@@ -9,7 +9,7 @@
     "build": {
       "entrypoint": "python/build.py",
       "routePrefix": "/build",
-      "memory": 1024,
+      "memory": 4096,
       "maxDuration": 30,
       "includeFiles": [
         "python/**/*.py",
