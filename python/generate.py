@@ -759,6 +759,9 @@ def ifc_to_glb(
     wall_color: tuple | None = None,
     roof_color: tuple | None = None,
     enabled_facades: tuple | None = None,
+    footprint: list | None = None,
+    roof_type: str | None = None,
+    storey_heights: list | None = None,
 ) -> bytes:
     """Convert an in-memory IFC file to a binary glTF (.glb) byte string.
 
@@ -792,6 +795,7 @@ def ifc_to_glb(
     # include=("IfcWall",) — much faster than sequential create_shape calls.
     wall_data: dict = {}  # wall.GlobalId -> (thin_axis, center, thickness, ext_sign)
     _wall_raw: list = []  # (guid, thin, center, thickness)
+    wall_max_z: float = 0.0  # used to detect "gable-triangle" windows (above wall tops)
     _wall_it = ifcopenshell.geom.iterator(
         settings, ifc_file, GEOM_THREADS, include=("IfcWall",),
     )
@@ -807,6 +811,7 @@ def ifc_to_glb(
                 center = float((bb_lo[thin] + bb_hi[thin]) / 2.0)
                 thickness = float(bb_hi[thin] - bb_lo[thin])
                 _wall_raw.append((_ws.guid, thin, center, thickness))
+                wall_max_z = max(wall_max_z, float(bb_hi[2]))
             if not _wall_it.next():
                 break
 
@@ -818,6 +823,96 @@ def ifc_to_glb(
     for guid, thin, center, thickness in _wall_raw:
         ext_sign = 1.0 if center > axis_means.get(thin, center) else -1.0
         wall_data[guid] = (thin, center, thickness, ext_sign)
+
+    # Gable-triangle windows: when Molior places windows in the triangular
+    # gable area above the upper-storey wall top (on pitched/hip roofs), it
+    # may produce 2 side-by-side. We post-process to keep only the one
+    # closest to the wall's horizontal center; the rest are marked for
+    # skipping AND their openings get covered by a wall-color "blanking"
+    # panel later (so the wall doesn't show through the cut-out).
+    skip_window_guids: set = set()
+    blanking_openings: dict = {}  # opening.GlobalId -> (bb_lo, bb_hi) — emit panel here
+    # Threshold above which a window is considered to be in the gable
+    # triangle (the section ABOVE the upper-storey ceiling, where the
+    # pitched roof tapers up to the ridge).
+    upper_storey_ceiling = (
+        float(sum(storey_heights)) if storey_heights else wall_max_z - 0.1
+    )
+    if roof_type in ("pitched", "hip") and footprint:
+        # Build a set of {(thin_axis, center) → wall guid} mapping. For each
+        # IfcWindow, find its parent wall via inverse relationships, then
+        # check: is the window z_mid > upper_storey_ceiling? If yes, gable.
+        from collections import defaultdict as _dd
+        gable_groups: dict = _dd(list)  # parent_wall_guid -> [(win_guid, h_coord)]
+        _win_it = ifcopenshell.geom.iterator(
+            settings, ifc_file, GEOM_THREADS, include=("IfcWindow",),
+        )
+        if _win_it.initialize():
+            while True:
+                _ws = _win_it.get()
+                _wv = np.asarray(_ws.geometry.verts, dtype=np.float32).reshape(-1, 3)
+                if _wv.size > 0:
+                    z_mid = float((_wv[:, 2].min() + _wv[:, 2].max()) / 2)
+                    # Above upper-storey ceiling → in the gable triangle area.
+                    if z_mid > upper_storey_ceiling - 0.05:
+                        try:
+                            _win_elem = ifc_file.by_guid(_ws.guid)
+                            _parent_guid = None
+                            for r in ifc_file.get_inverse(_win_elem):
+                                if r.is_a("IfcRelFillsElement"):
+                                    op = r.RelatingOpeningElement
+                                    for r2 in ifc_file.get_inverse(op):
+                                        if r2.is_a("IfcRelVoidsElement"):
+                                            pw = r2.RelatingBuildingElement
+                                            if pw is not None:
+                                                _parent_guid = pw.GlobalId
+                                            break
+                                    break
+                            if _parent_guid in wall_data:
+                                _thin = wall_data[_parent_guid][0]
+                                # Horizontal axis on the wall plane (not thin, not Z)
+                                h_axis = 0 if _thin != 0 else 1
+                                h_coord = float(
+                                    (_wv[:, h_axis].min() + _wv[:, h_axis].max()) / 2
+                                )
+                                gable_groups[_parent_guid].append((_ws.guid, h_coord))
+                        except Exception:
+                            pass
+                if not _win_it.next():
+                    break
+
+        # For each gable wall with 2+ top windows: keep the most-centered;
+        # mark the rest as skip + remember their opening for blanking.
+        # Collect their opening guids by walking IfcRelFillsElement.
+        win_to_opening: dict = {}  # window guid -> opening guid
+        for w in ifc_file.by_type("IfcWindow"):
+            try:
+                for r in ifc_file.get_inverse(w):
+                    if r.is_a("IfcRelFillsElement"):
+                        win_to_opening[w.GlobalId] = r.RelatingOpeningElement.GlobalId
+                        break
+            except Exception:
+                pass
+
+        for parent_guid, wins in gable_groups.items():
+            # Iterator can yield the same window twice (multiple representation
+            # contexts in Molior's output). Dedupe by guid before voting.
+            seen_guids = set()
+            wins = [w for w in wins if not (w[0] in seen_guids or seen_guids.add(w[0]))]
+            if len(wins) < 2:
+                continue
+            # Wall horizontal center along the in-plane axis is just the
+            # building axis_means value (footprint is centered on origin).
+            _thin = wall_data[parent_guid][0]
+            h_axis = 0 if _thin != 0 else 1
+            target = axis_means.get(h_axis, 0.0)
+            # Sort by distance from horizontal center, keep first, drop rest
+            wins_sorted = sorted(wins, key=lambda t: abs(t[1] - target))
+            for win_guid, _ in wins_sorted[1:]:
+                skip_window_guids.add(win_guid)
+                op_guid = win_to_opening.get(win_guid)
+                if op_guid is not None:
+                    blanking_openings[op_guid] = None  # filled in opening pass
 
     # Normalize the facade filter to a set of {'N','S','E','W'} (or None = all).
     facades_filter: set | None = (
@@ -906,6 +1001,12 @@ def ifc_to_glb(
                 # Facade filter: skip windows on facades the user disabled.
                 # Continues to next iterator item without rendering this window.
                 if not _window_enabled(elem):
+                    if not it.next():
+                        break
+                    continue
+                # Gable-triangle dedupe: skip the side-by-side extras (the
+                # most-centered one was already chosen above).
+                if elem.GlobalId in skip_window_guids:
                     if not it.next():
                         break
                     continue
@@ -1190,6 +1291,17 @@ def ifc_to_glb(
             facade = _facade_of(thin_axis, ext_sign)
             if facade is not None and facade not in facades_filter:
                 continue
+        # Gable-triangle skip: this opening's window was deduplicated. Record
+        # its bbox so we can emit a blanking panel instead, then continue
+        # (no glass quad for skipped windows).
+        if opening.GlobalId in blanking_openings:
+            blanking_openings[opening.GlobalId] = (
+                opening_bboxes[opening.GlobalId],
+                thin_axis,
+                wall_center,
+                ext_sign,
+            )
+            continue
         # Glass plane sits ~halfway between wall center and interior face —
         # comfortably behind any mullion bar that crosses the wall centerline.
         glass_y = wall_center + (-ext_sign) * (wall_thickness * 0.40)
@@ -1225,6 +1337,57 @@ def ifc_to_glb(
             "verts": [np.asarray(glass_verts, dtype=np.float32)],
             "faces": [np.asarray(glass_faces, dtype=np.uint32)],
             "v_offset": len(glass_verts),
+        }
+
+    # Blanking panels: for openings whose window was deduplicated (kept the
+    # most-centered, dropped the rest), emit a wall-color quad covering the
+    # opening rectangle at the exterior wall face. The wall mesh has a hole
+    # cut out at this position — without this panel the user would see
+    # straight through to the interior.
+    blank_verts: list = []
+    blank_faces: list = []
+    for op_guid, payload in blanking_openings.items():
+        if payload is None:
+            continue
+        (bb_lo_o, bb_hi_o), b_thin, b_center, b_ext_sign = payload
+        # Place at the wall's EXTERIOR face so it sits flush with the outside
+        # surface — same plane as the surrounding wall stucco.
+        blank_y = b_center + b_ext_sign * 0.165  # ~half a 0.33m wall
+        b_a1 = (b_thin + 1) % 3
+        b_a2 = (b_thin + 2) % 3
+        lo1 = float(bb_lo_o[b_a1])
+        hi1 = float(bb_hi_o[b_a1])
+        lo2 = float(bb_lo_o[b_a2])
+        hi2 = float(bb_hi_o[b_a2])
+        if hi1 - lo1 <= 0 or hi2 - lo2 <= 0:
+            continue
+
+        def _c(p1, p2, _t=b_thin, _y=blank_y, _x=b_a1, _z=b_a2):
+            c = np.zeros(3, dtype=np.float32)
+            c[_t] = _y
+            c[_x] = p1
+            c[_z] = p2
+            return c
+
+        q0 = _c(lo1, lo2)
+        q1 = _c(hi1, lo2)
+        q2 = _c(hi1, hi2)
+        q3 = _c(lo1, hi2)
+        off = len(blank_verts)
+        blank_verts.extend([q0, q1, q2, q3])
+        blank_faces.extend([[off, off + 1, off + 2], [off, off + 2, off + 3]])
+
+    if blank_verts:
+        blanking_color = wall_color if wall_color is not None else (
+            0.78, 0.74, 0.66, 1.0
+        )
+        mat_buckets["homemaker:wall-infill"] = {
+            "color": blanking_color,
+            "metallic": 0.0,
+            "roughness": 0.85,
+            "verts": [np.asarray(blank_verts, dtype=np.float32)],
+            "faces": [np.asarray(blank_faces, dtype=np.uint32)],
+            "v_offset": len(blank_verts),
         }
 
     # Build glTF
@@ -1402,6 +1565,9 @@ def build_and_export_glb(params: dict) -> bytes:
         wall_color=wall_color,
         roof_color=roof_color,
         enabled_facades=enabled_facades,
+        footprint=list(footprint),
+        roof_type=roof,
+        storey_heights=list(storey_heights),
     )
 
 

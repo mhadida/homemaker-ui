@@ -2,10 +2,16 @@
 
 import { Suspense, useMemo, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Environment, ContactShadows, Grid } from "@react-three/drei";
+import {
+  OrbitControls,
+  Environment,
+  ContactShadows,
+  Grid,
+  GizmoHelper,
+  GizmoViewport,
+} from "@react-three/drei";
 import * as THREE from "three";
 import GLTFBuildingScene, { type BuildStatus } from "./GLTFBuildingScene";
-import NorthIndicator from "./NorthIndicator";
 import type { BuildingParams, ViewSettings } from "@/lib/building/types";
 import { DEFAULT_VIEW } from "@/lib/building/types";
 
@@ -112,11 +118,6 @@ function Scene({
       {/* Building (Homemaker engine → IFC → glTF from backend) */}
       <GLTFBuildingScene params={params} onStatusChange={onStatusChange} />
 
-      {/* 3D north indicator — small arrow on the ground south of the building,
-       * pointing world +Z (north). Fixed in world space so it shows where
-       * north is regardless of camera orbit. */}
-      <NorthIndicator />
-
       {/* Ground plane: uniform warm-earthy color, RGBA vertex attribute
        * holds the alpha gradient. 30×30 m solid square at the centre,
        * smoothstep falloff to fully transparent at 70 m radius. The
@@ -179,6 +180,21 @@ function Scene({
       />
 
       {/* Camera controls — touch-friendly for iPad */}
+      {/* Viewport orientation gizmo — 3ds-Max-style. Anchored to the
+       * top-right corner of the canvas, rotates with the camera so the
+       * user can always see which world direction is which. Click the
+       * +Z (north) face to snap the camera to a north-facing view. */}
+      <GizmoHelper
+        alignment="top-right"
+        margin={[64, 64]}
+      >
+        <GizmoViewport
+          axisColors={["#c84a32", "#7aa845", "#3a7fd1"]}
+          labels={["E", "Up", "N"]}
+          labelColor="#fff"
+        />
+      </GizmoHelper>
+
       <OrbitControls
         makeDefault
         enableDamping
