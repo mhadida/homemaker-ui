@@ -2,17 +2,163 @@
 
 import { useState, useCallback } from "react";
 import dynamic from "next/dynamic";
-import type { BuildingParams } from "@/lib/building/types";
-import { DEFAULT_PARAMS } from "@/lib/building/types";
+import type { BuildingParams, StyleId, RoofType } from "@/lib/building/types";
+import {
+  DEFAULT_PARAMS,
+  WALL_SWATCHES,
+  ROOF_SWATCHES,
+  classicalStoreyHeights,
+  clampHeightsForStyle,
+} from "@/lib/building/types";
 import { parsePromptLocal, mergeParams } from "@/lib/building/prompt-parser";
-import { rectangularFootprint } from "@/lib/building/footprints";
+import {
+  rectangularFootprint,
+  lShapedFootprint,
+  uShapedFootprint,
+  hShapedFootprint,
+  courtyardFootprint,
+} from "@/lib/building/footprints";
 import PromptInput from "@/components/demo/PromptInput";
 import SliderControls from "@/components/demo/SliderControls";
 
 const BuildingViewer = dynamic(
   () => import("@/components/demo/BuildingViewer"),
-  { ssr: false }
+  { ssr: false },
 );
+
+// Inverse of BuildingSpec server schema → BuildingParams.
+// Defined here so the AI's compact response can be expanded into the full
+// state shape the rest of the app uses.
+interface BuildingSpec {
+  storeys?: number;
+  width?: number;
+  depth?: number;
+  shape?: "rectangle" | "l" | "u" | "h" | "courtyard";
+  style?: StyleId;
+  roof?: RoofType;
+  ridgeHeight?: number;
+  wallColor?: keyof typeof WALL_HEX;
+  roofColor?: keyof typeof ROOF_HEX;
+  rooms?: string[];
+}
+
+const WALL_HEX: Record<string, string> = Object.fromEntries(
+  WALL_SWATCHES.map((s) => [s.id, s.hex]),
+);
+const ROOF_HEX: Record<string, string> = Object.fromEntries(
+  ROOF_SWATCHES.map((s) => [s.id, s.hex]),
+);
+
+/** Convert an AI-returned spec into a complete BuildingParams object. */
+function specToParams(
+  spec: BuildingSpec,
+  prev: BuildingParams,
+): BuildingParams {
+  const next: BuildingParams = { ...prev };
+  if (spec.storeys && spec.storeys !== prev.storeys) {
+    next.storeys = spec.storeys;
+    next.storeyHeights = classicalStoreyHeights(
+      spec.storeys,
+      prev.storeyHeight,
+      spec.style ?? prev.style,
+    );
+  }
+  if (spec.style && spec.style !== prev.style) {
+    next.style = spec.style;
+    next.storeyHeights = clampHeightsForStyle(
+      next.storeyHeights ??
+        classicalStoreyHeights(next.storeys, prev.storeyHeight, spec.style),
+      spec.style,
+    );
+  }
+  if (spec.roof) next.roof = spec.roof;
+  if (typeof spec.ridgeHeight === "number") next.ridgeHeight = spec.ridgeHeight;
+  if (spec.wallColor && WALL_HEX[spec.wallColor])
+    next.wallColor = WALL_HEX[spec.wallColor];
+  if (spec.roofColor && ROOF_HEX[spec.roofColor])
+    next.roofColor = ROOF_HEX[spec.roofColor];
+
+  // Footprint: derive from shape + dims if either changed
+  if (spec.shape || spec.width || spec.depth) {
+    const w = spec.width ?? getFootprintWidth(prev);
+    const d = spec.depth ?? getFootprintDepth(prev);
+    const shape = spec.shape ?? getShapeFromParams(prev);
+    const { footprint, holes } = footprintForShape(shape, w, d);
+    next.footprint = footprint;
+    next.holes = holes;
+  }
+
+  if (spec.rooms) {
+    next.rooms = spec.rooms.map((r) => ({ type: r, label: r }));
+  }
+
+  return next;
+}
+
+function footprintForShape(
+  shape: "rectangle" | "l" | "u" | "h" | "courtyard",
+  w: number,
+  d: number,
+): { footprint: [number, number][]; holes?: [number, number][][] } {
+  switch (shape) {
+    case "l":
+      return { footprint: lShapedFootprint(w, d), holes: undefined };
+    case "u":
+      return { footprint: uShapedFootprint(w, d), holes: undefined };
+    case "h":
+      return { footprint: hShapedFootprint(w, d), holes: undefined };
+    case "courtyard": {
+      const c = courtyardFootprint(w, d);
+      return { footprint: c.outer, holes: [c.hole] };
+    }
+    default:
+      return { footprint: rectangularFootprint(w, d), holes: undefined };
+  }
+}
+
+function getFootprintWidth(p: BuildingParams): number {
+  const xs = p.footprint.map((pt) => pt[0]);
+  return Math.max(...xs) - Math.min(...xs);
+}
+
+function getFootprintDepth(p: BuildingParams): number {
+  const ys = p.footprint.map((pt) => pt[1]);
+  return Math.max(...ys) - Math.min(...ys);
+}
+
+function getShapeFromParams(
+  p: BuildingParams,
+): "rectangle" | "l" | "u" | "h" | "courtyard" {
+  if (p.holes && p.holes.length > 0) return "courtyard";
+  const n = p.footprint.length;
+  if (n === 4) return "rectangle";
+  if (n === 6) return "l";
+  if (n === 8) return "u";
+  if (n === 12) return "h";
+  return "rectangle";
+}
+
+/** Build the compact BuildingSpec snapshot of current params for the AI. */
+function paramsToSpec(p: BuildingParams): BuildingSpec {
+  const wallSwatch = WALL_SWATCHES.find(
+    (s) => s.hex.toLowerCase() === (p.wallColor || "").toLowerCase(),
+  );
+  const roofSwatch = ROOF_SWATCHES.find(
+    (s) => s.hex.toLowerCase() === (p.roofColor || "").toLowerCase(),
+  );
+  return {
+    storeys: p.storeys,
+    width: Math.round(getFootprintWidth(p) * 10) / 10,
+    depth: Math.round(getFootprintDepth(p) * 10) / 10,
+    shape: getShapeFromParams(p),
+    style: p.style,
+    roof: p.roof,
+    ridgeHeight: p.ridgeHeight,
+    wallColor: wallSwatch?.id as BuildingSpec["wallColor"],
+    roofColor: roofSwatch?.id as BuildingSpec["roofColor"],
+    rooms: p.rooms.map((r) => r.type),
+  };
+}
 
 export default function Home() {
   const [params, setParams] = useState<BuildingParams>(DEFAULT_PARAMS);
@@ -21,50 +167,44 @@ export default function Home() {
 
   const handlePrompt = useCallback(
     async (prompt: string) => {
+      // Optimistic local-keyword pass so the user sees something instantly
+      // while the AI call (~500ms-1s) is in flight.
       const localUpdates = parsePromptLocal(prompt);
-      setParams((prev: BuildingParams) => mergeParams(prev, localUpdates));
+      setParams((prev) => mergeParams(prev, localUpdates));
 
       setIsAILoading(true);
       setAiStatus(null);
 
       try {
+        // Snapshot the *current* params as context — this is how we get
+        // "merge after first prompt" behaviour without branching logic. The
+        // AI sees what's set and is instructed to keep unmentioned fields.
+        const current = paramsToSpec(params);
+
         const res = await fetch("/api/prompt", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt }),
+          body: JSON.stringify({ prompt, current }),
         });
 
-        if (res.ok) {
-          const aiResult = await res.json();
-          if (aiResult.storeys || aiResult.style || aiResult.width) {
-            const aiUpdates: Partial<BuildingParams> = {};
-            if (aiResult.storeys) aiUpdates.storeys = aiResult.storeys;
-            if (aiResult.style) aiUpdates.style = aiResult.style;
-            if (aiResult.roof) aiUpdates.roof = aiResult.roof;
-            if (aiResult.width || aiResult.depth) {
-              const w = aiResult.width || 10;
-              const d = aiResult.depth || 8;
-              aiUpdates.footprint = rectangularFootprint(w, d);
-            }
-            if (aiResult.rooms) {
-              aiUpdates.rooms = aiResult.rooms.map((r: string) => ({
-                type: r,
-                label: r,
-              }));
-            }
-            setParams((prev: BuildingParams) => mergeParams(prev, aiUpdates));
-            setAiStatus("AI refined parameters");
-          }
-        } else {
-          setAiStatus("Local parsing applied (AI unavailable)");
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || `HTTP ${res.status}`);
         }
-      } catch {
-        setAiStatus("Local parsing applied (AI unavailable)");
+        const { spec } = (await res.json()) as { spec: BuildingSpec };
+        setParams((prev) => specToParams(spec, prev));
+        setAiStatus("AI applied");
+      } catch (e) {
+        setAiStatus(
+          e instanceof Error
+            ? `AI unavailable: ${e.message.slice(0, 60)} (local parse applied)`
+            : "AI unavailable (local parse applied)",
+        );
       } finally {
         setIsAILoading(false);
       }
     },
-    []
+    [params],
   );
 
   const sumHeights =
@@ -93,7 +233,9 @@ export default function Home() {
             <polyline points="9 22 9 12 15 12 15 22" />
           </svg>
           <span className="font-semibold text-sm tracking-tight">Homemaker</span>
-          <span className="text-[11px] text-[var(--muted)] ml-1">by Bruno Postle</span>
+          <span className="text-[11px] text-[var(--muted)] ml-1">
+            by Bruno Postle
+          </span>
         </div>
         <div className="flex items-center gap-3 text-[11px] text-[var(--muted)] font-mono">
           <span>{params.storeys}F</span>
@@ -108,24 +250,18 @@ export default function Home() {
         <div className="flex-1 min-h-[40vh] md:min-h-0 relative">
           <BuildingViewer params={params} />
 
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-sm text-white/70 text-[10px] px-3 py-1.5 rounded-full pointer-events-none md:hidden">
-            Pinch to zoom · Drag to rotate · Two-finger pan
-          </div>
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-sm text-white/70 text-[10px] px-3 py-1.5 rounded-full pointer-events-none hidden md:block">
-            Scroll to zoom · Left-drag to rotate · Right-drag to pan
-          </div>
+          {/* Floating prompt pill, bottom-center of the viewer */}
+          <PromptInput onApply={handlePrompt} isLoading={isAILoading} />
+
+          {aiStatus && (
+            <div className="pointer-events-none absolute bottom-24 left-1/2 -translate-x-1/2 rounded-full bg-black/55 backdrop-blur-md px-3 py-1 text-[10px] text-white/75">
+              {aiStatus}
+            </div>
+          )}
         </div>
 
         <div className="w-full md:w-80 border-t md:border-t-0 md:border-l border-[var(--border)] bg-[var(--panel-bg)] overflow-y-auto">
           <div className="p-4 space-y-5">
-            <PromptInput onApply={handlePrompt} isLoading={isAILoading} />
-
-            {aiStatus && (
-              <p className="text-[10px] text-[var(--muted)]">{aiStatus}</p>
-            )}
-
-            <div className="border-t border-[var(--border)]" />
-
             <SliderControls params={params} onChange={setParams} />
           </div>
         </div>
@@ -136,7 +272,7 @@ export default function Home() {
 
 function calculateArea(
   footprint: [number, number][],
-  holes?: [number, number][][]
+  holes?: [number, number][][],
 ): number {
   const ringArea = (ring: [number, number][]) => {
     let a = 0;

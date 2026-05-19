@@ -1,135 +1,117 @@
 import { NextRequest, NextResponse } from "next/server";
-import { buildAIPrompt } from "@/lib/building/prompt-parser";
+import { generateObject } from "ai";
+import { z } from "zod";
 
-interface AIResponse {
-  storeys?: number;
-  style?: string;
-  roof?: string;
-  width?: number;
-  depth?: number;
-  shape?: string;
-  rooms?: string[];
-}
+export const runtime = "nodejs";
+
+// Available styles + roof types — keep in sync with src/lib/building/types.ts.
+const STYLES = [
+  "default",
+  "blank",
+  "cinema",
+  "courtyard",
+  "fancy",
+  "foxhouse",
+  "framing",
+  "halifax",
+  "simple",
+] as const;
+
+const SHAPES = ["rectangle", "l", "u", "h", "courtyard"] as const;
+const ROOFS = ["flat", "pitched", "hip"] as const;
+const ROOF_COLORS = ["terracotta", "slate"] as const;
+const ROOM_TYPES = [
+  "bedroom",
+  "kitchen",
+  "living",
+  "circulation",
+  "stair",
+  "toilet",
+  "retail",
+  "outside",
+  "sahn",
+  "void",
+] as const;
+
+// Compact, AI-friendly spec. Server converts this to BuildingParams before
+// returning. Width/depth + shape are friendlier for an LLM than raw polygon
+// coordinates. Colors come back as semantic names; the client maps to hex.
+const BuildingSpec = z.object({
+  storeys: z.number().int().min(1).max(6),
+  width: z.number().min(4).max(30),
+  depth: z.number().min(4).max(30),
+  shape: z.enum(SHAPES),
+  style: z.enum(STYLES),
+  roof: z.enum(ROOFS),
+  ridgeHeight: z.number().min(1).max(6),
+  wallColor: z
+    .enum(["earthy", "cream", "stone", "slate", "linen", "sage", "blush", "white"])
+    .optional(),
+  roofColor: z.enum(ROOF_COLORS).optional(),
+  rooms: z.array(z.enum(ROOM_TYPES)).optional(),
+});
+
+export type BuildingSpec = z.infer<typeof BuildingSpec>;
+
+const RequestSchema = z.object({
+  prompt: z.string().min(1),
+  current: BuildingSpec.partial().optional(),
+});
+
+const MODEL = process.env.HOMEMAKER_AI_MODEL ?? "openai/gpt-5-nano";
 
 export async function POST(req: NextRequest) {
   try {
-    const { prompt } = await req.json();
-
-    if (!prompt || typeof prompt !== "string") {
-      return NextResponse.json({ error: "Missing prompt" }, { status: 400 });
+    const body = await req.json();
+    const parsed = RequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Bad request", issues: parsed.error.issues },
+        { status: 400 },
+      );
     }
+    const { prompt, current } = parsed.data;
 
-    const systemPrompt = buildAIPrompt(prompt);
+    const { object } = await generateObject({
+      model: MODEL,
+      schema: BuildingSpec,
+      system: SYSTEM_PROMPT(current),
+      prompt,
+    });
 
-    // Try Ollama first (local), fall back to OpenAI (cloud)
-    let result: AIResponse | null = null;
-
-    // Try Ollama (local model)
-    try {
-      result = await callOllama(systemPrompt);
-    } catch {
-      // Ollama not available, try OpenAI
-    }
-
-    // Try OpenAI if Ollama failed
-    if (!result) {
-      const openaiKey = process.env.OPENAI_API_KEY;
-      if (openaiKey) {
-        try {
-          result = await callOpenAI(systemPrompt, openaiKey);
-        } catch {
-          return NextResponse.json(
-            { error: "AI service unavailable. Using local keyword parsing." },
-            { status: 503 }
-          );
-        }
-      } else {
-        return NextResponse.json(
-          { error: "No AI service configured. Set OPENAI_API_KEY or run Ollama locally." },
-          { status: 503 }
-        );
-      }
-    }
-
-    return NextResponse.json(result);
+    return NextResponse.json({ spec: object, model: MODEL });
   } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Unknown error" },
-      { status: 500 }
-    );
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[/api/prompt]", msg);
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
 
-async function callOllama(systemPrompt: string): Promise<AIResponse | null> {
-  const response = await fetch("http://localhost:11434/api/generate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "llama3.1",
-      prompt: systemPrompt,
-      stream: false,
-      options: {
-        temperature: 0.1,
-      },
-    }),
-    signal: AbortSignal.timeout(30000),
-  });
-
-  if (!response.ok) return null;
-
-  const data = await response.json();
-  const text = data.response as string;
-
-  return parseAIResponse(text);
-}
-
-async function callOpenAI(
-  systemPrompt: string,
-  apiKey: string
-): Promise<AIResponse | null> {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: systemPrompt },
-      ],
-      temperature: 0.1,
-      max_tokens: 200,
-    }),
-    signal: AbortSignal.timeout(30000),
-  });
-
-  if (!response.ok) return null;
-
-  const data = await response.json();
-  const text = data.choices?.[0]?.message?.content as string;
-
-  return parseAIResponse(text);
-}
-
-function parseAIResponse(text: string): AIResponse | null {
-  // Extract JSON from the response (may be wrapped in markdown code blocks)
-  const jsonMatch = text.match(/\{[\s\S]*?\}/);
-  if (!jsonMatch) return null;
-
-  try {
-    const parsed = JSON.parse(jsonMatch[0]);
-
-    return {
-      storeys: typeof parsed.storeys === "number" ? Math.min(6, Math.max(1, parsed.storeys)) : undefined,
-      style: typeof parsed.style === "string" ? parsed.style : undefined,
-      roof: typeof parsed.roof === "string" ? parsed.roof : undefined,
-      width: typeof parsed.width === "number" ? Math.min(30, Math.max(4, parsed.width)) : undefined,
-      depth: typeof parsed.depth === "number" ? Math.min(30, Math.max(4, parsed.depth)) : undefined,
-      shape: typeof parsed.shape === "string" ? parsed.shape : undefined,
-      rooms: Array.isArray(parsed.rooms) ? parsed.rooms : undefined,
-    };
-  } catch {
-    return null;
-  }
+function SYSTEM_PROMPT(current: Partial<BuildingSpec> | undefined): string {
+  const have = current ?? {};
+  return [
+    "You are a building configurator for an interactive parametric editor.",
+    "The user describes either a brand-new building or an edit to the current one.",
+    "Return the COMPLETE new building specification as JSON matching the schema.",
+    "If the user does NOT mention a property, KEEP its current value.",
+    "Only change properties the user explicitly asks for.",
+    "",
+    "Current building (use these as defaults for unmentioned properties):",
+    `- storeys: ${have.storeys ?? 2}`,
+    `- footprint: ${have.width ?? 10}m × ${have.depth ?? 8}m, shape "${have.shape ?? "rectangle"}"`,
+    `- style: ${have.style ?? "default"}`,
+    `- roof: ${have.roof ?? "flat"} (ridgeHeight ${have.ridgeHeight ?? 3}m)`,
+    `- wallColor: ${have.wallColor ?? "earthy"}`,
+    `- roofColor: ${have.roofColor ?? "terracotta"}`,
+    `- rooms: ${have.rooms?.join(", ") || "(none)"}`,
+    "",
+    "Style guide:",
+    '- "default": plain windows/doors, simplest. Good for modern.',
+    '- "fancy": classical with pediment surrounds. Needs storey ≥ 4.0m.',
+    '- "halifax": Piece-Hall arcaded ground floor.',
+    '- "cinema", "courtyard", "foxhouse", "framing", "simple", "blank": specialty.',
+    "",
+    "Shapes: rectangle (default), l/u/h (extruded letter shapes), courtyard (rectangle with central void).",
+    "Roof colors: terracotta (warm clay red) or slate (cool blue-gray).",
+  ].join("\n");
 }
