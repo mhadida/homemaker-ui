@@ -1,10 +1,16 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
-import type { BuildingParams, StyleId, RoofType } from "@/lib/building/types";
+import type {
+  BuildingParams,
+  StyleId,
+  RoofType,
+  ViewSettings,
+} from "@/lib/building/types";
 import {
   DEFAULT_PARAMS,
+  DEFAULT_VIEW,
   WALL_SWATCHES,
   ROOF_SWATCHES,
   classicalStoreyHeights,
@@ -26,9 +32,24 @@ const BuildingViewer = dynamic(
   { ssr: false },
 );
 
-// Inverse of BuildingSpec server schema → BuildingParams.
-// Defined here so the AI's compact response can be expanded into the full
-// state shape the rest of the app uses.
+// Properties that are pure-cosmetic — applied instantly client-side without
+// needing to re-run the server pipeline. Editing these does NOT mark the
+// draft as having "pending changes."
+const COSMETIC_KEYS = new Set<keyof BuildingParams>(["wallColor", "roofColor"]);
+
+function paramsAreSameForServer(a: BuildingParams, b: BuildingParams): boolean {
+  // Compare only the structural fields. We hash by JSON over the non-cosmetic
+  // subset so any structural mismatch surfaces.
+  const stripCosmetic = (p: BuildingParams) => {
+    const { wallColor, roofColor, ...rest } = p;
+    void wallColor;
+    void roofColor;
+    return rest;
+  };
+  return JSON.stringify(stripCosmetic(a)) === JSON.stringify(stripCosmetic(b));
+}
+
+// AI spec ↔ BuildingParams plumbing (kept from previous iteration).
 interface BuildingSpec {
   storeys?: number;
   width?: number;
@@ -49,7 +70,6 @@ const ROOF_HEX: Record<string, string> = Object.fromEntries(
   ROOF_SWATCHES.map((s) => [s.id, s.hex]),
 );
 
-/** Convert an AI-returned spec into a complete BuildingParams object. */
 function specToParams(
   spec: BuildingSpec,
   prev: BuildingParams,
@@ -78,7 +98,6 @@ function specToParams(
   if (spec.roofColor && ROOF_HEX[spec.roofColor])
     next.roofColor = ROOF_HEX[spec.roofColor];
 
-  // Footprint: derive from shape + dims if either changed
   if (spec.shape || spec.width || spec.depth) {
     const w = spec.width ?? getFootprintWidth(prev);
     const d = spec.depth ?? getFootprintDepth(prev);
@@ -91,7 +110,6 @@ function specToParams(
   if (spec.rooms) {
     next.rooms = spec.rooms.map((r) => ({ type: r, label: r }));
   }
-
   return next;
 }
 
@@ -120,12 +138,10 @@ function getFootprintWidth(p: BuildingParams): number {
   const xs = p.footprint.map((pt) => pt[0]);
   return Math.max(...xs) - Math.min(...xs);
 }
-
 function getFootprintDepth(p: BuildingParams): number {
   const ys = p.footprint.map((pt) => pt[1]);
   return Math.max(...ys) - Math.min(...ys);
 }
-
 function getShapeFromParams(
   p: BuildingParams,
 ): "rectangle" | "l" | "u" | "h" | "courtyard" {
@@ -138,7 +154,6 @@ function getShapeFromParams(
   return "rectangle";
 }
 
-/** Build the compact BuildingSpec snapshot of current params for the AI. */
 function paramsToSpec(p: BuildingParams): BuildingSpec {
   const wallSwatch = WALL_SWATCHES.find(
     (s) => s.hex.toLowerCase() === (p.wallColor || "").toLowerCase(),
@@ -161,38 +176,70 @@ function paramsToSpec(p: BuildingParams): BuildingSpec {
 }
 
 export default function Home() {
-  const [params, setParams] = useState<BuildingParams>(DEFAULT_PARAMS);
+  // Manual update mode:
+  //   - `draft`     = what the sliders are currently set to (live UI state)
+  //   - `committed` = what's actually been sent to the server and rendered
+  // Cosmetic-only changes (wallColor, roofColor) bypass this split — they're
+  // applied to BOTH instantly so the user sees them without clicking Update.
+  const [draft, setDraft] = useState<BuildingParams>(DEFAULT_PARAMS);
+  const [committed, setCommitted] = useState<BuildingParams>(DEFAULT_PARAMS);
+  const [view, setView] = useState<ViewSettings>(DEFAULT_VIEW);
   const [isAILoading, setIsAILoading] = useState(false);
   const [aiStatus, setAiStatus] = useState<string | null>(null);
 
+  // SliderControls receives `draft` and an onChange that updates `draft`.
+  // Cosmetic edits piggyback onto `committed` too (instant apply).
+  const handleParamsChange = useCallback((next: BuildingParams) => {
+    setDraft((prev) => {
+      // Detect which keys changed
+      const changedKeys = (Object.keys(next) as (keyof BuildingParams)[]).filter(
+        (k) => next[k] !== prev[k],
+      );
+      const onlyCosmetic =
+        changedKeys.length > 0 &&
+        changedKeys.every((k) => COSMETIC_KEYS.has(k));
+      if (onlyCosmetic) {
+        // Apply to both draft AND committed — color picks render instantly
+        setCommitted((c) => ({ ...c, ...pickCosmetic(next, prev) }));
+      }
+      return next;
+    });
+  }, []);
+
+  const commit = useCallback(() => {
+    setCommitted(draft);
+  }, [draft]);
+
+  const hasPendingChanges = useMemo(
+    () => !paramsAreSameForServer(draft, committed),
+    [draft, committed],
+  );
+
   const handlePrompt = useCallback(
     async (prompt: string) => {
-      // Optimistic local-keyword pass so the user sees something instantly
-      // while the AI call (~500ms-1s) is in flight.
       const localUpdates = parsePromptLocal(prompt);
-      setParams((prev) => mergeParams(prev, localUpdates));
+      // AI prompts apply directly to BOTH states — they describe the final
+      // building, not a tentative edit.
+      setDraft((prev) => mergeParams(prev, localUpdates));
+      setCommitted((prev) => mergeParams(prev, localUpdates));
 
       setIsAILoading(true);
       setAiStatus(null);
 
       try {
-        // Snapshot the *current* params as context — this is how we get
-        // "merge after first prompt" behaviour without branching logic. The
-        // AI sees what's set and is instructed to keep unmentioned fields.
-        const current = paramsToSpec(params);
-
+        const current = paramsToSpec(draft);
         const res = await fetch("/api/prompt", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt, current }),
         });
-
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error || `HTTP ${res.status}`);
         }
         const { spec } = (await res.json()) as { spec: BuildingSpec };
-        setParams((prev) => specToParams(spec, prev));
+        setDraft((prev) => specToParams(spec, prev));
+        setCommitted((prev) => specToParams(spec, prev));
         setAiStatus("AI applied");
       } catch (e) {
         setAiStatus(
@@ -204,18 +251,16 @@ export default function Home() {
         setIsAILoading(false);
       }
     },
-    [params],
+    [draft],
   );
 
   const sumHeights =
-    params.storeyHeights && params.storeyHeights.length >= params.storeys
-      ? params.storeyHeights
-          .slice(0, params.storeys)
-          .reduce((a, b) => a + b, 0)
-      : params.storeys * params.storeyHeight;
+    draft.storeyHeights && draft.storeyHeights.length >= draft.storeys
+      ? draft.storeyHeights.slice(0, draft.storeys).reduce((a, b) => a + b, 0)
+      : draft.storeys * draft.storeyHeight;
   const totalHeight =
-    sumHeights + (params.roof !== "flat" ? params.ridgeHeight : 0);
-  const footprintArea = calculateArea(params.footprint, params.holes);
+    sumHeights + (draft.roof !== "flat" ? draft.ridgeHeight : 0);
+  const footprintArea = calculateArea(draft.footprint, draft.holes);
 
   return (
     <div className="h-screen flex flex-col bg-[var(--background)] text-[var(--foreground)]">
@@ -238,7 +283,7 @@ export default function Home() {
           </span>
         </div>
         <div className="flex items-center gap-3 text-[11px] text-[var(--muted)] font-mono">
-          <span>{params.storeys}F</span>
+          <span>{draft.storeys}F</span>
           <span>·</span>
           <span>{totalHeight.toFixed(1)}m</span>
           <span>·</span>
@@ -248,9 +293,9 @@ export default function Home() {
 
       <div className="flex flex-1 min-h-0 flex-col md:flex-row">
         <div className="flex-1 min-h-[40vh] md:min-h-0 relative">
-          <BuildingViewer params={params} />
+          {/* Viewer renders `committed` — what the server has actually built. */}
+          <BuildingViewer params={committed} view={view} />
 
-          {/* Floating prompt pill, bottom-center of the viewer */}
           <PromptInput onApply={handlePrompt} isLoading={isAILoading} />
 
           {aiStatus && (
@@ -260,14 +305,31 @@ export default function Home() {
           )}
         </div>
 
-        <div className="w-full md:w-80 border-t md:border-t-0 md:border-l border-[var(--border)] bg-[var(--panel-bg)] overflow-y-auto">
-          <div className="p-4 space-y-5">
-            <SliderControls params={params} onChange={setParams} />
+        <div className="w-full md:w-80 border-t md:border-t-0 md:border-l border-[var(--border)] bg-[var(--panel-bg)] overflow-y-auto relative">
+          <div className="p-4 space-y-5 pb-4">
+            <SliderControls
+              params={draft}
+              onChange={handleParamsChange}
+              view={view}
+              onViewChange={setView}
+              hasPendingChanges={hasPendingChanges}
+              onCommit={commit}
+            />
           </div>
         </div>
       </div>
     </div>
   );
+}
+
+function pickCosmetic(
+  next: BuildingParams,
+  prev: BuildingParams,
+): Partial<BuildingParams> {
+  const out: Partial<BuildingParams> = {};
+  if (next.wallColor !== prev.wallColor) out.wallColor = next.wallColor;
+  if (next.roofColor !== prev.roofColor) out.roofColor = next.roofColor;
+  return out;
 }
 
 function calculateArea(

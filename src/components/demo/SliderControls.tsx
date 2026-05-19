@@ -1,10 +1,17 @@
 "use client";
 
-import type { BuildingParams, StyleId, RoofType } from "@/lib/building/types";
+import type {
+  BuildingParams,
+  StyleId,
+  RoofType,
+  ViewSettings,
+  FacadeId,
+} from "@/lib/building/types";
 import {
   STYLE_OPTIONS,
   WALL_SWATCHES,
   ROOF_SWATCHES,
+  ALL_FACADES,
   classicalStoreyHeights,
   clampHeightsForStyle,
   minStoreyHeightForStyle,
@@ -24,11 +31,35 @@ const FLOOR_LABELS = [
 interface SliderControlsProps {
   params: BuildingParams;
   onChange: (params: BuildingParams) => void;
+  view: ViewSettings;
+  onViewChange: (v: ViewSettings) => void;
+  /** True when the draft state diverges from what's currently rendered. */
+  hasPendingChanges: boolean;
+  /** User clicked the big update button (commits draft → committed). */
+  onCommit: () => void;
 }
 
-export default function SliderControls({ params, onChange }: SliderControlsProps) {
+export default function SliderControls({
+  params,
+  onChange,
+  view,
+  onViewChange,
+  hasPendingChanges,
+  onCommit,
+}: SliderControlsProps) {
   const update = (updates: Partial<BuildingParams>) => {
     onChange({ ...params, ...updates });
+  };
+  const updateView = (updates: Partial<ViewSettings>) => {
+    onViewChange({ ...view, ...updates });
+  };
+  const enabledFacades: FacadeId[] = params.enabledFacades ?? ALL_FACADES;
+  const facadeToggle = (f: FacadeId) => {
+    const has = enabledFacades.includes(f);
+    const next = has
+      ? enabledFacades.filter((x) => x !== f)
+      : [...enabledFacades, f];
+    update({ enabledFacades: next });
   };
 
   const shapes = [
@@ -41,6 +72,79 @@ export default function SliderControls({ params, onChange }: SliderControlsProps
 
   return (
     <div className="space-y-5">
+      {/* Sun — view-only, doesn't trigger regeneration */}
+      <div>
+        <label className="text-[10px] uppercase tracking-wider text-[var(--muted)] font-medium block mb-1.5">
+          Sun
+        </label>
+        <div className="space-y-2">
+          <div>
+            <div className="flex items-center justify-between mb-0.5">
+              <span className="text-[10px] text-[var(--muted)]">Azimuth</span>
+              <span className="text-[11px] font-mono text-[var(--foreground)]">
+                {Math.round(view.sunAzimuth)}°
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={360}
+              step={1}
+              value={view.sunAzimuth}
+              onChange={(e) =>
+                updateView({ sunAzimuth: parseFloat(e.target.value) })
+              }
+              className="w-full h-1 rounded-full appearance-none bg-[var(--border)] cursor-pointer accent-[var(--accent)]"
+            />
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-0.5">
+              <span className="text-[10px] text-[var(--muted)]">Altitude</span>
+              <span className="text-[11px] font-mono text-[var(--foreground)]">
+                {Math.round(view.sunAltitude)}°
+              </span>
+            </div>
+            <input
+              type="range"
+              min={5}
+              max={85}
+              step={1}
+              value={view.sunAltitude}
+              onChange={(e) =>
+                updateView({ sunAltitude: parseFloat(e.target.value) })
+              }
+              className="w-full h-1 rounded-full appearance-none bg-[var(--border)] cursor-pointer accent-[var(--accent)]"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Windows per facade */}
+      <div>
+        <label className="text-[10px] uppercase tracking-wider text-[var(--muted)] font-medium block mb-1.5">
+          Windows
+        </label>
+        <div className="grid grid-cols-4 gap-1">
+          {ALL_FACADES.map((f) => {
+            const on = enabledFacades.includes(f);
+            return (
+              <button
+                key={f}
+                type="button"
+                onClick={() => facadeToggle(f)}
+                className={`px-2 py-1.5 rounded text-[11px] font-mono transition-colors ${
+                  on
+                    ? "bg-[var(--accent)] text-white"
+                    : "bg-[var(--border)] text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                {f}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Storeys */}
       <div>
         <div className="flex items-center justify-between mb-1.5">
@@ -411,6 +515,24 @@ export default function SliderControls({ params, onChange }: SliderControlsProps
           onChange={(e) => update({ wallColor: e.target.value })}
           className="w-full h-7 rounded bg-[var(--border)] cursor-pointer"
         />
+      </div>
+
+      {/* Big commit button — cosmetic colors apply instantly, but structural
+       * changes (storeys, footprint, style, etc.) queue up until the user
+       * clicks Update. Avoids redundant server roundtrips while dragging. */}
+      <div className="sticky bottom-0 -mx-4 -mb-5 mt-6 border-t border-[var(--border)] bg-[var(--panel-bg)] p-4">
+        <button
+          type="button"
+          onClick={onCommit}
+          disabled={!hasPendingChanges}
+          className={`w-full rounded-lg px-4 py-3 text-sm font-semibold transition-all ${
+            hasPendingChanges
+              ? "bg-[var(--accent)] text-white shadow-lg hover:opacity-90"
+              : "bg-[var(--border)] text-[var(--muted)] cursor-not-allowed"
+          }`}
+        >
+          {hasPendingChanges ? "Update Building" : "No pending changes"}
+        </button>
       </div>
     </div>
   );

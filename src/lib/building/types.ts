@@ -36,7 +36,14 @@ export interface BuildingParams {
   /** Roof tile/slate color as #RRGGBB hex. If absent, Molior's default
    * orange-terracotta is used. */
   roofColor?: string;
+  /** Which facades render windows. Defaults to all four. Server-side
+   * filter applies via parent-wall thin axis + ext_sign. */
+  enabledFacades?: FacadeId[];
 }
+
+export type FacadeId = "N" | "S" | "E" | "W";
+
+export const ALL_FACADES: FacadeId[] = ["N", "S", "E", "W"];
 
 /** Classical façade proportions (Palladian tradition).
  * Ground floor = robust base; piano nobile = grandest;
@@ -117,6 +124,21 @@ export const DEFAULT_PARAMS: BuildingParams = {
   roofColor: "#a64b32",
 };
 
+/** View settings — purely client-side (not sent to the Python pipeline).
+ * Lives separately from BuildingParams so changing the sun doesn't trigger
+ * a regeneration of the building. */
+export interface ViewSettings {
+  /** Sun azimuth in degrees. 0 = North, 90 = East, 180 = South, 270 = West. */
+  sunAzimuth: number;
+  /** Sun altitude in degrees above the horizon. 0 = on horizon, 90 = zenith. */
+  sunAltitude: number;
+}
+
+export const DEFAULT_VIEW: ViewSettings = {
+  sunAzimuth: 135, // South-east — classic architectural rendering angle
+  sunAltitude: 50, // Mid-morning / mid-afternoon
+};
+
 /** Roof tile/slate swatches. */
 export const ROOF_SWATCHES: { id: string; label: string; hex: string }[] = [
   { id: "terracotta", label: "Terracotta", hex: "#a64b32" },
@@ -135,6 +157,9 @@ export const WALL_SWATCHES: { id: string; label: string; hex: string }[] = [
   { id: "white", label: "White", hex: "#ece8e0" },
 ];
 
+// "framing" and "blank" are hidden from the UI picker — framing has no
+// wall geometry (timber-only) and blank produces a featureless shell. They
+// remain valid StyleId values for direct API usage but aren't user-selectable.
 export const STYLE_OPTIONS: {
   id: StyleId;
   label: string;
@@ -143,12 +168,10 @@ export const STYLE_OPTIONS: {
   { id: "default", label: "Default", desc: "Full detail with windows & doors" },
   { id: "courtyard", label: "Courtyard", desc: "Open central space" },
   { id: "fancy", label: "Fancy", desc: "Ornamental classical" },
-  { id: "framing", label: "Framing", desc: "Timber frame structure" },
   { id: "halifax", label: "Halifax", desc: "Piece Hall inspired" },
   { id: "cinema", label: "Cinema", desc: "Art deco auditorium" },
   { id: "foxhouse", label: "Foxhouse", desc: "Fox house with openings" },
   { id: "simple", label: "Simple", desc: "Minimal shells only" },
-  { id: "blank", label: "Blank", desc: "Empty, no elements" },
 ];
 
 export const ROOM_TYPES = [

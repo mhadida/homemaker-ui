@@ -758,6 +758,7 @@ def ifc_to_glb(
     ifc_file: ifcopenshell.file,
     wall_color: tuple | None = None,
     roof_color: tuple | None = None,
+    enabled_facades: tuple | None = None,
 ) -> bytes:
     """Convert an in-memory IFC file to a binary glTF (.glb) byte string.
 
@@ -818,6 +819,34 @@ def ifc_to_glb(
         ext_sign = 1.0 if center > axis_means.get(thin, center) else -1.0
         wall_data[guid] = (thin, center, thickness, ext_sign)
 
+    # Normalize the facade filter to a set of {'N','S','E','W'} (or None = all).
+    facades_filter: set | None = (
+        set(enabled_facades) if enabled_facades is not None else None
+    )
+
+    def _facade_of(thin_axis: int, ext_sign: float) -> str | None:
+        """Map (wall thin axis, outward sign) → cardinal facade label.
+        Assumes IFC convention: X=east/west, Y=south/north (Y+ is north).
+        Returns None for non-axis-aligned walls (not currently produced
+        by Molior on rectilinear footprints, but we'd just keep windows)."""
+        if thin_axis == 0:
+            return "E" if ext_sign > 0 else "W"
+        if thin_axis == 1:
+            return "N" if ext_sign > 0 else "S"
+        return None
+
+    def _window_enabled(elem) -> bool:
+        """Is this window on an enabled facade? Defaults to True if we
+        can't determine the facade (no parent wall in wall_data)."""
+        if facades_filter is None:
+            return True
+        info = _find_parent_wall_info(elem)
+        if info is None:
+            return True
+        thin_axis, _, _, ext_sign = info
+        facade = _facade_of(thin_axis, ext_sign)
+        return facade is None or facade in facades_filter
+
     def _find_parent_wall_info(elem):
         """Walk Window/Door → IfcRelFillsElement → Opening → IfcRelVoidsElement → Wall."""
         try:
@@ -874,11 +903,32 @@ def ifc_to_glb(
             elem = ifc_file.by_guid(shape.guid)
             n_mats = len(materials)
             if elem.is_a("IfcWindow"):
+                # Facade filter: skip windows on facades the user disabled.
+                # Continues to next iterator item without rendering this window.
+                if not _window_enabled(elem):
+                    if not it.next():
+                        break
+                    continue
                 frame_color = wall_color if wall_color is not None else (0.78, 0.74, 0.66, 1.0)
                 info = _find_parent_wall_info(elem)
+                # Determine wall-normal axis for the glass classifier.
+                # Preferred: parent wall's thin axis from wall_data.
+                # Fallback (e.g. "framing" style — walls have no geometry):
+                # infer from the window mesh's own bbox — the smallest spread
+                # is the wall-normal direction. This means framing windows
+                # still get glass classified correctly even though we have
+                # no wall info to apply the protrusion cap.
                 if info is not None:
+                    thin_for_window = info[0]
+                elif verts.size:
+                    ext = verts.max(axis=0) - verts.min(axis=0)
+                    thin_for_window = int(np.argmin(ext))
+                else:
+                    thin_for_window = None
+
+                if thin_for_window is not None:
                     window_classify = (
-                        info[0],  # thin axis (= wall normal)
+                        thin_for_window,
                         ("homemaker:window",
                          _WINDOW_OVERRIDE["color"],
                          _WINDOW_OVERRIDE["metallic"],
@@ -886,7 +936,6 @@ def ifc_to_glb(
                         ("homemaker:window-frame", frame_color, 0.0, 0.85),
                     )
                 else:
-                    # No parent wall — fall back to single-bucket painted frame
                     for mi in range(n_mats):
                         material_overrides[mi] = (
                             "homemaker:window-frame", frame_color, 0.0, 0.85,
@@ -1004,6 +1053,39 @@ def ifc_to_glb(
             drop_mask = (align > 0.9) & (areas > 0.005) & (aspect < 5.0)
             keep_mask = ~drop_mask
 
+            # Route glass tris. When we have parent wall info, the synthesized
+            # glass quad pass at the end emits a flat dark plane BEHIND the
+            # sash bars — so we drop these tris (they'd otherwise sit in front
+            # of the bars). When we DON'T have wall info (e.g. framing style
+            # where walls have no geometry), the synthesized pass is skipped,
+            # so we route the classified glass tris directly to the glass
+            # bucket instead — accept Molior's authored Y position.
+            elem_has_wall_data = info is not None
+            if drop_mask.any() and not elem_has_wall_data:
+                _glass_name, _glass_color, _glass_metallic, _glass_roughness = (
+                    _glass_spec
+                )
+                tri_g = faces[drop_mask]
+                glass_bucket = mat_buckets.setdefault(
+                    _glass_name,
+                    {
+                        "color": _glass_color,
+                        "metallic": _glass_metallic,
+                        "roughness": _glass_roughness,
+                        "verts": [],
+                        "faces": [],
+                        "v_offset": 0,
+                    },
+                )
+                used_g = np.unique(tri_g)
+                remap_g = np.full(verts.shape[0], -1, dtype=np.int32)
+                remap_g[used_g] = (
+                    np.arange(used_g.size, dtype=np.int32) + glass_bucket["v_offset"]
+                )
+                glass_bucket["verts"].append(verts[used_g])
+                glass_bucket["faces"].append(remap_g[tri_g])
+                glass_bucket["v_offset"] += used_g.size
+
             if keep_mask.any():
                 tri = faces[keep_mask]
                 name, color, ov_metallic, ov_roughness = frame_spec
@@ -1103,6 +1185,11 @@ def ifc_to_glb(
         if not is_window or not parent_wall_guid or parent_wall_guid not in wall_data:
             continue
         thin_axis, wall_center, wall_thickness, ext_sign = wall_data[parent_wall_guid]
+        # Honour the facade filter — no glass quad on disabled facades.
+        if facades_filter is not None:
+            facade = _facade_of(thin_axis, ext_sign)
+            if facade is not None and facade not in facades_filter:
+                continue
         # Glass plane sits ~halfway between wall center and interior face —
         # comfortably behind any mullion bar that crosses the wall centerline.
         glass_y = wall_center + (-ext_sign) * (wall_thickness * 0.40)
@@ -1289,6 +1376,12 @@ def build_and_export_glb(params: dict) -> bytes:
     wall_color = _hex_to_rgba(wall_color_hex) if wall_color_hex else None
     roof_color_hex = params.get("roofColor")
     roof_color = _hex_to_rgba(roof_color_hex) if roof_color_hex else None
+    raw_facades = params.get("enabledFacades")
+    enabled_facades = (
+        tuple(f for f in raw_facades if f in ("N", "S", "E", "W"))
+        if isinstance(raw_facades, list)
+        else None
+    )
 
     faces = build_faces(
         footprint, storeys, storey_heights, style, roof, ridge_height, holes=holes
@@ -1304,7 +1397,12 @@ def build_and_export_glb(params: dict) -> bytes:
         share_dir=SHARE_DIR,
     ).execute()
 
-    return ifc_to_glb(ifc, wall_color=wall_color, roof_color=roof_color)
+    return ifc_to_glb(
+        ifc,
+        wall_color=wall_color,
+        roof_color=roof_color,
+        enabled_facades=enabled_facades,
+    )
 
 
 def main():

@@ -5,10 +5,32 @@ import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Environment, ContactShadows, Grid } from "@react-three/drei";
 import * as THREE from "three";
 import GLTFBuildingScene, { type BuildStatus } from "./GLTFBuildingScene";
-import type { BuildingParams } from "@/lib/building/types";
+import NorthIndicator from "./NorthIndicator";
+import type { BuildingParams, ViewSettings } from "@/lib/building/types";
+import { DEFAULT_VIEW } from "@/lib/building/types";
 
 interface BuildingViewerProps {
   params: BuildingParams;
+  view?: ViewSettings;
+}
+
+/** Convert sun azimuth/altitude (degrees) to a directional-light position
+ * vector. Distance is arbitrary — the light is directional so only direction
+ * matters; we pick a large radius so the shadow camera frustum lines up. */
+function sunPositionFromAngles(
+  azimuthDeg: number,
+  altitudeDeg: number,
+): [number, number, number] {
+  const az = (azimuthDeg * Math.PI) / 180;
+  const alt = (altitudeDeg * Math.PI) / 180;
+  const r = 30;
+  // Convention: az=0 → +Z (north), az=90 → +X (east), so sun position is
+  // OPPOSITE to where the light shines from. directionalLight.position is
+  // the light's location; it shines toward the origin.
+  const x = r * Math.cos(alt) * Math.sin(az);
+  const y = r * Math.sin(alt);
+  const z = r * Math.cos(alt) * Math.cos(az);
+  return [x, y, z];
 }
 
 function useGroundGeometry() {
@@ -48,18 +70,24 @@ function useGroundGeometry() {
 
 function Scene({
   params,
+  view,
   onStatusChange,
 }: {
   params: BuildingParams;
+  view: ViewSettings;
   onStatusChange: (s: BuildStatus) => void;
 }) {
   const groundGeo = useGroundGeometry();
+  const sunPos = useMemo(
+    () => sunPositionFromAngles(view.sunAzimuth, view.sunAltitude),
+    [view.sunAzimuth, view.sunAltitude],
+  );
   return (
     <>
-      {/* Lighting — three-point setup for architectural visualization */}
+      {/* Lighting — sun-direction driven by the view sliders. */}
       <ambientLight intensity={0.35} />
       <directionalLight
-        position={[15, 20, 10]}
+        position={sunPos}
         intensity={1.4}
         castShadow
         shadow-mapSize-width={2048}
@@ -83,6 +111,11 @@ function Scene({
 
       {/* Building (Homemaker engine → IFC → glTF from backend) */}
       <GLTFBuildingScene params={params} onStatusChange={onStatusChange} />
+
+      {/* 3D north indicator — small arrow on the ground south of the building,
+       * pointing world +Z (north). Fixed in world space so it shows where
+       * north is regardless of camera orbit. */}
+      <NorthIndicator />
 
       {/* Ground plane: uniform warm-earthy color, RGBA vertex attribute
        * holds the alpha gradient. 30×30 m solid square at the centre,
@@ -180,9 +213,16 @@ function LoadingFallback() {
   );
 }
 
-export default function BuildingViewer({ params }: BuildingViewerProps) {
+export default function BuildingViewer({
+  params,
+  view = DEFAULT_VIEW,
+}: BuildingViewerProps) {
   const [status, setStatus] = useState<BuildStatus>({ kind: "idle" });
 
+  const footprintKey = useMemo(
+    () => JSON.stringify(params.footprint),
+    [params.footprint],
+  );
   const cameraDistance = useMemo(() => {
     const maxDim = Math.max(
       ...params.footprint.map((p) => Math.abs(p[0])),
@@ -190,11 +230,10 @@ export default function BuildingViewer({ params }: BuildingViewerProps) {
     );
     const totalHeight = params.storeys * params.storeyHeight;
     return Math.max(maxDim * 3, totalHeight * 2, 15);
-  }, [
-    JSON.stringify(params.footprint),
-    params.storeys,
-    params.storeyHeight,
-  ]);
+    // footprintKey covers content-equality for params.footprint (which is an
+    // array reference that changes on every render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [footprintKey, params.storeys, params.storeyHeight]);
 
   return (
     <div
@@ -222,7 +261,7 @@ export default function BuildingViewer({ params }: BuildingViewerProps) {
         dpr={[1, 2]}
       >
         <Suspense fallback={<LoadingFallback />}>
-          <Scene params={params} onStatusChange={setStatus} />
+          <Scene params={params} view={view} onStatusChange={setStatus} />
         </Suspense>
       </Canvas>
 
