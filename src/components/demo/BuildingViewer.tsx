@@ -102,15 +102,16 @@ function CompassArrow({
 
   return (
     <group quaternion={quat}>
-      {/* Shaft */}
+      {/* Shaft — unlit material so it stays visible in the GizmoHelper's
+       * isolated (light-less) inset scene. PBR would render black there. */}
       <mesh position={[0, SHAFT_LEN / 2, 0]}>
         <cylinderGeometry args={[SHAFT_R, SHAFT_R, SHAFT_LEN, 16]} />
-        <meshStandardMaterial color={color} roughness={0.5} metalness={0.1} />
+        <meshBasicMaterial color={color} toneMapped={false} />
       </mesh>
       {/* Cone tip */}
       <mesh position={[0, SHAFT_LEN + CONE_LEN / 2, 0]}>
         <coneGeometry args={[CONE_R, CONE_LEN, 24]} />
-        <meshStandardMaterial color={color} roughness={0.5} metalness={0.1} />
+        <meshBasicMaterial color={color} toneMapped={false} />
       </mesh>
       {/* Label — placed in world coords, NOT inside the rotated group,
        * so it doesn't tumble with the arrow. We achieve this by
@@ -156,7 +157,7 @@ function NSEWGizmo() {
       {/* Small disc at the center for visual anchor */}
       <mesh rotation={[-Math.PI / 2, 0, 0]}>
         <circleGeometry args={[0.18, 32]} />
-        <meshStandardMaterial color="#1a1a1a" roughness={0.7} />
+        <meshBasicMaterial color="#1a1a1a" toneMapped={false} />
       </mesh>
     </group>
   );
