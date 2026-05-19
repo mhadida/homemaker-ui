@@ -140,12 +140,14 @@ function CompassArrow({
 }
 
 /** 3D isometric NSEW gizmo. Rendered inside drei's <GizmoHelper>, which
- * mounts a small inset scene whose camera mirrors the main camera's
- * rotation. The result: a corner-anchored 3D compass that rotates with
- * the user's view. No vertical (up) axis is drawn. */
+ * mounts a HUD with an orthographic camera sized in pixels. Our compass
+ * content is authored in unit coords (arrows ~1 unit long), so we wrap
+ * everything in `scale={40}` to land in the ~40px range — matching
+ * drei's built-in GizmoViewport convention. Without this the arrows
+ * render at sub-pixel size and are invisible. */
 function NSEWGizmo() {
   return (
-    <group>
+    <group scale={40}>
       {/* +Z = North — red (compass needle) */}
       <CompassArrow dir={[0, 0, 1]} color="#e74c4c" label="N" />
       {/* -Z = South — neutral */}
