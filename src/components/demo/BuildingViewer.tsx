@@ -1,0 +1,256 @@
+"use client";
+
+import { Suspense, useMemo, useState } from "react";
+import { Canvas } from "@react-three/fiber";
+import { OrbitControls, Environment, ContactShadows, Grid } from "@react-three/drei";
+import * as THREE from "three";
+import GLTFBuildingScene, { type BuildStatus } from "./GLTFBuildingScene";
+import type { BuildingParams } from "@/lib/building/types";
+
+interface BuildingViewerProps {
+  params: BuildingParams;
+}
+
+function useGroundGeometry() {
+  return useMemo(() => {
+    // Subdivided enough that the fade band reads smoothly
+    const geo = new THREE.PlaneGeometry(200, 200, 96, 96);
+    // Slightly-warm gray — between the original tan (#a89c8d) and a cool
+    // gray. Reads as neutral stone with a touch of warmth.
+    const base = new THREE.Color("#a59e95");
+    const pos = geo.attributes.position;
+    const colors = new Float32Array(pos.count * 4); // RGBA — itemSize=4 enables USE_COLOR_ALPHA
+    const SOLID_HALF = 15; // 30×30 m solid square at the centre
+    const FADE_END = 70;   // fully transparent past this radius
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const y = pos.getY(i);
+      // Chebyshev distance → square (not circular) solid region
+      const d = Math.max(Math.abs(x), Math.abs(y));
+      let alpha: number;
+      if (d <= SOLID_HALF) {
+        alpha = 1;
+      } else if (d >= FADE_END) {
+        alpha = 0;
+      } else {
+        const t = (d - SOLID_HALF) / (FADE_END - SOLID_HALF);
+        alpha = 1 - t * t * (3 - 2 * t); // smoothstep falloff
+      }
+      colors[i * 4] = base.r;
+      colors[i * 4 + 1] = base.g;
+      colors[i * 4 + 2] = base.b;
+      colors[i * 4 + 3] = alpha;
+    }
+    geo.setAttribute("color", new THREE.BufferAttribute(colors, 4));
+    return geo;
+  }, []);
+}
+
+function Scene({
+  params,
+  onStatusChange,
+}: {
+  params: BuildingParams;
+  onStatusChange: (s: BuildStatus) => void;
+}) {
+  const groundGeo = useGroundGeometry();
+  return (
+    <>
+      {/* Lighting — three-point setup for architectural visualization */}
+      <ambientLight intensity={0.35} />
+      <directionalLight
+        position={[15, 20, 10]}
+        intensity={1.4}
+        castShadow
+        shadow-mapSize-width={2048}
+        shadow-mapSize-height={2048}
+        shadow-camera-far={80}
+        shadow-camera-near={0.1}
+        shadow-camera-left={-25}
+        shadow-camera-right={25}
+        shadow-camera-top={25}
+        shadow-camera-bottom={-25}
+        shadow-bias={-0.0005}
+      />
+      <directionalLight position={[-8, 10, -6]} intensity={0.25} />
+      <pointLight position={[0, 30, 0]} intensity={0.3} />
+
+      {/* Fürstenstein old town courtyard HDRI (Poly Haven CC0) */}
+      <Environment
+        files="https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/furstenstein_1k.hdr"
+        background={false}
+      />
+
+      {/* Building (Homemaker engine → IFC → glTF from backend) */}
+      <GLTFBuildingScene params={params} onStatusChange={onStatusChange} />
+
+      {/* Ground plane: uniform warm-earthy color, RGBA vertex attribute
+       * holds the alpha gradient. 30×30 m solid square at the centre,
+       * smoothstep falloff to fully transparent at 70 m radius. The
+       * sky gradient behind the canvas shows through where transparent. */}
+      <mesh
+        position={[0, -0.02, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        receiveShadow
+        geometry={groundGeo}
+      >
+        <meshStandardMaterial
+          vertexColors
+          transparent
+          roughness={0.95}
+          metalness={0}
+        />
+      </mesh>
+
+      {/* Site grid overlay — three levels: 25 cm fine, 1 m regular, 5 m major.
+       * drei's <Grid> only supports two levels (cell + section), so we stack
+       * two grids on slightly different Y offsets to avoid z-fight. */}
+      {/* Fine 25 cm sub-grid (faint), 1 m as its "section" (medium-dark) */}
+      <Grid
+        position={[0, -0.006, 0]}
+        args={[60, 60]}
+        cellSize={0.25}
+        cellThickness={0.35}
+        cellColor="#3f3c39"
+        sectionSize={1}
+        sectionThickness={0.7}
+        sectionColor="#1f1d1b"
+        fadeDistance={25}
+        fadeStrength={1.4}
+        infiniteGrid
+      />
+      {/* 5 m major lines (strongest), 1 m repeated here too so the 1 m
+       * stays visible past the fine-grid fade distance. */}
+      <Grid
+        position={[0, -0.004, 0]}
+        args={[60, 60]}
+        cellSize={1}
+        cellThickness={0.7}
+        cellColor="#1f1d1b"
+        sectionSize={5}
+        sectionThickness={1.4}
+        sectionColor="#0d0c0b"
+        fadeDistance={70}
+        fadeStrength={1.2}
+        infiniteGrid
+      />
+
+      {/* Soft contact shadow blob right under the building */}
+      <ContactShadows
+        position={[0, 0.005, 0]}
+        opacity={0.45}
+        scale={50}
+        blur={2.5}
+        far={20}
+        resolution={1024}
+      />
+
+      {/* Camera controls — touch-friendly for iPad */}
+      <OrbitControls
+        makeDefault
+        enableDamping
+        dampingFactor={0.08}
+        minDistance={3}
+        maxDistance={80}
+        maxPolarAngle={Math.PI / 2.05}
+        enablePan
+        panSpeed={0.8}
+        rotateSpeed={0.5}
+        zoomSpeed={1.0}
+        touches={{
+          ONE: THREE.TOUCH.ROTATE,
+          TWO: THREE.TOUCH.DOLLY_PAN,
+        }}
+        mouseButtons={{
+          LEFT: THREE.MOUSE.ROTATE,
+          MIDDLE: THREE.MOUSE.DOLLY,
+          RIGHT: THREE.MOUSE.PAN,
+        }}
+      />
+    </>
+  );
+}
+
+function LoadingFallback() {
+  return (
+    <mesh>
+      <boxGeometry args={[2, 2, 2]} />
+      <meshStandardMaterial color="#666" wireframe />
+    </mesh>
+  );
+}
+
+export default function BuildingViewer({ params }: BuildingViewerProps) {
+  const [status, setStatus] = useState<BuildStatus>({ kind: "idle" });
+
+  const cameraDistance = useMemo(() => {
+    const maxDim = Math.max(
+      ...params.footprint.map((p) => Math.abs(p[0])),
+      ...params.footprint.map((p) => Math.abs(p[1]))
+    );
+    const totalHeight = params.storeys * params.storeyHeight;
+    return Math.max(maxDim * 3, totalHeight * 2, 15);
+  }, [
+    JSON.stringify(params.footprint),
+    params.storeys,
+    params.storeyHeight,
+  ]);
+
+  return (
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        position: "relative",
+        background:
+          "linear-gradient(to bottom, #8ea4b8 0%, #a8b0b3 55%, #b8ad9c 100%)",
+      }}
+    >
+      <Canvas
+        shadows
+        camera={{
+          position: [
+            cameraDistance * 0.7,
+            cameraDistance * 0.5,
+            cameraDistance * 0.7,
+          ],
+          fov: 40,
+          near: 0.1,
+          far: 200,
+        }}
+        gl={{ alpha: true, antialias: true }}
+        dpr={[1, 2]}
+      >
+        <Suspense fallback={<LoadingFallback />}>
+          <Scene params={params} onStatusChange={setStatus} />
+        </Suspense>
+      </Canvas>
+
+      {/* Centered loading spinner overlay */}
+      {status.kind === "loading" && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="flex flex-col items-center gap-3 px-6 py-5 rounded-2xl bg-black/55 backdrop-blur-md">
+            <div className="w-12 h-12 rounded-full border-[3px] border-white/25 border-t-white animate-spin" />
+            <span className="text-white/85 text-[11px] font-mono tracking-wide">
+              generating…
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Compact status chip (corner) */}
+      <div className="absolute top-3 left-3 text-[10px] font-mono px-2 py-1 rounded bg-black/55 backdrop-blur-sm text-white/75 pointer-events-none">
+        {status.kind === "ready" && (
+          <span>
+            {status.generationMs}ms · {(status.bytes / 1024).toFixed(0)}KB
+          </span>
+        )}
+        {status.kind === "error" && (
+          <span className="text-red-300">err: {status.message.slice(0, 60)}</span>
+        )}
+        {status.kind === "loading" && <span>generating…</span>}
+        {status.kind === "idle" && <span>idle</span>}
+      </div>
+    </div>
+  );
+}

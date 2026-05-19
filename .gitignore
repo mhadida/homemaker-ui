@@ -39,3 +39,23 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# python
+__pycache__/
+*.pyc
+python/.venv/
+
+# local dev tool configs (per-developer)
+.mcp.json
+.opencode/
+opencode.jsonc
+.playwright-mcp/
+
+# ephemera + screenshots
+.tmp-screenshots/
+/demo-initial.png
+/first-load.png
+
+# firebase logs
+firebase-debug.log
+firebase-debug.*.log

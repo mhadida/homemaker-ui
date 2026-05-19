@@ -1,7 +1,14 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  async rewrites() {
+    // Local `npm run dev` only — Vercel serves /build directly via the
+    // Python service (see vercel.json experimentalServices.build).
+    // In dev we route /build → /api/generate-building so the stdio python
+    // child keeps doing the work without needing `vercel dev -L`.
+    if (process.env.VERCEL) return [];
+    return [{ source: "/build", destination: "/api/generate-building" }];
+  },
 };
 
 export default nextConfig;

@@ -1,0 +1,3 @@
+[submodule "python/vendor/homemaker-addon"]
+	path = python/vendor/homemaker-addon
+	url = https://github.com/brunopostle/homemaker-addon.git

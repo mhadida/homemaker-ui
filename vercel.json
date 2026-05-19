@@ -1,0 +1,26 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "experimentalServices": {
+    "web": {
+      "entrypoint": ".",
+      "routePrefix": "/",
+      "framework": "nextjs"
+    },
+    "build": {
+      "entrypoint": "python/build.py",
+      "routePrefix": "/build",
+      "memory": 1024,
+      "maxDuration": 30,
+      "includeFiles": [
+        "python/**/*.py",
+        "python/vendor/homemaker-addon/**/*"
+      ]
+    }
+  },
+  "crons": [
+    {
+      "path": "/build",
+      "schedule": "*/4 * * * *"
+    }
+  ]
+}

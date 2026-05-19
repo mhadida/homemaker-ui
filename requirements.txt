@@ -1,0 +1,6 @@
+ifcopenshell==0.8.5
+numpy==2.4.5
+pygltflib==1.16.5
+PyYAML==6.0.3
+topologic_core==8.0.4
+shapely==2.0.6

@@ -1,8 +1,15 @@
 @import "tailwindcss";
+@import "maplibre-gl/dist/maplibre-gl.css";
+@import "@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  --panel-bg: #141414;
+  --border: #2a2a2a;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --muted: #888;
 }
 
 @theme inline {
@@ -12,15 +19,28 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  overflow: hidden;
+}
+
+/* MapLibre overrides for dark theme */
+.maplibregl-ctrl-group {
+  background: var(--panel-bg) !important;
+  border: 1px solid var(--border) !important;
+}
+
+.maplibregl-ctrl-group button {
+  filter: invert(1);
+}
+
+.maplibregl-ctrl-attrib {
+  background: rgba(0, 0, 0, 0.6) !important;
+  color: var(--muted) !important;
+}
+
+.maplibregl-ctrl-attrib a {
+  color: var(--muted) !important;
 }
