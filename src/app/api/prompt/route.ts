@@ -36,6 +36,12 @@ const ROOM_TYPES = [
 // Compact, AI-friendly spec. Server converts this to BuildingParams before
 // returning. Width/depth + shape are friendlier for an LLM than raw polygon
 // coordinates. Colors come back as semantic names; the client maps to hex.
+//
+// IMPORTANT: All fields are REQUIRED. OpenAI's structured-output schema
+// rejects any property that isn't in the `required` list (it doesn't
+// support Zod's `.optional()`). The system prompt instructs the model to
+// echo the current value when the user doesn't mention a field, so the
+// model always has a sensible value to return for each one.
 const BuildingSpec = z.object({
   storeys: z.number().int().min(1).max(6),
   width: z.number().min(4).max(30),
@@ -44,11 +50,18 @@ const BuildingSpec = z.object({
   style: z.enum(STYLES),
   roof: z.enum(ROOFS),
   ridgeHeight: z.number().min(1).max(6),
-  wallColor: z
-    .enum(["earthy", "cream", "stone", "slate", "linen", "sage", "blush", "white"])
-    .optional(),
-  roofColor: z.enum(ROOF_COLORS).optional(),
-  rooms: z.array(z.enum(ROOM_TYPES)).optional(),
+  wallColor: z.enum([
+    "earthy",
+    "cream",
+    "stone",
+    "slate",
+    "linen",
+    "sage",
+    "blush",
+    "white",
+  ]),
+  roofColor: z.enum(ROOF_COLORS),
+  rooms: z.array(z.enum(ROOM_TYPES)),
 });
 
 export type BuildingSpec = z.infer<typeof BuildingSpec>;

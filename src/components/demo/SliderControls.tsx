@@ -457,12 +457,12 @@ export default function SliderControls({
         </div>
       )}
 
-      {/* Roof color — two-swatch toggle (terracotta/slate). */}
+      {/* Roof color — presets + custom picker. */}
       <div>
         <label className="text-[10px] uppercase tracking-wider text-[var(--muted)] font-medium block mb-1.5">
           Roof Color
         </label>
-        <div className="grid grid-cols-2 gap-1.5">
+        <div className="grid grid-cols-2 gap-1.5 mb-2">
           {ROOF_SWATCHES.map((s) => {
             const active =
               (params.roofColor || "").toLowerCase() === s.hex.toLowerCase();
@@ -483,6 +483,13 @@ export default function SliderControls({
             );
           })}
         </div>
+        <input
+          type="color"
+          value={params.roofColor || "#a64b32"}
+          onChange={(e) => update({ roofColor: e.target.value })}
+          className="w-full h-7 rounded bg-[var(--border)] cursor-pointer"
+          aria-label="Custom roof color"
+        />
       </div>
 
       {/* Wall Paint */}
