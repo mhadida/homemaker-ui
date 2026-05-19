@@ -832,6 +832,10 @@ def ifc_to_glb(
     # panel later (so the wall doesn't show through the cut-out).
     skip_window_guids: set = set()
     blanking_openings: dict = {}  # opening.GlobalId -> (bb_lo, bb_hi) — emit panel here
+    # Per-gable-wall accumulator for synthesizing ONE centered window in
+    # place of the side-by-side originals. Populated during the opening
+    # pass; consumed after regular glass quads are emitted.
+    gable_synth_targets: dict = {}  # parent_wall_guid -> accumulator dict
     # Threshold above which a window is considered to be in the gable
     # triangle (the section ABOVE the upper-storey ceiling, where the
     # pitched roof tapers up to the ridge).
@@ -896,23 +900,26 @@ def ifc_to_glb(
 
         for parent_guid, wins in gable_groups.items():
             # Iterator can yield the same window twice (multiple representation
-            # contexts in Molior's output). Dedupe by guid before voting.
+            # contexts in Molior's output). Dedupe by guid before counting.
             seen_guids = set()
             wins = [w for w in wins if not (w[0] in seen_guids or seen_guids.add(w[0]))]
             if len(wins) < 2:
                 continue
-            # Wall horizontal center along the in-plane axis is just the
-            # building axis_means value (footprint is centered on origin).
-            _thin = wall_data[parent_guid][0]
-            h_axis = 0 if _thin != 0 else 1
-            target = axis_means.get(h_axis, 0.0)
-            # Sort by distance from horizontal center, keep first, drop rest
-            wins_sorted = sorted(wins, key=lambda t: abs(t[1] - target))
-            for win_guid, _ in wins_sorted[1:]:
+            # Skip ALL gable windows on this wall; blank every opening; and
+            # register a synthesis target so we can place ONE glass quad
+            # centered on the gable. axis_means gives the wall's in-plane
+            # midline (footprint is centered on origin).
+            for win_guid, _ in wins:
                 skip_window_guids.add(win_guid)
                 op_guid = win_to_opening.get(win_guid)
                 if op_guid is not None:
-                    blanking_openings[op_guid] = None  # filled in opening pass
+                    blanking_openings[op_guid] = None  # payload filled in opening pass
+            gable_synth_targets[parent_guid] = {
+                "sum_w": 0.0,
+                "sum_h": 0.0,
+                "sum_z": 0.0,
+                "n": 0,
+            }
 
     # Normalize the facade filter to a set of {'N','S','E','W'} (or None = all).
     facades_filter: set | None = (
@@ -1292,15 +1299,29 @@ def ifc_to_glb(
             if facade is not None and facade not in facades_filter:
                 continue
         # Gable-triangle skip: this opening's window was deduplicated. Record
-        # its bbox so we can emit a blanking panel instead, then continue
-        # (no glass quad for skipped windows).
+        # its bbox so we can emit a blanking panel instead, AND accumulate
+        # its dimensions into the gable-synth target so we can place one
+        # centered window per gable wall further down.
         if opening.GlobalId in blanking_openings:
+            bb_lo_g, bb_hi_g = opening_bboxes[opening.GlobalId]
             blanking_openings[opening.GlobalId] = (
-                opening_bboxes[opening.GlobalId],
+                (bb_lo_g, bb_hi_g),
                 thin_axis,
                 wall_center,
                 ext_sign,
             )
+            tgt = gable_synth_targets.get(parent_wall_guid)
+            if tgt is not None:
+                # In-plane horizontal axis (non-thin, non-Z).
+                h_a = 1 if thin_axis == 0 else 0
+                tgt["sum_w"] += float(bb_hi_g[h_a]) - float(bb_lo_g[h_a])
+                tgt["sum_h"] += float(bb_hi_g[2]) - float(bb_lo_g[2])
+                tgt["sum_z"] += float((bb_hi_g[2] + bb_lo_g[2]) / 2.0)
+                tgt["n"] += 1
+                tgt["thin_axis"] = thin_axis
+                tgt["wall_center"] = wall_center
+                tgt["wall_thickness"] = wall_thickness
+                tgt["ext_sign"] = ext_sign
             continue
         # Glass plane sits ~halfway between wall center and interior face —
         # comfortably behind any mullion bar that crosses the wall centerline.
@@ -1328,6 +1349,52 @@ def ifc_to_glb(
         off = len(glass_verts)
         glass_verts.extend([q0, q1, q2, q3])
         glass_faces.extend([[off, off + 1, off + 2], [off, off + 2, off + 3]])
+
+    # Synthesize ONE centered window per gable wall (replacing the
+    # side-by-side originals that were skipped + blanked above). Placed at
+    # the wall's horizontal midline, at the average vertical center and
+    # average dimensions of the originals, pushed 5 mm proud of the blanking
+    # panel so it reads as glass on top of solid gable wall.
+    for parent_guid, tgt in gable_synth_targets.items():
+        n = tgt.get("n", 0)
+        if n == 0 or "thin_axis" not in tgt:
+            continue
+        avg_w = tgt["sum_w"] / n
+        avg_h = tgt["sum_h"] / n
+        z_center = tgt["sum_z"] / n
+        t_axis = tgt["thin_axis"]
+        t_center = tgt["wall_center"]
+        t_ext = tgt["ext_sign"]
+        h_a = 1 if t_axis == 0 else 0
+        # Wall midline along the in-plane axis = mean center of walls whose
+        # thin axis matches h_a. For a rectangular footprint centered on
+        # the origin this is 0; for off-center footprints it correctly
+        # tracks the gable centerline.
+        h_center = float(axis_means.get(h_a, 0.0))
+        # Push synthesized glass 5mm proud of the blanking panel (which sits
+        # at t_center + t_ext*0.165) so the two don't z-fight.
+        syn_y = t_center + t_ext * 0.170
+        lo1 = h_center - avg_w / 2.0
+        hi1 = h_center + avg_w / 2.0
+        lo2 = z_center - avg_h / 2.0
+        hi2 = z_center + avg_h / 2.0
+
+        def _gcorner(p1, p2, _t=t_axis, _y=syn_y, _x=h_a):
+            c = np.zeros(3, dtype=np.float32)
+            c[_t] = _y
+            c[_x] = p1
+            c[2] = p2
+            return c
+
+        gq0 = _gcorner(lo1, lo2)
+        gq1 = _gcorner(hi1, lo2)
+        gq2 = _gcorner(hi1, hi2)
+        gq3 = _gcorner(lo1, hi2)
+        goff = len(glass_verts)
+        glass_verts.extend([gq0, gq1, gq2, gq3])
+        glass_faces.extend(
+            [[goff, goff + 1, goff + 2], [goff, goff + 2, goff + 3]]
+        )
 
     if glass_verts:
         mat_buckets["homemaker:window"] = {
