@@ -1,9 +1,20 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { BuildingParams } from "@/lib/building/types";
+
+export type BuildStatus =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | {
+      kind: "ready";
+      generationMs: number;
+      bytes: number;
+      cached?: boolean;
+    }
+  | { kind: "error"; message: string };
 
 interface GLTFBuildingSceneProps {
   params: BuildingParams;
@@ -11,11 +22,60 @@ interface GLTFBuildingSceneProps {
   onStatusChange?: (s: BuildStatus) => void;
 }
 
-export type BuildStatus =
-  | { kind: "idle" }
-  | { kind: "loading" }
-  | { kind: "ready"; generationMs: number; bytes: number }
-  | { kind: "error"; message: string };
+// ── Client-side cache + cosmetic-vs-structural split ────────────────────────
+//
+// The Python pipeline on Vercel takes 1-3s warm to regenerate a building.
+// Most slider tweaks don't actually need to hit the server:
+//   - Cosmetic changes (wallColor, roofColor) are pure material recolors
+//     applied to the existing Three.js scene — no fetch at all.
+//   - Structural changes (footprint, style, storeys, roof, ...) DO need a
+//     new glb. We keep an LRU cache keyed by the structural-only hash so
+//     sliding back across recent values is instant.
+//
+// The cache is module-scoped so it survives component remounts (e.g. when
+// the parent layout briefly unmounts the scene).
+
+const STRUCTURAL_KEYS = [
+  "footprint",
+  "holes",
+  "storeys",
+  "storeyHeight",
+  "storeyHeights",
+  "style",
+  "roof",
+  "ridgeHeight",
+  "rooms",
+] as const;
+
+function structuralKey(p: BuildingParams): string {
+  return JSON.stringify(STRUCTURAL_KEYS.map((k) => p[k]));
+}
+
+const GLB_CACHE = new Map<string, ArrayBuffer>();
+const GLB_CACHE_MAX = 24;
+
+function cachePut(key: string, buf: ArrayBuffer) {
+  // Touch-on-write LRU: delete-and-reinsert puts the key at the tail.
+  if (GLB_CACHE.has(key)) GLB_CACHE.delete(key);
+  GLB_CACHE.set(key, buf);
+  while (GLB_CACHE.size > GLB_CACHE_MAX) {
+    const oldest = GLB_CACHE.keys().next().value;
+    if (oldest === undefined) break;
+    GLB_CACHE.delete(oldest);
+  }
+}
+
+function cacheGet(key: string): ArrayBuffer | undefined {
+  const buf = GLB_CACHE.get(key);
+  if (buf !== undefined) {
+    // Touch for LRU
+    GLB_CACHE.delete(key);
+    GLB_CACHE.set(key, buf);
+  }
+  return buf;
+}
+
+// ── Component ───────────────────────────────────────────────────────────────
 
 export default function GLTFBuildingScene({
   params,
@@ -26,18 +86,107 @@ export default function GLTFBuildingScene({
   const requestId = useRef(0);
   const loader = useRef(new GLTFLoader());
 
+  // Keep latest props in refs so the fetch effect doesn't re-fire on
+  // cosmetic-only changes (those only deps that actually drive the fetch
+  // belong in its dep array — the structural key).
+  const paramsRef = useRef(params);
   useEffect(() => {
+    paramsRef.current = params;
+  }, [params]);
+
+  const onStatusChangeRef = useRef(onStatusChange);
+  useEffect(() => {
+    onStatusChangeRef.current = onStatusChange;
+  }, [onStatusChange]);
+
+  const key = useMemo(() => structuralKey(params), [params]);
+
+  // ── Apply current cosmetic colors to the loaded scene. Fires on either
+  // (a) a brand-new scene loading, or (b) the user changing a color slider. ──
+  useEffect(() => {
+    if (!scene) return;
+    scene.traverse((obj) => {
+      if (!(obj instanceof THREE.Mesh)) return;
+      const mat = obj.material as THREE.MeshStandardMaterial | undefined;
+      if (!mat || !mat.color) return;
+      if (mat.name === "homemaker:wall" && params.wallColor) {
+        mat.color.set(params.wallColor);
+        mat.needsUpdate = true;
+      } else if (mat.name === "homemaker:roof" && params.roofColor) {
+        mat.color.set(params.roofColor);
+        mat.needsUpdate = true;
+      }
+    });
+  }, [scene, params.wallColor, params.roofColor]);
+
+  // ── Fetch (or cache-hit) a glb whenever structural params change ──
+  useEffect(() => {
+    const applyGlb = (
+      buf: ArrayBuffer,
+      genMs: number,
+      fromCache: boolean,
+      myId: number,
+    ) => {
+      loader.current.parse(
+        buf,
+        "",
+        (gltf) => {
+          if (myId !== requestId.current) return;
+          gltf.scene.traverse((obj) => {
+            if (obj instanceof THREE.Mesh) {
+              obj.castShadow = true;
+              obj.receiveShadow = true;
+              const mat = obj.material as THREE.MeshStandardMaterial;
+              if (!mat) return;
+              if (mat.name === "homemaker:window") {
+                mat.envMapIntensity = 3.0;
+                mat.transparent = true;
+                mat.depthWrite = false;
+              } else {
+                mat.envMapIntensity = 0.7;
+              }
+            }
+          });
+          setScene((prev) => {
+            if (prev) prev.parent?.remove(prev);
+            return gltf.scene;
+          });
+          onStatusChangeRef.current?.({
+            kind: "ready",
+            generationMs: genMs,
+            bytes: buf.byteLength,
+            cached: fromCache,
+          });
+        },
+        (err) => {
+          const msg =
+            err && typeof err === "object" && "message" in err
+              ? String((err as { message: unknown }).message)
+              : "unknown";
+          onStatusChangeRef.current?.({
+            kind: "error",
+            message: `parse: ${msg}`,
+          });
+        },
+      );
+    };
+
     const handle = window.setTimeout(() => {
       const myId = ++requestId.current;
-      onStatusChange?.({ kind: "loading" });
 
-      // `/build` is the Python Vercel Function service (see vercel.json).
-      // It's served by Next.js's API route in `npm run dev` via a rewrite,
-      // and directly by Vercel in production + `vercel dev -L`.
+      // Cache hit: render synchronously, no network.
+      const cached = cacheGet(key);
+      if (cached) {
+        applyGlb(cached, 0, true, myId);
+        return;
+      }
+
+      onStatusChangeRef.current?.({ kind: "loading" });
+
       fetch("/build", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(params),
+        body: JSON.stringify(paramsRef.current),
       })
         .then(async (res) => {
           if (myId !== requestId.current) return null;
@@ -51,53 +200,12 @@ export default function GLTFBuildingScene({
         })
         .then((result) => {
           if (!result || myId !== requestId.current) return;
-          loader.current.parse(
-            result.buf,
-            "",
-            (gltf) => {
-              if (myId !== requestId.current) return;
-              gltf.scene.traverse((obj) => {
-                if (obj instanceof THREE.Mesh) {
-                  obj.castShadow = true;
-                  obj.receiveShadow = true;
-                  const mat = obj.material as THREE.MeshStandardMaterial;
-                  if (mat) {
-                    // Strong HDRI reflection on glass; subtle everywhere else.
-                    if (mat.name === "homemaker:window") {
-                      mat.envMapIntensity = 3.0;
-                      mat.transparent = true;
-                      mat.depthWrite = false;
-                    } else {
-                      mat.envMapIntensity = 0.7;
-                    }
-                  }
-                }
-              });
-              setScene((prev) => {
-                if (prev) prev.parent?.remove(prev);
-                return gltf.scene;
-              });
-              onStatusChange?.({
-                kind: "ready",
-                generationMs: result.genMs,
-                bytes: result.buf.byteLength,
-              });
-            },
-            (err) => {
-              const msg =
-                err && typeof err === "object" && "message" in err
-                  ? String((err as { message: unknown }).message)
-                  : "unknown";
-              onStatusChange?.({
-                kind: "error",
-                message: `parse: ${msg}`,
-              });
-            },
-          );
+          cachePut(key, result.buf);
+          applyGlb(result.buf, result.genMs, false, myId);
         })
         .catch((err) => {
           if (myId !== requestId.current) return;
-          onStatusChange?.({
+          onStatusChangeRef.current?.({
             kind: "error",
             message: err instanceof Error ? err.message : String(err),
           });
@@ -105,7 +213,7 @@ export default function GLTFBuildingScene({
     }, debounceMs);
 
     return () => window.clearTimeout(handle);
-  }, [JSON.stringify(params), debounceMs, onStatusChange]);
+  }, [key, debounceMs]);
 
   if (!scene) return null;
   return <primitive object={scene} />;
