@@ -9,6 +9,19 @@ const nextConfig: NextConfig = {
     if (process.env.VERCEL) return [];
     return [{ source: "/build", destination: "/api/generate-building" }];
   },
+  async headers() {
+    return [
+      {
+        source: "/default.glb",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

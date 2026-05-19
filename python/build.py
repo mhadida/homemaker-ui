@@ -54,7 +54,7 @@ class handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "model/gltf-binary")
         self.send_header("Content-Length", str(len(glb)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "public, max-age=3600")
         self.send_header("X-Generation-Ms", str(ms))
         self.end_headers()
         self.wfile.write(glb)

@@ -117,7 +117,7 @@ export const DEFAULT_PARAMS: BuildingParams = {
   storeyHeight: 3.0,
   storeyHeights: classicalStoreyHeights(2, 3.0),
   style: "default",
-  roof: "flat",
+  roof: "pitched",
   ridgeHeight: 3.0,
   rooms: [],
   wallColor: "#c7bca8",

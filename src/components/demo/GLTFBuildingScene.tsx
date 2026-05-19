@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { BuildingParams } from "@/lib/building/types";
+import { DEFAULT_PARAMS } from "@/lib/building/types";
 
 export type BuildStatus =
   | { kind: "idle" }
@@ -74,6 +75,28 @@ function cacheGet(key: string): ArrayBuffer | undefined {
   }
   return buf;
 }
+
+// Prewarm with the canonical default glb shipped as a static asset. Lets the
+// initial render skip the Python pipeline entirely on cold start — the static
+// file is served from the CDN with immutable caching (see next.config.ts).
+const DEFAULT_KEY = structuralKey(DEFAULT_PARAMS);
+let prewarmPromise: Promise<void> | null = null;
+function prewarmDefault(): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
+  if (prewarmPromise) return prewarmPromise;
+  prewarmPromise = fetch("/default.glb")
+    .then((res) => (res.ok ? res.arrayBuffer() : null))
+    .then((buf) => {
+      if (buf) cachePut(DEFAULT_KEY, buf);
+    })
+    .catch(() => {
+      // Missing or stale default.glb is non-fatal — fall through to /build.
+    });
+  return prewarmPromise;
+}
+
+// Fire-and-forget prewarm on module load — runs once per page session.
+if (typeof window !== "undefined") prewarmDefault();
 
 // ── Component ───────────────────────────────────────────────────────────────
 
@@ -171,14 +194,27 @@ export default function GLTFBuildingScene({
       );
     };
 
-    const handle = window.setTimeout(() => {
+    const handle = window.setTimeout(async () => {
       const myId = ++requestId.current;
 
       // Cache hit: render synchronously, no network.
-      const cached = cacheGet(key);
+      let cached = cacheGet(key);
       if (cached) {
         applyGlb(cached, 0, true, myId);
         return;
+      }
+
+      // For the canonical default, wait briefly for the static prewarm to
+      // finish before falling through to the Python pipeline. The static glb
+      // is served from CDN with immutable caching and avoids cold-start cost.
+      if (key === DEFAULT_KEY) {
+        await prewarmDefault();
+        if (myId !== requestId.current) return;
+        cached = cacheGet(key);
+        if (cached) {
+          applyGlb(cached, 0, true, myId);
+          return;
+        }
       }
 
       onStatusChangeRef.current?.({ kind: "loading" });

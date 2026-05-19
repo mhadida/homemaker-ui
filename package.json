@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "build:default-glb": "python/.venv/bin/python3 python/build_default.py"
   },
   "dependencies": {
     "@mapbox/mapbox-gl-draw": "^1.5.1",
