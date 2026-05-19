@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "homemaker": {
+      "command": "uv",
+      "args": ["run", "../homemaker-blender/mcp_server.py"]
+    }
+  }
+}

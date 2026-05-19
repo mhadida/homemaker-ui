@@ -12,10 +12,10 @@ Interactive parametric building editor. Users draw a building footprint on a map
 
 Four parts work together:
 
-- **`homemaker-ui/`** (this repo) — Next.js 16 app, the interactive editor
-- **`../homemaker-addon/`** — Bruno Postle's Blender addon (the engine), generates IFC buildings from topology
-- **`mcp_server.py`** — MCP server bridging agents to Blender via socket on port 9876
-- **Blender** (running separately) — runs Bonsai + Homemaker addons, serves as the backend
+- **`homemaker-ui/`** (this repo) — Next.js 16 app, the interactive editor. Generates IFC + glTF in pure Python (`ifcopenshell` + `topologic_core` + Molior) — no Blender needed in the deployed web app.
+- **`python/vendor/homemaker-addon/`** — Bruno Postle's Blender addon, vendored as a Git submodule pinned to a known-good commit. Provides the Molior IFC generator.
+- **`../homemaker-blender/`** (sibling repo, optional) — developer tooling: MCP server + Blender workspace for driving a running Blender instance from agents like Claude Code. Not required for the web app.
+- **Blender** (optional, dev-only) — runs Bonsai + Homemaker addons when you want to use the MCP bridge.
 
 ## Commands
 
@@ -26,18 +26,15 @@ Four parts work together:
 | Start prod | `npm run start` | |
 | Lint | `npm run lint` | ESLint 9 flat config (`eslint.config.mjs`) |
 | Typecheck | `npx tsc --noEmit` | No npm script exists — run manually |
-| MCP server | `uv run mcp_server.py` | Bridges agents to Blender |
+| MCP server (dev only) | `uv run ../homemaker-blender/mcp_server.py` | Bridges agents to a running Blender; lives in the sibling repo |
 
 **No test runner or test files exist.** Don't look for jest/vitest/playwright.
 
-## Blender dependency (critical)
+## Blender is NOT a runtime dependency of the web app
 
-The app's API routes (`/api/generate`, `/api/export`) talk to Blender via a raw TCP socket at `127.0.0.1:9876`. Blender **must** be running with:
-1. Bonsai (BlenderBIM) addon enabled
-2. Homemaker addon enabled (registers `bpy.ops.object.homemaker`)
-3. BlenderMCP socket server running on port 9876
+The deployed web app (Vercel + the local `npm run dev` flow) generates IFC and glTF purely in Python via Molior + `ifcopenshell` + `topologic_core`. The pipeline entry is `python/generate.py:build_and_export_glb()`.
 
-If the `/api/generate` endpoint returns connection errors, Blender isn't running or the socket server isn't active.
+Blender is **optional dev tooling**, only used if you want to drive a running Blender instance from an MCP-connected agent. That flow lives in the sibling [`homemaker-blender`](../homemaker-blender/) repo (private). When using it, Blender must run with Bonsai + the Homemaker addon enabled and the BlenderMCP socket server listening on `127.0.0.1:9876`.
 
 The startup sequence matters: Bonsai first, then Homemaker. The autostart script handles this: `~/Library/Application Support/Blender/4.3/scripts/startup/homemaker_autostart.py`
 
@@ -73,8 +70,11 @@ src/
       index.ts        — Re-exports
   types/
     mapbox-gl-draw.d.ts — Type declarations
-blender/
-  homemaker_workspace.py — Stripped-down Blender UI workspace file
+python/
+  generate.py             — IFC + glTF pipeline (entry: build_and_export_glb)
+  build.py                — Vercel Function entrypoint (POST → glb, GET → "ok")
+  server.py               — Local-dev stdio child server
+  vendor/homemaker-addon/ — Submodule (Bruno Postle's addon)
 ```
 
 ## Demo app (`/demo`)
@@ -112,9 +112,9 @@ Room types: `bedroom`, `circulation`, `circulation_stair`, `stair`, `kitchen`, `
 
 ## MCP integration
 
-- `.mcp.json` registers `mcp_server.py` as a Homemaker MCP tool for Claude Code agents.
+- `.mcp.json` (gitignored, per-developer) registers `mcp_server.py` from the sibling `../homemaker-blender/` repo as a Homemaker MCP tool. Copy `.mcp.json.example` to `.mcp.json` to enable.
 - `.claude/settings.local.json` pre-approves a subset of MCP tools (`execute_python`, `clear_scene`, `create_building_mesh`, `render_view`, `select_objects`, `homemaker`).
-- To use manually: `claude mcp add homemaker -- uv run /path/to/mcp_server.py`
+- To use manually: `claude mcp add homemaker -- uv run ../homemaker-blender/mcp_server.py`
 
 ## The app is dark-only
 
