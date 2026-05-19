@@ -1,14 +1,12 @@
 "use client";
 
 import { Suspense, useMemo, useState } from "react";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useFrame } from "@react-three/fiber";
 import {
   OrbitControls,
   Environment,
   ContactShadows,
   Grid,
-  GizmoHelper,
-  GizmoViewport,
 } from "@react-three/drei";
 import * as THREE from "three";
 import GLTFBuildingScene, { type BuildStatus } from "./GLTFBuildingScene";
@@ -74,14 +72,30 @@ function useGroundGeometry() {
   }, []);
 }
 
+/** Tracks the camera's azimuth (angle around the world Y axis from world
+ * +Z) every frame and forwards it to a parent listener. Used by the HTML
+ * <Compass /> overlay to rotate the N/S/E/W rose so "N" always glues to
+ * world +Z on screen. */
+function CompassTracker({ onAzimuth }: { onAzimuth: (deg: number) => void }) {
+  useFrame(({ camera }) => {
+    // atan2(x, z) → angle of camera position in XZ plane, measured from +Z
+    // toward +X (CCW positive when looking down from +Y). Returns degrees.
+    const deg = (Math.atan2(camera.position.x, camera.position.z) * 180) / Math.PI;
+    onAzimuth(deg);
+  });
+  return null;
+}
+
 function Scene({
   params,
   view,
   onStatusChange,
+  onAzimuthChange,
 }: {
   params: BuildingParams;
   view: ViewSettings;
   onStatusChange: (s: BuildStatus) => void;
+  onAzimuthChange: (deg: number) => void;
 }) {
   const groundGeo = useGroundGeometry();
   const sunPos = useMemo(
@@ -179,21 +193,10 @@ function Scene({
         resolution={1024}
       />
 
-      {/* Camera controls — touch-friendly for iPad */}
-      {/* Viewport orientation gizmo — 3ds-Max-style. Anchored to the
-       * top-right corner of the canvas, rotates with the camera so the
-       * user can always see which world direction is which. Click the
-       * +Z (north) face to snap the camera to a north-facing view. */}
-      <GizmoHelper
-        alignment="top-right"
-        margin={[64, 64]}
-      >
-        <GizmoViewport
-          axisColors={["#c84a32", "#7aa845", "#3a7fd1"]}
-          labels={["E", "Up", "N"]}
-          labelColor="#fff"
-        />
-      </GizmoHelper>
+      {/* Camera-azimuth tracker — lifts the camera's XZ angle out to the
+       * HTML compass overlay below the Canvas. No 3D up/down indicator is
+       * shown; the compass is purely N/S/E/W. */}
+      <CompassTracker onAzimuth={onAzimuthChange} />
 
       <OrbitControls
         makeDefault
@@ -229,11 +232,40 @@ function LoadingFallback() {
   );
 }
 
+/** HTML compass overlay: 2D rose in the top-right corner showing world
+ * N/S/E/W. N is rendered in red (compass-needle convention). The whole
+ * rose rotates by -azimuth so each label sticks to its world direction
+ * regardless of where the camera is. */
+function Compass({ azimuth }: { azimuth: number }) {
+  return (
+    <div className="pointer-events-none absolute top-3 right-3 h-16 w-16">
+      <div
+        className="relative h-full w-full rounded-full bg-black/45 backdrop-blur-md ring-1 ring-white/15"
+        style={{ transform: `rotate(${-azimuth}deg)` }}
+      >
+        <span className="absolute left-1/2 top-1 -translate-x-1/2 font-serif text-[13px] font-bold leading-none text-red-400">
+          N
+        </span>
+        <span className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[10px] leading-none text-white/55">
+          S
+        </span>
+        <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[10px] leading-none text-white/55">
+          E
+        </span>
+        <span className="absolute left-1 top-1/2 -translate-y-1/2 text-[10px] leading-none text-white/55">
+          W
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export default function BuildingViewer({
   params,
   view = DEFAULT_VIEW,
 }: BuildingViewerProps) {
   const [status, setStatus] = useState<BuildStatus>({ kind: "idle" });
+  const [azimuth, setAzimuth] = useState(0);
 
   const footprintKey = useMemo(
     () => JSON.stringify(params.footprint),
@@ -277,9 +309,16 @@ export default function BuildingViewer({
         dpr={[1, 2]}
       >
         <Suspense fallback={<LoadingFallback />}>
-          <Scene params={params} view={view} onStatusChange={setStatus} />
+          <Scene
+            params={params}
+            view={view}
+            onStatusChange={setStatus}
+            onAzimuthChange={setAzimuth}
+          />
         </Suspense>
       </Canvas>
+
+      <Compass azimuth={azimuth} />
 
       {/* Centered loading spinner overlay */}
       {status.kind === "loading" && (

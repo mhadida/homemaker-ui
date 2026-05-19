@@ -242,11 +242,15 @@ export default function Home() {
         setCommitted((prev) => specToParams(spec, prev));
         setAiStatus("AI applied");
       } catch (e) {
-        setAiStatus(
-          e instanceof Error
-            ? `AI unavailable: ${e.message.slice(0, 60)} (local parse applied)`
-            : "AI unavailable (local parse applied)",
-        );
+        // Strip ANSI escape sequences (Vercel AI Gateway emits them) and
+        // surface a friendlier message for the common "unauthenticated"
+        // case — the user needs to set AI_GATEWAY_API_KEY on Vercel.
+        const raw = e instanceof Error ? e.message : String(e);
+        const clean = raw.replace(/\[[0-9;]*m/g, "").trim();
+        const friendly = /Unauthenticated/i.test(clean)
+          ? "AI unavailable: set AI_GATEWAY_API_KEY in Vercel env (local parse applied)"
+          : `AI unavailable: ${clean.slice(0, 80)} (local parse applied)`;
+        setAiStatus(friendly);
       } finally {
         setIsAILoading(false);
       }
@@ -296,7 +300,16 @@ export default function Home() {
           {/* Viewer renders `committed` — what the server has actually built. */}
           <BuildingViewer params={committed} view={view} />
 
-          <PromptInput onApply={handlePrompt} isLoading={isAILoading} />
+          {/* Floating prompt: desktop only. On mobile it sits inline at the
+           * top of the controls panel below, so it doesn't cover the
+           * sticky Update button. */}
+          <div className="hidden md:block">
+            <PromptInput
+              onApply={handlePrompt}
+              isLoading={isAILoading}
+              variant="floating"
+            />
+          </div>
 
           {aiStatus && (
             <div className="pointer-events-none absolute bottom-24 left-1/2 -translate-x-1/2 rounded-full bg-black/55 backdrop-blur-md px-3 py-1 text-[10px] text-white/75">
@@ -307,6 +320,19 @@ export default function Home() {
 
         <div className="w-full md:w-80 border-t md:border-t-0 md:border-l border-[var(--border)] bg-[var(--panel-bg)] overflow-y-auto relative">
           <div className="p-4 space-y-5 pb-4">
+            {/* Inline prompt: mobile only — appears above the sliders. */}
+            <div className="md:hidden">
+              <PromptInput
+                onApply={handlePrompt}
+                isLoading={isAILoading}
+                variant="inline"
+              />
+              {aiStatus && (
+                <div className="mt-1 text-[10px] text-[var(--muted)]">
+                  {aiStatus}
+                </div>
+              )}
+            </div>
             <SliderControls
               params={draft}
               onChange={handleParamsChange}
