@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import math
-import multiprocessing
+import os
 import struct
 import sys
 import tempfile
@@ -774,28 +774,40 @@ def ifc_to_glb(
     settings = ifcopenshell.geom.settings()
     settings.set("use-world-coords", True)
 
+    # Thread count for the parallel triangulators. On Vercel Fluid Compute,
+    # multiprocessing.cpu_count() returns the underlying *host* core count
+    # (16-32 on AWS), but a 4 GB function only gets ~2 vCPU of actual compute.
+    # Oversubscribing threads creates scheduling overhead with zero speed-up.
+    # 4 is a sweet spot for both the 8-core dev MBP and the 4 GB Vercel tier.
+    GEOM_THREADS = int(os.environ.get("HOMEMAKER_GEOM_THREADS", "4"))
+
     # Precompute each wall's thin axis (the wall-normal direction in world
     # coords), centerline coordinate, thickness, and per-axis ext_sign
     # (+1 if exterior face is on the +axis side of the building centroid,
     # -1 otherwise). We use this to scale IfcWindow/IfcDoor meshes inside
     # the wall plane and to position the glass quad behind the mullions.
+    #
+    # We triangulate walls via the parallel ifcopenshell.geom.iterator with
+    # include=("IfcWall",) — much faster than sequential create_shape calls.
     wall_data: dict = {}  # wall.GlobalId -> (thin_axis, center, thickness, ext_sign)
     _wall_raw: list = []  # (guid, thin, center, thickness)
-    for wall in ifc_file.by_type("IfcWall"):
-        try:
-            sh = ifcopenshell.geom.create_shape(settings, wall)
-            wv = np.asarray(sh.geometry.verts, dtype=np.float32).reshape(-1, 3)
-        except Exception:
-            continue
-        if wv.size == 0:
-            continue
-        bb_lo = wv.min(axis=0)
-        bb_hi = wv.max(axis=0)
-        e = bb_hi - bb_lo
-        thin = int(np.argmin(e))
-        center = float((bb_lo[thin] + bb_hi[thin]) / 2.0)
-        thickness = float(bb_hi[thin] - bb_lo[thin])
-        _wall_raw.append((wall.GlobalId, thin, center, thickness))
+    _wall_it = ifcopenshell.geom.iterator(
+        settings, ifc_file, GEOM_THREADS, include=("IfcWall",),
+    )
+    if _wall_it.initialize():
+        while True:
+            _ws = _wall_it.get()
+            wv = np.asarray(_ws.geometry.verts, dtype=np.float32).reshape(-1, 3)
+            if wv.size > 0:
+                bb_lo = wv.min(axis=0)
+                bb_hi = wv.max(axis=0)
+                e = bb_hi - bb_lo
+                thin = int(np.argmin(e))
+                center = float((bb_lo[thin] + bb_hi[thin]) / 2.0)
+                thickness = float(bb_hi[thin] - bb_lo[thin])
+                _wall_raw.append((_ws.guid, thin, center, thickness))
+            if not _wall_it.next():
+                break
 
     axis_means: dict = {}
     for _, t, c, _t in _wall_raw:
@@ -829,7 +841,7 @@ def ifc_to_glb(
     it = ifcopenshell.geom.iterator(
         settings,
         ifc_file,
-        multiprocessing.cpu_count(),
+        GEOM_THREADS,
         exclude=(
             "IfcOpeningElement",
             "IfcStructuralSurfaceMember",
@@ -1057,13 +1069,24 @@ def ifc_to_glb(
     # interior side, well past the back of the mullion mesh.
     glass_verts: list = []
     glass_faces: list = []
+    # Triangulate all openings in parallel up front, then walk them
+    # serially with their bboxes already cached. Faster than 36 sequential
+    # create_shape() calls in a Python loop.
+    opening_bboxes: dict = {}  # opening.GlobalId -> (bb_lo, bb_hi)
+    _op_it = ifcopenshell.geom.iterator(
+        settings, ifc_file, GEOM_THREADS, include=("IfcOpeningElement",),
+    )
+    if _op_it.initialize():
+        while True:
+            _os = _op_it.get()
+            v_o = np.asarray(_os.geometry.verts, dtype=np.float32).reshape(-1, 3)
+            if v_o.size > 0:
+                opening_bboxes[_os.guid] = (v_o.min(axis=0), v_o.max(axis=0))
+            if not _op_it.next():
+                break
+
     for opening in ifc_file.by_type("IfcOpeningElement"):
-        try:
-            sh_o = ifcopenshell.geom.create_shape(settings, opening)
-            v_o = np.asarray(sh_o.geometry.verts, dtype=np.float32).reshape(-1, 3)
-        except Exception:
-            continue
-        if v_o.size == 0:
+        if opening.GlobalId not in opening_bboxes:
             continue
         parent_wall_guid = None
         is_window = False
@@ -1085,8 +1108,7 @@ def ifc_to_glb(
         glass_y = wall_center + (-ext_sign) * (wall_thickness * 0.40)
         a1 = (thin_axis + 1) % 3
         a2 = (thin_axis + 2) % 3
-        bb_lo = v_o.min(axis=0)
-        bb_hi = v_o.max(axis=0)
+        bb_lo, bb_hi = opening_bboxes[opening.GlobalId]
         INSET = 0.04
         lo_a1, hi_a1 = float(bb_lo[a1]) + INSET, float(bb_hi[a1]) - INSET
         lo_a2, hi_a2 = float(bb_lo[a2]) + INSET, float(bb_hi[a2]) - INSET
