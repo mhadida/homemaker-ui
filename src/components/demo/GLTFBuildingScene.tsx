@@ -46,6 +46,7 @@ const STRUCTURAL_KEYS = [
   "roof",
   "ridgeHeight",
   "rooms",
+  "enabledFacades",
 ] as const;
 
 function structuralKey(p: BuildingParams): string {
