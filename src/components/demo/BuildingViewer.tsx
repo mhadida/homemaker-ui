@@ -207,8 +207,12 @@ function Scene({
 
       <GLTFBuildingScene params={params} onStatusChange={onStatusChange} />
 
+      {/* Ground and grids are all coplanar at y=0. We avoid z-fighting by
+       * giving the ground material `polygonOffset` (positive factor/units
+       * pushes its depth values back), so the grid lines always win the
+       * depth test regardless of camera angle — no Y stacking needed. */}
       <mesh
-        position={[0, -0.02, 0]}
+        position={[0, 0, 0]}
         rotation={[-Math.PI / 2, 0, 0]}
         receiveShadow
         geometry={groundGeo}
@@ -218,11 +222,14 @@ function Scene({
           transparent
           roughness={0.95}
           metalness={0}
+          polygonOffset
+          polygonOffsetFactor={1}
+          polygonOffsetUnits={1}
         />
       </mesh>
 
       <Grid
-        position={[0, -0.006, 0]}
+        position={[0, 0, 0]}
         args={[60, 60]}
         cellSize={0.25}
         cellThickness={0.35}
@@ -235,7 +242,7 @@ function Scene({
         infiniteGrid
       />
       <Grid
-        position={[0, -0.004, 0]}
+        position={[0, 0, 0]}
         args={[60, 60]}
         cellSize={1}
         cellThickness={0.7}
