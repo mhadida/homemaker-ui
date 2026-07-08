@@ -50,6 +50,14 @@ describe("parseFacadePromptLocal", () => {
   it("returns empty updates for unrelated text", () => {
     expect(parseFacadePromptLocal("hello there")).toEqual({});
   });
+
+  it("preset + explicit storeys recomputes storeyHeights on merge", () => {
+    const u = parseFacadePromptLocal("5 storey georgian house");
+    expect(u.preset).toBe("georgian");
+    expect(u.storeys).toBe(5);
+    const merged = mergeFacadeParams(DEFAULT_FACADE, u);
+    expect(merged.storeyHeights).toHaveLength(5);
+  });
 });
 
 describe("mergeFacadeParams", () => {

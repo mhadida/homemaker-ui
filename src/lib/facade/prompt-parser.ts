@@ -48,6 +48,14 @@ export function parseFacadePromptLocal(prompt: string): FacadePromptUpdates {
       FACADE_LIMITS.storeys.min,
       FACADE_LIMITS.storeys.max,
     );
+    // A preset may have set storeyHeights for its own storey count — if the
+    // explicit storey count differs, drop them so mergeFacadeParams recomputes.
+    if (
+      updates.storeyHeights !== undefined &&
+      updates.storeyHeights.length !== updates.storeys
+    ) {
+      delete updates.storeyHeights;
+    }
   }
 
   const bayMatch = lower.match(/(\d+)\s*bays?/);
