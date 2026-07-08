@@ -102,9 +102,22 @@ function CaptureBridge({ bind }: { bind: (fn: () => void) => void }) {
   useEffect(() => {
     bind(() => {
       gl.render(scene, camera);
-      const url = gl.domElement.toDataURL("image/png");
+      const src = gl.domElement;
+      // The sky is a CSS gradient behind the (alpha) canvas — composite it in,
+      // or the exported PNG gets a transparent sky.
+      const out = document.createElement("canvas");
+      out.width = src.width;
+      out.height = src.height;
+      const ctx = out.getContext("2d")!;
+      const grad = ctx.createLinearGradient(0, 0, 0, out.height);
+      grad.addColorStop(0, "#8ea4b8");
+      grad.addColorStop(0.55, "#a8b0b3");
+      grad.addColorStop(1, "#b8ad9c");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, out.width, out.height);
+      ctx.drawImage(src, 0, 0);
       const a = document.createElement("a");
-      a.href = url;
+      a.href = out.toDataURL("image/png");
       a.download = "facade.png";
       a.click();
     });

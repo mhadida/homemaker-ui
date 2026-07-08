@@ -9,6 +9,7 @@ import {
   DEFAULT_LOT_CONTEXT,
   FACADE_DEFAULT_VIEW,
   DOOR_SWATCHES,
+  FACADE_PRESETS,
 } from "@/lib/facade/types";
 import { computeLayout } from "@/lib/facade/layout";
 import {
@@ -40,6 +41,7 @@ interface FacadeSpec {
   wallColor?: string;
   trimColor?: string;
   doorColor?: string;
+  preset?: "none" | "georgian" | "victorian-shopfront" | "modern";
 }
 
 const WINDOW_SIZE_RATIOS = {
@@ -53,6 +55,16 @@ const DOOR_HEX = Object.fromEntries(DOOR_SWATCHES.map((s) => [s.id, s.hex]));
 
 function specToFacadeParams(spec: FacadeSpec, prev: FacadeParams): FacadeParams {
   let next = { ...prev };
+  if (spec.preset && spec.preset !== "none" && spec.preset !== prev.preset) {
+    // A newly-named preset applies its bundle first; the remaining spec
+    // fields then refine on top (mirrors the local parser's order).
+    next = {
+      ...DEFAULT_FACADE,
+      ...FACADE_PRESETS[spec.preset].params,
+      cellOverrides: [],
+      preset: spec.preset,
+    };
+  }
   if (spec.storeys) next = mergeFacadeParams(next, { storeys: spec.storeys });
   if (spec.width) next.width = spec.width;
   if (spec.bays) next.bays = spec.bays;
@@ -72,7 +84,10 @@ function specToFacadeParams(spec: FacadeSpec, prev: FacadeParams): FacadeParams 
     sills: spec.sills ?? next.ornament.sills,
     surrounds: spec.surrounds ?? next.ornament.surrounds,
   };
-  if (spec.windowSize) Object.assign(next, WINDOW_SIZE_RATIOS[spec.windowSize]);
+  // Only apply when the AI actually changed the bucket — an echo of the
+  // current bucket must not snap fine-tuned slider ratios to bucket values.
+  if (spec.windowSize && spec.windowSize !== nearestWindowSize(prev))
+    Object.assign(next, WINDOW_SIZE_RATIOS[spec.windowSize]);
   if (spec.wallColor && WALL_HEX[spec.wallColor])
     next.wallColor = WALL_HEX[spec.wallColor];
   if (spec.trimColor && WALL_HEX[spec.trimColor])
@@ -126,6 +141,7 @@ function paramsToFacadeSpec(p: FacadeParams): FacadeSpec {
     wallColor: wallId,
     trimColor: trimId,
     doorColor: doorId,
+    preset: p.preset ?? "none",
   };
 }
 
@@ -149,8 +165,11 @@ export default function FacadePage() {
 
   const handlePrompt = useCallback(
     async (prompt: string) => {
-      // Instant local parse, then the AI refines.
-      setParams((prev) => mergeFacadeParams(prev, parseFacadePromptLocal(prompt)));
+      // Instant local parse, then the AI refines on top of that same state
+      // (not the pre-parse closure value — otherwise the AI's echoed
+      // "current" reverts the just-applied local parse when it responds).
+      const next = mergeFacadeParams(params, parseFacadePromptLocal(prompt));
+      setParams(next);
 
       setIsAILoading(true);
       setAiStatus(null);
@@ -158,7 +177,7 @@ export default function FacadePage() {
         const res = await fetch("/api/facade-prompt", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt, current: paramsToFacadeSpec(params) }),
+          body: JSON.stringify({ prompt, current: paramsToFacadeSpec(next) }),
         });
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));

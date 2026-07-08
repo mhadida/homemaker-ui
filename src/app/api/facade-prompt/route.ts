@@ -42,6 +42,8 @@ const FacadeSpec = z.object({
   wallColor: z.enum(WALL_COLOR_IDS),
   trimColor: z.enum(WALL_COLOR_IDS),
   doorColor: z.enum(DOOR_COLOR_IDS),
+  // "none" = no preset active; echo current when the user doesn't name a style
+  preset: z.enum(["none", "georgian", "victorian-shopfront", "modern"]),
 });
 export type FacadeSpec = z.infer<typeof FacadeSpec>;
 
@@ -94,11 +96,13 @@ function SYSTEM_PROMPT(current: Partial<FacadeSpec> | undefined): string {
     `- ornament: cornice ${have.cornice ?? true}, parapet ${have.parapet ?? false}, sills ${have.sills ?? true}, surrounds ${have.surrounds ?? false}`,
     `- windowSize: ${have.windowSize ?? "medium"}`,
     `- colors: wall ${have.wallColor ?? "earthy"}, trim ${have.trimColor ?? "white"}, door ${have.doorColor ?? "racing-green"}`,
+    `- preset: ${have.preset ?? "none"}`,
     "",
     "Meanings:",
     '- treatment "residential": windows + front door. "shopfront": retail glazing across the ground floor. "garage": vehicle door instead of an entrance.',
     "- stoop: entry steps in front of the door (residential only).",
     "- windowSize small/medium/large controls window proportions within each bay.",
     "- doorBay is 1-based from the left and must not exceed bays.",
+    "- preset: georgian (classical terrace), victorian-shopfront (retail ground floor), modern (minimal). Set it when the user names a style; otherwise echo the current value.",
   ].join("\n");
 }
