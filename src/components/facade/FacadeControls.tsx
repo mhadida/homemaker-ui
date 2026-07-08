@@ -1,0 +1,389 @@
+"use client";
+
+import type {
+  FacadeParams,
+  LotContext,
+  PresetId,
+  GroundTreatment,
+} from "@/lib/facade/types";
+import {
+  DEFAULT_FACADE,
+  FACADE_PRESETS,
+  FACADE_LIMITS,
+  DOOR_SWATCHES,
+} from "@/lib/facade/types";
+import type { ViewSettings } from "@/lib/building/types";
+import { WALL_SWATCHES, classicalStoreyHeights } from "@/lib/building/types";
+import BayGrid from "./BayGrid";
+
+interface FacadeControlsProps {
+  params: FacadeParams;
+  onChange: (p: FacadeParams) => void;
+  context: LotContext;
+  onContextChange: (c: LotContext) => void;
+  view: ViewSettings;
+  onViewChange: (v: ViewSettings) => void;
+}
+
+function SliderRow({
+  label,
+  value,
+  display,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  display: string;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-0.5">
+        <span className="text-[10px] text-[var(--muted)]">{label}</span>
+        <span className="text-[11px] font-mono text-[var(--foreground)]">
+          {display}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        className="w-full h-1 rounded-full appearance-none bg-[var(--border)] cursor-pointer accent-[var(--accent)]"
+      />
+    </div>
+  );
+}
+
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <details open className="group">
+      <summary className="cursor-pointer list-none flex items-center justify-between mb-1.5">
+        <span className="text-[10px] uppercase tracking-wider text-[var(--muted)] font-medium">
+          {title}
+        </span>
+        <span className="text-[var(--muted)] text-[10px] group-open:rotate-90 transition-transform">
+          ▸
+        </span>
+      </summary>
+      <div className="space-y-2">{children}</div>
+    </details>
+  );
+}
+
+function Toggle({
+  label,
+  on,
+  onClick,
+}: {
+  label: string;
+  on: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`px-2 py-1.5 rounded text-[11px] transition-colors ${
+        on
+          ? "bg-[var(--accent)] text-white"
+          : "bg-[var(--border)] text-zinc-500 hover:text-zinc-300"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function Swatches({
+  label,
+  swatches,
+  value,
+  onPick,
+}: {
+  label: string;
+  swatches: { id: string; label: string; hex: string }[];
+  value: string;
+  onPick: (hex: string) => void;
+}) {
+  return (
+    <div>
+      <span className="text-[10px] text-[var(--muted)] block mb-1">{label}</span>
+      <div className="flex flex-wrap gap-1.5">
+        {swatches.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            title={s.label}
+            onClick={() => onPick(s.hex)}
+            className={`w-6 h-6 rounded-full border-2 transition-transform hover:scale-110 ${
+              value.toLowerCase() === s.hex.toLowerCase()
+                ? "border-[var(--accent)]"
+                : "border-transparent"
+            }`}
+            style={{ backgroundColor: s.hex }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const TREATMENTS: { id: GroundTreatment; label: string }[] = [
+  { id: "residential", label: "Residential" },
+  { id: "shopfront", label: "Shopfront" },
+  { id: "garage", label: "Garage" },
+];
+
+export default function FacadeControls({
+  params,
+  onChange,
+  context,
+  onContextChange,
+  view,
+  onViewChange,
+}: FacadeControlsProps) {
+  const update = (u: Partial<FacadeParams>) => onChange({ ...params, ...u });
+  const L = FACADE_LIMITS;
+
+  const applyPreset = (id: PresetId) => {
+    onChange({
+      ...DEFAULT_FACADE,
+      ...FACADE_PRESETS[id].params,
+      cellOverrides: [],
+      preset: id,
+    });
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Presets */}
+      <div className="grid grid-cols-3 gap-1">
+        {(Object.keys(FACADE_PRESETS) as PresetId[]).map((id) => (
+          <Toggle
+            key={id}
+            label={FACADE_PRESETS[id].label}
+            on={params.preset === id}
+            onClick={() => applyPreset(id)}
+          />
+        ))}
+      </div>
+
+      <Section title="Proportions">
+        <SliderRow
+          label="Width"
+          value={params.width}
+          display={`${params.width.toFixed(1)}m`}
+          min={L.width.min}
+          max={L.width.max}
+          step={0.5}
+          onChange={(width) => update({ width, preset: undefined })}
+        />
+        <SliderRow
+          label="Storeys"
+          value={params.storeys}
+          display={`${params.storeys}`}
+          min={L.storeys.min}
+          max={L.storeys.max}
+          step={1}
+          onChange={(n) =>
+            update({
+              storeys: n,
+              storeyHeights: classicalStoreyHeights(n, params.storeyHeight),
+              preset: undefined,
+            })
+          }
+        />
+        <SliderRow
+          label="Storey height"
+          value={params.storeyHeight}
+          display={`${params.storeyHeight.toFixed(1)}m`}
+          min={L.storeyHeight.min}
+          max={L.storeyHeight.max}
+          step={0.1}
+          onChange={(h) =>
+            update({
+              storeyHeight: h,
+              storeyHeights: classicalStoreyHeights(params.storeys, h),
+              preset: undefined,
+            })
+          }
+        />
+      </Section>
+
+      <Section title="Bays & Openings">
+        <SliderRow
+          label="Bays"
+          value={params.bays}
+          display={`${params.bays}`}
+          min={L.bays.min}
+          max={L.bays.max}
+          step={1}
+          onChange={(bays) => update({ bays, preset: undefined })}
+        />
+        <SliderRow
+          label="Window width"
+          value={params.windowWidthRatio}
+          display={`${Math.round(params.windowWidthRatio * 100)}%`}
+          min={L.windowWidthRatio.min}
+          max={L.windowWidthRatio.max}
+          step={0.05}
+          onChange={(r) => update({ windowWidthRatio: r, preset: undefined })}
+        />
+        <SliderRow
+          label="Window height"
+          value={params.windowHeightRatio}
+          display={`${Math.round(params.windowHeightRatio * 100)}%`}
+          min={L.windowHeightRatio.min}
+          max={L.windowHeightRatio.max}
+          step={0.05}
+          onChange={(r) => update({ windowHeightRatio: r, preset: undefined })}
+        />
+        <BayGrid params={params} onChange={onChange} />
+      </Section>
+
+      <Section title="Ground Floor">
+        <div className="grid grid-cols-3 gap-1">
+          {TREATMENTS.map((t) => (
+            <Toggle
+              key={t.id}
+              label={t.label}
+              on={params.groundFloor.treatment === t.id}
+              onClick={() =>
+                update({
+                  groundFloor: { ...params.groundFloor, treatment: t.id },
+                  preset: undefined,
+                })
+              }
+            />
+          ))}
+        </div>
+        <SliderRow
+          label="Door bay"
+          value={Math.min(params.groundFloor.doorBay, params.bays - 1)}
+          display={`${Math.min(params.groundFloor.doorBay, params.bays - 1) + 1}`}
+          min={0}
+          max={params.bays - 1}
+          step={1}
+          onChange={(b) =>
+            update({
+              groundFloor: { ...params.groundFloor, doorBay: b },
+              preset: undefined,
+            })
+          }
+        />
+        <Toggle
+          label={params.groundFloor.stoop ? "Stoop: on" : "Stoop: off"}
+          on={params.groundFloor.stoop}
+          onClick={() =>
+            update({
+              groundFloor: {
+                ...params.groundFloor,
+                stoop: !params.groundFloor.stoop,
+              },
+              preset: undefined,
+            })
+          }
+        />
+      </Section>
+
+      <Section title="Ornament & Materials">
+        <div className="grid grid-cols-2 gap-1">
+          {(["cornice", "parapet", "sills", "surrounds"] as const).map((k) => (
+            <Toggle
+              key={k}
+              label={k}
+              on={params.ornament[k]}
+              onClick={() =>
+                update({
+                  ornament: { ...params.ornament, [k]: !params.ornament[k] },
+                  preset: undefined,
+                })
+              }
+            />
+          ))}
+        </div>
+        <Swatches
+          label="Wall"
+          swatches={WALL_SWATCHES}
+          value={params.wallColor}
+          onPick={(hex) => update({ wallColor: hex })}
+        />
+        <Swatches
+          label="Trim"
+          swatches={WALL_SWATCHES}
+          value={params.trimColor}
+          onPick={(hex) => update({ trimColor: hex })}
+        />
+        <Swatches
+          label="Door"
+          swatches={DOOR_SWATCHES}
+          value={params.doorColor}
+          onPick={(hex) => update({ doorColor: hex })}
+        />
+      </Section>
+
+      <Section title="Context & Sun">
+        <Toggle
+          label={context.show ? "Neighbors: shown" : "Neighbors: hidden"}
+          on={context.show}
+          onClick={() => onContextChange({ ...context, show: !context.show })}
+        />
+        <SliderRow
+          label="Left neighbor"
+          value={context.leftNeighborHeight}
+          display={`${context.leftNeighborHeight.toFixed(0)}m`}
+          min={L.neighborHeight.min}
+          max={L.neighborHeight.max}
+          step={1}
+          onChange={(leftNeighborHeight) =>
+            onContextChange({ ...context, leftNeighborHeight })
+          }
+        />
+        <SliderRow
+          label="Right neighbor"
+          value={context.rightNeighborHeight}
+          display={`${context.rightNeighborHeight.toFixed(0)}m`}
+          min={L.neighborHeight.min}
+          max={L.neighborHeight.max}
+          step={1}
+          onChange={(rightNeighborHeight) =>
+            onContextChange({ ...context, rightNeighborHeight })
+          }
+        />
+        <SliderRow
+          label="Sun azimuth"
+          value={view.sunAzimuth}
+          display={`${Math.round(view.sunAzimuth)}°`}
+          min={0}
+          max={360}
+          step={1}
+          onChange={(sunAzimuth) => onViewChange({ ...view, sunAzimuth })}
+        />
+        <SliderRow
+          label="Sun altitude"
+          value={view.sunAltitude}
+          display={`${Math.round(view.sunAltitude)}°`}
+          min={5}
+          max={85}
+          step={1}
+          onChange={(sunAltitude) => onViewChange({ ...view, sunAltitude })}
+        />
+      </Section>
+    </div>
+  );
+}

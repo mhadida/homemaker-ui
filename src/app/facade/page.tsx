@@ -7,6 +7,7 @@ import type { FacadeParams, LotContext } from "@/lib/facade/types";
 import { DEFAULT_FACADE, DEFAULT_LOT_CONTEXT, FACADE_DEFAULT_VIEW } from "@/lib/facade/types";
 import { computeLayout } from "@/lib/facade/layout";
 import type { ViewSettings } from "@/lib/building/types";
+import FacadeControls from "@/components/facade/FacadeControls";
 
 const FacadeViewer = dynamic(() => import("@/components/facade/FacadeViewer"), {
   ssr: false,
@@ -15,13 +16,8 @@ const FacadeViewer = dynamic(() => import("@/components/facade/FacadeViewer"), {
 export default function FacadePage() {
   // Everything is live — no draft/committed split. Client-side geometry
   // rebuilds are trivially fast, so every slider tick renders immediately.
-  // setParams/setContext/setView are unused until Task 6 wires up the
-  // controls panel — remove these disables then.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [params, setParams] = useState<FacadeParams>(DEFAULT_FACADE);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [context, setContext] = useState<LotContext>(DEFAULT_LOT_CONTEXT);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [view, setView] = useState<ViewSettings>(FACADE_DEFAULT_VIEW);
 
   const layout = useMemo(() => computeLayout(params), [params]);
@@ -68,10 +64,14 @@ export default function FacadePage() {
 
         <div className="w-full md:w-80 border-t md:border-t-0 md:border-l border-[var(--border)] bg-[var(--panel-bg)] overflow-y-auto">
           <div className="p-4 space-y-5">
-            {/* Task 6 replaces this placeholder with FacadeControls */}
-            <div className="text-[11px] text-[var(--muted)]">
-              Controls coming in Task 6.
-            </div>
+            <FacadeControls
+              params={params}
+              onChange={setParams}
+              context={context}
+              onContextChange={setContext}
+              view={view}
+              onViewChange={setView}
+            />
           </div>
         </div>
       </div>
