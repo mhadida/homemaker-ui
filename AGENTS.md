@@ -27,8 +27,9 @@ Four parts work together:
 | Lint | `npm run lint` | ESLint 9 flat config (`eslint.config.mjs`) |
 | Typecheck | `npx tsc --noEmit` | No npm script exists — run manually |
 | MCP server (dev only) | `uv run ../homemaker-blender/mcp_server.py` | Bridges agents to a running Blender; lives in the sibling repo |
+| Tests | `npm test` | vitest — src/lib/facade unit tests |
 
-**No test runner or test files exist.** Don't look for jest/vitest/playwright.
+**Tests:** vitest covers the pure facade layout engine and prompt parser (`src/lib/facade/*.test.ts`) — run `npm test`. No e2e/playwright; everything else is verified visually.
 
 ## Blender is NOT a runtime dependency of the web app
 
@@ -45,12 +46,14 @@ src/
   app/
     page.tsx          — Main 3-panel layout (Map | Config | Render)
     demo/page.tsx     — Self-contained 3D demo (no Blender needed)
+    facade/page.tsx   — Facade designer: single street-facing facade for infill lots
     layout.tsx        — Root layout, dark-only theme
     globals.css       — Tailwind v4 imports + dark CSS vars
     api/
       generate/route.ts   — POST: builds mesh in Blender, runs Homemaker, returns renders
       export/route.ts     — POST: exports IFC from Blender
       prompt/route.ts     — POST: AI prompt parsing (Ollama + OpenAI)
+      facade-prompt/route.ts — POST: AI prompt parsing for the facade designer
   components/
     MapView.tsx       — MapLibre GL + Mapbox GL Draw for footprint drawing
     ConfigPanel.tsx   — Storeys, style picker, room types
@@ -60,14 +63,23 @@ src/
       BuildingMesh.tsx   — Procedural building geometry renderer
       PromptInput.tsx    — Natural language prompt + suggestion chips
       SliderControls.tsx — Storeys, height, width, depth, shape, style, roof, rooms
+    facade/
+      FacadeViewer.tsx   — R3F canvas, front-hemisphere orbit, save-image
+      FacadeMesh.tsx     — FacadeLayout → meshes (wall, openings, ornament)
+      FacadeControls.tsx — presets + sliders + toggles panel
+      BayGrid.tsx        — tappable per-cell opening editor
   lib/
     blender.ts        — TCP socket client to Blender (port 9876)
     building/
       types.ts        — BuildingParams, StyleId, RoofType, defaults
-      styles.ts       — StyleConfig per style (colors, materials, window/door flags)
-      geometry.ts     — Procedural building generator (walls, windows, doors, roof, slabs)
+      styles.ts        — StyleConfig per style (colors, materials, window/door flags)
+      geometry.ts      — Procedural building generator (walls, windows, doors, roof, slabs)
       prompt-parser.ts — Local keyword parser + AI prompt builder
-      index.ts        — Re-exports
+      index.ts         — Re-exports
+    facade/
+      types.ts         — FacadeParams, presets, defaults, LotContext
+      layout.ts        — pure layout engine (params → rectangles, all clamps)
+      prompt-parser.ts — local keyword parser + deep merge
   types/
     mapbox-gl-draw.d.ts — Type declarations
 python/
@@ -86,6 +98,21 @@ A self-contained 3D building viewer that works without Blender. Uses React Three
 - **Style system**: 9 styles with distinct materials (colors, roughness, metalness, window/door flags)
 - **AI prompt**: Local keyword parser works instantly; optional Ollama/OpenAI for richer parsing via `/api/prompt`
 - **No Blender dependency**: The demo generates buildings entirely in the browser
+
+## Facade designer (`/facade`)
+
+A single-wall parametric facade designer for infill urban lots (one street-facing
+facade, party walls both sides). Pure client-side Three.js — the Python pipeline is
+NOT involved; every edit is live (no Update button). Spec:
+`docs/superpowers/specs/2026-07-06-facade-designer-design.md`.
+
+- **Layout engine**: `src/lib/facade/layout.ts` is a pure function
+  (FacadeParams → rectangles) holding ALL validity clamps; the mesh renders
+  whatever it returns. Corner conditions (two facades) plug in at this seam later.
+- **Grid model**: (storeys × bays) cells, treatment-derived defaults + sparse
+  `cellOverrides` patches.
+- **AI prompt**: `/api/facade-prompt` (flat fully-required zod spec — OpenAI
+  structured output rejects optionals), plus an instant local keyword parser.
 
 ## Tailwind v4
 
