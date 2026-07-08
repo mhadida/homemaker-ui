@@ -9,6 +9,10 @@ interface PromptInputProps {
    * the controls panel — used at the top of the mobile menu so the Update
    * button at the bottom isn't covered by a fixed bottom-pill. */
   variant?: "floating" | "inline";
+  /** Override the input placeholder (defaults to the building copy). */
+  placeholder?: string;
+  /** Override the suggestion chips (defaults to the building suggestions). */
+  suggestions?: string[];
 }
 
 const SUGGESTIONS = [
@@ -22,6 +26,8 @@ export default function PromptInput({
   onApply,
   isLoading,
   variant = "floating",
+  placeholder,
+  suggestions = SUGGESTIONS,
 }: PromptInputProps) {
   const [prompt, setPrompt] = useState("");
   const [focused, setFocused] = useState(false);
@@ -69,7 +75,7 @@ export default function PromptInput({
               : "pointer-events-auto mb-2 flex flex-wrap justify-center gap-1.5 px-2"
           }
         >
-          {SUGGESTIONS.map((s) => (
+          {suggestions.map((s) => (
             <button
               key={s}
               type="button"
@@ -93,9 +99,10 @@ export default function PromptInput({
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           placeholder={
-            isInline
+            placeholder ??
+            (isInline
               ? "Describe your building…"
-              : "Describe your building — e.g. 3-storey fancy with slate roof"
+              : "Describe your building — e.g. 3-storey fancy with slate roof")
           }
           disabled={isLoading}
           className={inputClass}
