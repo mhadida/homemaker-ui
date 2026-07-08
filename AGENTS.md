@@ -44,25 +44,21 @@ The startup sequence matters: Bonsai first, then Homemaker. The autostart script
 ```
 src/
   app/
-    page.tsx          — Main 3-panel layout (Map | Config | Render)
-    demo/page.tsx     — Self-contained 3D demo (no Blender needed)
+    page.tsx          — Main parametric editor (viewer + controls, manual-update mode)
     facade/page.tsx   — Facade designer: single street-facing facade for infill lots
     layout.tsx        — Root layout, dark-only theme
     globals.css       — Tailwind v4 imports + dark CSS vars
     api/
-      generate/route.ts   — POST: builds mesh in Blender, runs Homemaker, returns renders
-      export/route.ts     — POST: exports IFC from Blender
-      prompt/route.ts     — POST: AI prompt parsing (Ollama + OpenAI)
-      facade-prompt/route.ts — POST: AI prompt parsing for the facade designer
+      generate-building/route.ts — POST: runs the Python pipeline via python-server, returns glb
+      debug-walls/route.ts       — GET: serves debug glbs (walls/windows/roofs) from /tmp
+      prompt/route.ts            — POST: AI prompt parsing (Vercel AI Gateway)
+      facade-prompt/route.ts     — POST: AI prompt parsing for the facade designer
   components/
-    MapView.tsx       — MapLibre GL + Mapbox GL Draw for footprint drawing
-    ConfigPanel.tsx   — Storeys, style picker, room types
-    RenderView.tsx    — Shows rendered building images
     demo/
-      BuildingViewer.tsx — R3F canvas with orbit controls, lighting, grid
-      BuildingMesh.tsx   — Procedural building geometry renderer
-      PromptInput.tsx    — Natural language prompt + suggestion chips
-      SliderControls.tsx — Storeys, height, width, depth, shape, style, roof, rooms
+      BuildingViewer.tsx   — R3F canvas with orbit controls, lighting, grid, compass
+      GLTFBuildingScene.tsx — Fetches/caches glbs from /build, applies cosmetic colors
+      PromptInput.tsx      — Natural language prompt + suggestion chips
+      SliderControls.tsx   — Storeys, heights, footprint shape, style, roof, facades
     facade/
       FacadeViewer.tsx   — R3F canvas, front-hemisphere orbit, save-image
       FacadeMesh.tsx     — FacadeLayout → meshes (wall, openings, ornament)
@@ -70,10 +66,10 @@ src/
       BayGrid.tsx        — tappable per-cell opening editor
   lib/
     blender.ts        — TCP socket client to Blender (port 9876)
+    python-server.ts  — Long-running Python child process serving pipeline requests (local dev)
     building/
-      types.ts        — BuildingParams, StyleId, RoofType, defaults
-      styles.ts        — StyleConfig per style (colors, materials, window/door flags)
-      geometry.ts      — Procedural building generator (walls, windows, doors, roof, slabs)
+      types.ts         — BuildingParams, StyleId, RoofType, defaults
+      footprints.ts    — Rectangle/L/U/H/courtyard footprint generators
       prompt-parser.ts — Local keyword parser + AI prompt builder
       index.ts         — Re-exports
     facade/
@@ -81,23 +77,13 @@ src/
       layout.ts        — pure layout engine (params → rectangles, all clamps)
       prompt-parser.ts — local keyword parser + deep merge
   types/
-    mapbox-gl-draw.d.ts — Type declarations
+    mapbox-gl-draw.d.ts — Type declarations (legacy; no map UI currently exists)
 python/
   generate.py             — IFC + glTF pipeline (entry: build_and_export_glb)
   build.py                — Vercel Function entrypoint (POST → glb, GET → "ok")
   server.py               — Local-dev stdio child server
   vendor/homemaker-addon/ — Submodule (Bruno Postle's addon)
 ```
-
-## Demo app (`/demo`)
-
-A self-contained 3D building viewer that works without Blender. Uses React Three Fiber for in-browser rendering with proper PBR lighting (ACES filmic tone mapping, environment maps, contact shadows). Touch-friendly orbit controls for iPad.
-
-- **3D viewer**: R3F + drei (OrbitControls, Environment, ContactShadows, Grid)
-- **Procedural geometry**: `lib/building/geometry.ts` generates walls, windows, doors, roofs, slabs from params
-- **Style system**: 9 styles with distinct materials (colors, roughness, metalness, window/door flags)
-- **AI prompt**: Local keyword parser works instantly; optional Ollama/OpenAI for richer parsing via `/api/prompt`
-- **No Blender dependency**: The demo generates buildings entirely in the browser
 
 ## Facade designer (`/facade`)
 
@@ -121,12 +107,6 @@ Uses `@import "tailwindcss"` in `globals.css` (not old `@tailwind` directives). 
 ## Path alias
 
 `@/*` → `./src/*` (configured in both `tsconfig.json` and `next.config.ts`).
-
-## MapLibre GL + Mapbox GL Draw quirks
-
-- Mapbox GL Draw's default styles use bare arrays for `line-dasharray`, which MapLibre rejects. The app works around this by overriding **all** draw styles manually in `MapView.tsx` with `["literal", [...]]` wrapper.
-- Draw starts in `draw_polygon` mode by default.
-- Building footprints fetched from Overpass API at zoom ≥ 15.
 
 ## Engine docs (key references)
 
