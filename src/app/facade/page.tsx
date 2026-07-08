@@ -4,10 +4,9 @@ import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import type { FacadeParams, LotContext } from "@/lib/facade/types";
-import { DEFAULT_FACADE, DEFAULT_LOT_CONTEXT } from "@/lib/facade/types";
+import { DEFAULT_FACADE, DEFAULT_LOT_CONTEXT, FACADE_DEFAULT_VIEW } from "@/lib/facade/types";
 import { computeLayout } from "@/lib/facade/layout";
 import type { ViewSettings } from "@/lib/building/types";
-import { DEFAULT_VIEW } from "@/lib/building/types";
 
 const FacadeViewer = dynamic(() => import("@/components/facade/FacadeViewer"), {
   ssr: false,
@@ -23,7 +22,7 @@ export default function FacadePage() {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [context, setContext] = useState<LotContext>(DEFAULT_LOT_CONTEXT);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [view, setView] = useState<ViewSettings>(DEFAULT_VIEW);
+  const [view, setView] = useState<ViewSettings>(FACADE_DEFAULT_VIEW);
 
   const layout = useMemo(() => computeLayout(params), [params]);
 

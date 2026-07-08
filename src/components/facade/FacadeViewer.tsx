@@ -6,8 +6,8 @@ import { OrbitControls, Environment, ContactShadows, Grid } from "@react-three/d
 import * as THREE from "three";
 import FacadeMesh from "./FacadeMesh";
 import type { FacadeParams, LotContext } from "@/lib/facade/types";
+import { FACADE_DEFAULT_VIEW } from "@/lib/facade/types";
 import type { ViewSettings } from "@/lib/building/types";
-import { DEFAULT_VIEW } from "@/lib/building/types";
 
 interface FacadeViewerProps {
   params: FacadeParams;
@@ -233,7 +233,7 @@ function SceneContents({
 export default function FacadeViewer({
   params,
   context,
-  view = DEFAULT_VIEW,
+  view = FACADE_DEFAULT_VIEW,
 }: FacadeViewerProps) {
   const captureRef = useRef<(() => void) | null>(null);
   const bindCapture = useCallback((fn: () => void) => {

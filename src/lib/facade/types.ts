@@ -1,3 +1,4 @@
+import type { ViewSettings } from "@/lib/building/types";
 import { classicalStoreyHeights } from "@/lib/building/types";
 
 export type OpeningKind = "window" | "door" | "blank" | "shopfront" | "garage";
@@ -96,6 +97,14 @@ export const DEFAULT_LOT_CONTEXT: LotContext = {
   leftNeighborHeight: 9,
   rightNeighborHeight: 7,
   show: true,
+};
+
+/** Facade-specific sun default. The facade faces +z (azimuth 0), so unlike
+ * the main app's DEFAULT_VIEW (135° = behind the building), the sun starts
+ * front-right to rake across the relief. */
+export const FACADE_DEFAULT_VIEW: ViewSettings = {
+  sunAzimuth: 30,
+  sunAltitude: 50,
 };
 
 /** Door + garage panel swatches — deep traditional door colors. */
