@@ -31,7 +31,7 @@ export default function BayGrid({ params, onChange }: BayGridProps) {
       next === defaults[storey][bay]
         ? rest
         : [...rest, { storey, bay, kind: next }];
-    onChange({ ...params, cellOverrides });
+    onChange({ ...params, cellOverrides, preset: undefined });
   };
 
   // Top storey renders first so the grid mirrors the facade.
