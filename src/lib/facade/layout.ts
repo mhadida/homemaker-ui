@@ -153,12 +153,14 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
         y = floorY;
       } else {
         // shopfront: fill the bay; MIN_PIER at party edges, slim mullion gap
-        // against interior neighbors
-        const left = b === 0 ? bayLeft + MIN_PIER : bayLeft + SHOPFRONT_MULLION;
-        const right =
-          b === bays - 1
-            ? bayLeft + bayWidth - MIN_PIER
-            : bayLeft + bayWidth - SHOPFRONT_MULLION;
+        // against a shopfront neighbor, else half a pier (the neighbor's own
+        // opening contributes the other half) so the combined gap is MIN_PIER.
+        const edgeInset = (neighborBay: number, isPartyEdge: boolean): number => {
+          if (isPartyEdge) return MIN_PIER;
+          return grid[s][neighborBay] === "shopfront" ? SHOPFRONT_MULLION : MIN_PIER / 2;
+        };
+        const left = bayLeft + edgeInset(b - 1, b === 0);
+        const right = bayLeft + bayWidth - edgeInset(b + 1, b === bays - 1);
         w = right - left;
         if (w < MIN_OPENING_WIDTH) continue;
         h = sh - SHOPFRONT_FASCIA;
@@ -191,13 +193,17 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
     door &&
     params.groundFloor.stoop &&
     params.groundFloor.treatment === "residential"
-      ? {
-          x: door.x - 0.2,
-          w: door.w + 0.4,
-          steps: STOOP_STEPS,
-          rise: STOOP_RISE,
-          run: STOOP_RUN,
-        }
+      ? (() => {
+          const stoopX = Math.max(door.x - 0.2, -width / 2);
+          const stoopRight = Math.min(door.x + door.w + 0.2, width / 2);
+          return {
+            x: stoopX,
+            w: stoopRight - stoopX,
+            steps: STOOP_STEPS,
+            rise: STOOP_RISE,
+            run: STOOP_RUN,
+          };
+        })()
       : null;
 
   return {

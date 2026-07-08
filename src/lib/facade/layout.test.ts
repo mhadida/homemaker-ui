@@ -105,6 +105,12 @@ function invariants(params: FacadeParams) {
       ).toBe(false);
     }
   }
+  if (layout.stoop) {
+    expect(layout.stoop.x).toBeGreaterThanOrEqual(-layout.width / 2 - 1e-9);
+    expect(layout.stoop.x + layout.stoop.w).toBeLessThanOrEqual(
+      layout.width / 2 + 1e-9,
+    );
+  }
   return layout;
 }
 
@@ -212,5 +218,54 @@ describe("computeLayout", () => {
 
   it("short storeys (2.2m) still produce valid windows", () => {
     invariants(p({ storeyHeight: 2.2, storeyHeights: [2.2, 2.2, 2.2] }));
+  });
+
+  it("stoop clamps to the wall bounds when the door sits near a party edge", () => {
+    const layout = invariants(
+      p({
+        width: 5,
+        bays: 9,
+        groundFloor: { treatment: "residential", doorBay: 0, stoop: true },
+      }),
+    );
+    expect(layout.stoop).not.toBeNull();
+  });
+
+  it("shopfront piers stay >= MIN_PIER next to a non-shopfront neighbor", () => {
+    const params = p({
+      width: 5,
+      bays: 9,
+      groundFloor: { treatment: "shopfront", doorBay: 4, stoop: false },
+    });
+    const layout = invariants(params);
+    const ground = layout.openings.filter((o) => o.storey === 0).sort((a, b) => a.x - b.x);
+    const door = ground.find((o) => o.kind === "door")!;
+    expect(door).toBeDefined();
+    const doorIndex = ground.indexOf(door);
+    const leftNeighbor = ground[doorIndex - 1];
+    const rightNeighbor = ground[doorIndex + 1];
+    if (leftNeighbor) {
+      const gap = door.x - (leftNeighbor.x + leftNeighbor.w);
+      expect(gap).toBeGreaterThanOrEqual(0.3 - 1e-9); // MIN_PIER
+    }
+    if (rightNeighbor) {
+      const gap = rightNeighbor.x - (door.x + door.w);
+      expect(gap).toBeGreaterThanOrEqual(0.3 - 1e-9); // MIN_PIER
+    }
+  });
+
+  it("garage treatment produces a single garage opening at doorBay", () => {
+    const layout = invariants(
+      p({ groundFloor: { treatment: "garage", doorBay: 1, stoop: false } }),
+    );
+    const garages = layout.openings.filter(
+      (o) => o.kind === "garage" && o.storey === 0,
+    );
+    expect(garages).toHaveLength(1);
+    const garage = garages[0];
+    expect(garage.bay).toBe(1);
+    expect(garage.y).toBe(0);
+    expect(garage.h).toBeLessThanOrEqual(2.4); // GARAGE_HEIGHT_MAX
+    expect(garage.w).toBeLessThanOrEqual(2.6); // GARAGE_WIDTH_MAX
   });
 });
