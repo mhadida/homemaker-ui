@@ -9,11 +9,12 @@ import {
   type FacadeLayout,
   type OpeningRect,
 } from "@/lib/facade/layout";
-import type { FacadeParams } from "@/lib/facade/types";
+import type { FacadeParams, WindowStyleId } from "@/lib/facade/types";
 
 const FRAME_T = 0.07; // window frame member thickness
 const FRAME_D = 0.06; // frame depth
 const GLASS_RECESS = 0.15; // how far frames/glass sit behind the wall face
+const GLAZING_BAR = 0.04; // thin internal glazing-bar thickness
 
 /** Wall body: outer rect with punched opening holes, extruded to thickness.
  * ExtrudeGeometry runs +z from the shape plane, so we shift it back so the
@@ -65,7 +66,71 @@ function Trim({ color }: { color: string }) {
   return <meshStandardMaterial color={color} roughness={0.6} />;
 }
 
-function WindowFill({ o, trimColor }: { o: OpeningRect; trimColor: string }) {
+/** Internal glazing bars for a w×h pane, centered on the group origin.
+ * "sash" reproduces the pre-windowStyle rendering exactly. */
+function MullionBars({
+  w,
+  h,
+  style,
+  trimColor,
+}: {
+  w: number;
+  h: number;
+  style: WindowStyleId;
+  trimColor: string;
+}) {
+  if (style === "none") return null;
+  if (style === "victorian") {
+    return (
+      <mesh position={[0, h * 0.12, 0]}>
+        <boxGeometry args={[w, 0.05, FRAME_D]} />
+        <Trim color={trimColor} />
+      </mesh>
+    );
+  }
+  if (style === "sash") {
+    return (
+      <>
+        <mesh>
+          <boxGeometry args={[0.05, h, FRAME_D]} />
+          <Trim color={trimColor} />
+        </mesh>
+        <mesh position={[0, h * 0.12, 0]}>
+          <boxGeometry args={[w, 0.05, FRAME_D]} />
+          <Trim color={trimColor} />
+        </mesh>
+      </>
+    );
+  }
+  // georgian: vertical bars at thirds + horizontal bars for ~square panes
+  const rows = Math.max(2, Math.round(h / (w / 3)));
+  return (
+    <>
+      {[-w / 6, w / 6].map((x, i) => (
+        <mesh key={`v${i}`} position={[x, 0, 0]}>
+          <boxGeometry args={[GLAZING_BAR, h, FRAME_D]} />
+          <Trim color={trimColor} />
+        </mesh>
+      ))}
+      {Array.from({ length: rows - 1 }, (_, i) => (
+        <mesh key={`h${i}`} position={[0, -h / 2 + ((i + 1) * h) / rows, 0]}>
+          <boxGeometry args={[w, GLAZING_BAR, FRAME_D]} />
+          <Trim color={trimColor} />
+        </mesh>
+      ))}
+    </>
+  );
+}
+
+function WindowFill({
+  o,
+  trimColor,
+  windowStyle,
+}: {
+  o: OpeningRect;
+  trimColor: string;
+  windowStyle: WindowStyleId;
+}) {
   const cx = o.x + o.w / 2;
   const cy = o.y + o.h / 2;
   return (
@@ -88,15 +153,7 @@ function WindowFill({ o, trimColor }: { o: OpeningRect; trimColor: string }) {
         <boxGeometry args={[FRAME_T, o.h, FRAME_D]} />
         <Trim color={trimColor} />
       </mesh>
-      {/* central mullion + transom bar (sash feel) */}
-      <mesh>
-        <boxGeometry args={[0.05, o.h, FRAME_D]} />
-        <Trim color={trimColor} />
-      </mesh>
-      <mesh position={[0, o.h * 0.12, 0]}>
-        <boxGeometry args={[o.w, 0.05, FRAME_D]} />
-        <Trim color={trimColor} />
-      </mesh>
+      <MullionBars w={o.w} h={o.h} style={windowStyle} trimColor={trimColor} />
     </group>
   );
 }
@@ -105,10 +162,12 @@ function DoorFill({
   o,
   doorColor,
   trimColor,
+  windowStyle,
 }: {
   o: OpeningRect;
   doorColor: string;
   trimColor: string;
+  windowStyle: WindowStyleId;
 }) {
   // With a transom, the leaf occupies the bottom DOOR_LEAF_HEIGHT of the
   // opening (o.h - transomH === DOOR_LEAF_HEIGHT by construction).
@@ -138,6 +197,13 @@ function DoorFill({
       {o.transomH && (
         <group position={[0, leafH + o.transomH / 2, 0]}>
           <Glass w={o.w} h={o.transomH} />
+          {windowStyle === "georgian" &&
+            [-o.w / 6, o.w / 6].map((x, i) => (
+              <mesh key={i} position={[x, 0, 0]}>
+                <boxGeometry args={[GLAZING_BAR, o.transomH!, FRAME_D]} />
+                <Trim color={trimColor} />
+              </mesh>
+            ))}
           {/* frame bar between leaf and transom */}
           <mesh position={[0, -o.transomH / 2 + 0.04, 0.02]}>
             <boxGeometry args={[o.w, 0.08, 0.1]} />
@@ -257,7 +323,14 @@ export default function FacadeMesh({ params }: { params: FacadeParams }) {
         const key = `${o.storey}-${o.bay}`;
         switch (o.kind) {
           case "window":
-            return <WindowFill key={key} o={o} trimColor={params.trimColor} />;
+            return (
+              <WindowFill
+                key={key}
+                o={o}
+                trimColor={params.trimColor}
+                windowStyle={params.windowStyle}
+              />
+            );
           case "door":
             return (
               <DoorFill
@@ -265,6 +338,7 @@ export default function FacadeMesh({ params }: { params: FacadeParams }) {
                 o={o}
                 doorColor={params.doorColor}
                 trimColor={params.trimColor}
+                windowStyle={params.windowStyle}
               />
             );
           case "shopfront":
