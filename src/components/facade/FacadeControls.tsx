@@ -5,7 +5,6 @@ import type {
   LotContext,
   PresetId,
   GroundTreatment,
-  WindowStyleId,
 } from "@/lib/facade/types";
 import {
   DEFAULT_FACADE,
