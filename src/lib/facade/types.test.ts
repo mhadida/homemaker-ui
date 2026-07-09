@@ -28,4 +28,16 @@ describe("facade types", () => {
       expect(preset.label, id).toBeTruthy();
     }
   });
+
+  it("default and presets carry a valid windowStyle", () => {
+    const valid = ["georgian", "sash", "victorian", "none"];
+    expect(DEFAULT_FACADE.windowStyle).toBe("sash");
+    for (const [id, preset] of Object.entries(FACADE_PRESETS)) {
+      const p = { ...DEFAULT_FACADE, ...preset.params };
+      expect(valid, id).toContain(p.windowStyle);
+    }
+    expect(FACADE_PRESETS.georgian.params.windowStyle).toBe("georgian");
+    expect(FACADE_PRESETS["victorian-shopfront"].params.windowStyle).toBe("victorian");
+    expect(FACADE_PRESETS.modern.params.windowStyle).toBe("none");
+  });
 });

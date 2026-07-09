@@ -91,6 +91,15 @@ export function parseFacadePromptLocal(prompt: string): FacadePromptUpdates {
   if (/\bsurrounds?\b/.test(lower)) orn.surrounds = true;
   if (Object.keys(orn).length > 0) updates.ornament = orn;
 
+  // Window glazing — explicit keywords override a preset's default style.
+  if (/\bsmall panes?\b|\bgeorgian windows?\b|\bglazing bars?\b/.test(lower)) {
+    updates.windowStyle = "georgian";
+  } else if (/\bsash\b/.test(lower)) {
+    updates.windowStyle = "sash";
+  } else if (/\bsingle pane\b|\bplain glass\b|\bplain windows?\b/.test(lower)) {
+    updates.windowStyle = "none";
+  }
+
   // Colors: "<swatch> wall(s)" / "<swatch> door"
   for (const s of WALL_SWATCHES) {
     if (new RegExp(`\\b${s.label.toLowerCase()}\\b[^.]*\\bwalls?\\b`).test(lower)) {

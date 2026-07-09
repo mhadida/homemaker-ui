@@ -58,6 +58,18 @@ describe("parseFacadePromptLocal", () => {
     const merged = mergeFacadeParams(DEFAULT_FACADE, u);
     expect(merged.storeyHeights).toHaveLength(5);
   });
+
+  it("parses window glazing styles", () => {
+    expect(parseFacadePromptLocal("small panes").windowStyle).toBe("georgian");
+    expect(parseFacadePromptLocal("sash windows").windowStyle).toBe("sash");
+    expect(parseFacadePromptLocal("plain glass").windowStyle).toBe("none");
+  });
+
+  it("explicit glazing overrides the preset's default", () => {
+    const u = parseFacadePromptLocal("georgian house with plain glass");
+    expect(u.preset).toBe("georgian");
+    expect(u.windowStyle).toBe("none");
+  });
 });
 
 describe("mergeFacadeParams", () => {

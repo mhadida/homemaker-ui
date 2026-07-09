@@ -31,6 +31,16 @@ export interface CellOverride {
 
 export type PresetId = "georgian" | "victorian-shopfront" | "modern";
 
+export type WindowStyleId = "georgian" | "sash" | "victorian" | "none";
+
+/** Order matches the controls chip row. */
+export const WINDOW_STYLE_OPTIONS: { id: WindowStyleId; label: string }[] = [
+  { id: "georgian", label: "Georgian" },
+  { id: "sash", label: "Sash" },
+  { id: "victorian", label: "1-over-1" },
+  { id: "none", label: "Plain" },
+];
+
 export interface FacadeParams {
   /** Lot width in meters */
   width: number;
@@ -47,6 +57,8 @@ export interface FacadeParams {
   windowWidthRatio: number;
   /** Opening height as fraction of storey height */
   windowHeightRatio: number;
+  /** Internal glazing-bar pattern for windows (and the door transom). */
+  windowStyle: WindowStyleId;
   /** Sparse per-cell overrides of the default grid kinds */
   cellOverrides?: CellOverride[];
   groundFloor: GroundFloorConfig;
@@ -86,6 +98,7 @@ export const DEFAULT_FACADE: FacadeParams = {
   bays: 3,
   windowWidthRatio: 0.45,
   windowHeightRatio: 0.55,
+  windowStyle: "sash",
   groundFloor: { treatment: "residential", doorBay: 0, stoop: true },
   ornament: { cornice: true, parapet: false, sills: true, surrounds: false },
   wallColor: "#c7bca8",
@@ -131,6 +144,7 @@ export const FACADE_PRESETS: Record<
       storeyHeights: classicalStoreyHeights(3, 3.2),
       windowWidthRatio: 0.4,
       windowHeightRatio: 0.6,
+      windowStyle: "georgian",
       groundFloor: { treatment: "residential", doorBay: 0, stoop: true },
       ornament: { cornice: true, parapet: true, sills: true, surrounds: false },
       wallColor: "#c7bca8",
@@ -147,6 +161,7 @@ export const FACADE_PRESETS: Record<
       storeyHeights: classicalStoreyHeights(3, 3.4),
       windowWidthRatio: 0.5,
       windowHeightRatio: 0.6,
+      windowStyle: "victorian",
       groundFloor: { treatment: "shopfront", doorBay: 1, stoop: false },
       ornament: { cornice: true, parapet: false, sills: true, surrounds: true },
       wallColor: "#a89c8d",
@@ -163,6 +178,7 @@ export const FACADE_PRESETS: Record<
       storeyHeights: classicalStoreyHeights(4, 2.9),
       windowWidthRatio: 0.7,
       windowHeightRatio: 0.7,
+      windowStyle: "none",
       groundFloor: { treatment: "residential", doorBay: 1, stoop: false },
       ornament: { cornice: false, parapet: true, sills: false, surrounds: false },
       wallColor: "#ece8e0",
