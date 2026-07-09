@@ -5,12 +5,14 @@ import type {
   LotContext,
   PresetId,
   GroundTreatment,
+  WindowStyleId,
 } from "@/lib/facade/types";
 import {
   DEFAULT_FACADE,
   FACADE_PRESETS,
   FACADE_LIMITS,
   DOOR_SWATCHES,
+  WINDOW_STYLE_OPTIONS,
 } from "@/lib/facade/types";
 import type { ViewSettings } from "@/lib/building/types";
 import { WALL_SWATCHES, classicalStoreyHeights } from "@/lib/building/types";
@@ -253,6 +255,23 @@ export default function FacadeControls({
           step={0.05}
           onChange={(r) => update({ windowHeightRatio: r, preset: undefined })}
         />
+        <div>
+          <span className="text-[10px] text-[var(--muted)] block mb-1">
+            Glazing
+          </span>
+          <div className="grid grid-cols-4 gap-1">
+            {WINDOW_STYLE_OPTIONS.map((ws) => (
+              <Toggle
+                key={ws.id}
+                label={ws.label}
+                on={params.windowStyle === ws.id}
+                onClick={() =>
+                  update({ windowStyle: ws.id, preset: undefined })
+                }
+              />
+            ))}
+          </div>
+        </div>
         <BayGrid params={params} onChange={onChange} />
       </Section>
 

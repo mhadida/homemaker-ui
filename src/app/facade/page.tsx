@@ -38,6 +38,7 @@ interface FacadeSpec {
   sills?: boolean;
   surrounds?: boolean;
   windowSize?: "small" | "medium" | "large";
+  windowStyle?: "georgian" | "sash" | "victorian" | "none";
   wallColor?: string;
   trimColor?: string;
   doorColor?: string;
@@ -88,6 +89,7 @@ function specToFacadeParams(spec: FacadeSpec, prev: FacadeParams): FacadeParams 
   // current bucket must not snap fine-tuned slider ratios to bucket values.
   if (spec.windowSize && spec.windowSize !== nearestWindowSize(prev))
     Object.assign(next, WINDOW_SIZE_RATIOS[spec.windowSize]);
+  if (spec.windowStyle) next.windowStyle = spec.windowStyle;
   if (spec.wallColor && WALL_HEX[spec.wallColor])
     next.wallColor = WALL_HEX[spec.wallColor];
   if (spec.trimColor && WALL_HEX[spec.trimColor])
@@ -138,6 +140,7 @@ function paramsToFacadeSpec(p: FacadeParams): FacadeSpec {
     sills: p.ornament.sills,
     surrounds: p.ornament.surrounds,
     windowSize: nearestWindowSize(p),
+    windowStyle: p.windowStyle,
     wallColor: wallId,
     trimColor: trimId,
     doorColor: doorId,

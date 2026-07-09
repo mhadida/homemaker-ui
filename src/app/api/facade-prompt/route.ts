@@ -39,6 +39,7 @@ const FacadeSpec = z.object({
   sills: z.boolean(),
   surrounds: z.boolean(),
   windowSize: z.enum(["small", "medium", "large"]),
+  windowStyle: z.enum(["georgian", "sash", "victorian", "none"]),
   wallColor: z.enum(WALL_COLOR_IDS),
   trimColor: z.enum(WALL_COLOR_IDS),
   doorColor: z.enum(DOOR_COLOR_IDS),
@@ -95,6 +96,7 @@ function SYSTEM_PROMPT(current: Partial<FacadeSpec> | undefined): string {
     `- ground floor: ${have.treatment ?? "residential"}, door in bay ${have.doorBay ?? 1} (1 = leftmost), stoop: ${have.stoop ?? true}`,
     `- ornament: cornice ${have.cornice ?? true}, parapet ${have.parapet ?? false}, sills ${have.sills ?? true}, surrounds ${have.surrounds ?? false}`,
     `- windowSize: ${have.windowSize ?? "medium"}`,
+    `- windowStyle: ${have.windowStyle ?? "sash"}`,
     `- colors: wall ${have.wallColor ?? "earthy"}, trim ${have.trimColor ?? "white"}, door ${have.doorColor ?? "racing-green"}`,
     `- preset: ${have.preset ?? "none"}`,
     "",
@@ -103,6 +105,7 @@ function SYSTEM_PROMPT(current: Partial<FacadeSpec> | undefined): string {
     "- stoop: entry steps in front of the door (residential only).",
     "- windowSize small/medium/large controls window proportions within each bay.",
     "- doorBay is 1-based from the left and must not exceed bays.",
+    '- windowStyle: internal glazing bars — georgian (small-pane grid), sash (2-over-2), victorian (1-over-1), none (plain glass). Echo current unless the user mentions panes/glazing.',
     "- preset: georgian (classical terrace), victorian-shopfront (retail ground floor), modern (minimal). Set it when the user names a style; otherwise echo the current value.",
   ].join("\n");
 }
