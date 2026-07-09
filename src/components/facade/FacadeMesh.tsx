@@ -101,27 +101,55 @@ function WindowFill({ o, trimColor }: { o: OpeningRect; trimColor: string }) {
   );
 }
 
-function DoorFill({ o, doorColor }: { o: OpeningRect; doorColor: string }) {
+function DoorFill({
+  o,
+  doorColor,
+  trimColor,
+}: {
+  o: OpeningRect;
+  doorColor: string;
+  trimColor: string;
+}) {
+  // With a transom, the leaf occupies the bottom DOOR_LEAF_HEIGHT of the
+  // opening (o.h - transomH === DOOR_LEAF_HEIGHT by construction).
+  const leafH = o.transomH ? o.h - o.transomH : o.h;
   return (
-    <group position={[o.x + o.w / 2, o.y + o.h / 2, -0.18]}>
-      <mesh castShadow>
-        <boxGeometry args={[o.w, o.h, 0.07]} />
+    <group position={[o.x + o.w / 2, o.y, -0.18]}>
+      {/* leaf panel */}
+      <mesh position={[0, leafH / 2, 0]} castShadow>
+        <boxGeometry args={[o.w, leafH, 0.07]} />
         <meshStandardMaterial color={doorColor} roughness={0.5} />
       </mesh>
-      {/* two raised panel hints */}
-      <mesh position={[0, o.h * 0.22, 0.045]}>
-        <boxGeometry args={[o.w * 0.62, o.h * 0.3, 0.015]} />
+      {/* two raised panel hints (same proportions as before, bottom-up) */}
+      <mesh position={[0, leafH * 0.72, 0.045]}>
+        <boxGeometry args={[o.w * 0.62, leafH * 0.3, 0.015]} />
         <meshStandardMaterial color={doorColor} roughness={0.4} />
       </mesh>
-      <mesh position={[0, -o.h * 0.22, 0.045]}>
-        <boxGeometry args={[o.w * 0.62, o.h * 0.3, 0.015]} />
+      <mesh position={[0, leafH * 0.28, 0.045]}>
+        <boxGeometry args={[o.w * 0.62, leafH * 0.3, 0.015]} />
         <meshStandardMaterial color={doorColor} roughness={0.4} />
       </mesh>
       {/* knob */}
-      <mesh position={[o.w * 0.32, 0, 0.06]}>
+      <mesh position={[o.w * 0.32, leafH / 2, 0.06]}>
         <sphereGeometry args={[0.035, 12, 12]} />
         <meshStandardMaterial color="#b8a878" roughness={0.25} metalness={0.8} />
       </mesh>
+      {/* glazed transom above the leaf */}
+      {o.transomH && (
+        <group position={[0, leafH + o.transomH / 2, 0]}>
+          <Glass w={o.w} h={o.transomH} />
+          {/* frame bar between leaf and transom */}
+          <mesh position={[0, -o.transomH / 2 + 0.04, 0.02]}>
+            <boxGeometry args={[o.w, 0.08, 0.1]} />
+            <Trim color={trimColor} />
+          </mesh>
+          {/* slim top frame member */}
+          <mesh position={[0, o.transomH / 2 - 0.035, 0]}>
+            <boxGeometry args={[o.w, 0.07, 0.06]} />
+            <Trim color={trimColor} />
+          </mesh>
+        </group>
+      )}
     </group>
   );
 }
@@ -231,7 +259,14 @@ export default function FacadeMesh({ params }: { params: FacadeParams }) {
           case "window":
             return <WindowFill key={key} o={o} trimColor={params.trimColor} />;
           case "door":
-            return <DoorFill key={key} o={o} doorColor={params.doorColor} />;
+            return (
+              <DoorFill
+                key={key}
+                o={o}
+                doorColor={params.doorColor}
+                trimColor={params.trimColor}
+              />
+            );
           case "shopfront":
             return <ShopfrontFill key={key} o={o} trimColor={params.trimColor} />;
           case "garage":
