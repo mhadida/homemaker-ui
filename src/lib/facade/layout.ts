@@ -42,6 +42,8 @@ export const WINDOW_HEAD_GAP = 0.3; // min wall above a window within its storey
 export const DOOR_WIDTH = 1.0;
 export const DOOR_HEIGHT_MAX = 2.3;
 export const DOOR_HEAD_GAP = 0.3;
+export const DOOR_LEAF_HEIGHT = 2.1; // fixed door-leaf height; transom fills above
+export const TRANSOM_MIN = 0.3; // no sliver transoms — leaf stretches instead
 export const GARAGE_WIDTH_MAX = 2.6;
 export const GARAGE_HEIGHT_MAX = 2.4;
 export const SHOPFRONT_FASCIA = 0.5; // wall band above shopfront glazing
@@ -65,6 +67,9 @@ export interface OpeningRect {
   y: number;
   w: number;
   h: number;
+  /** Glazed transom height above a DOOR_LEAF_HEIGHT leaf (door kind only;
+   * absent when the leaf fills the whole opening). */
+  transomH?: number;
 }
 
 export interface FacadeLayout {
@@ -129,6 +134,7 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
       if (maxW < MIN_OPENING_WIDTH) continue; // degenerate bay — skip
 
       let x: number, y: number, w: number, h: number;
+      let transomH: number | undefined;
       if (kind === "window") {
         w = clamp(params.windowWidthRatio * bayWidth, MIN_OPENING_WIDTH, maxW);
         const maxH = sh - SILL_HEIGHT - WINDOW_HEAD_GAP;
@@ -141,10 +147,34 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
           params.groundFloor.treatment === "residential";
         const yOff = raised ? stoopRise : 0;
         w = Math.min(DOOR_WIDTH, maxW);
-        h = Math.min(DOOR_HEIGHT_MAX, sh - DOOR_HEAD_GAP - yOff);
+        // Base rule is the floor — head alignment only ever GROWS the door.
+        const baseH = Math.min(DOOR_HEIGHT_MAX, sh - DOOR_HEAD_GAP - yOff);
+        // Alignment target (head height above the storey floor): the row's
+        // window head, else the shopfront glazing head, else none.
+        let alignedHead = 0;
+        const windowMaxH = sh - SILL_HEIGHT - WINDOW_HEAD_GAP;
+        if (grid[s].includes("window") && windowMaxH >= MIN_WINDOW_HEIGHT) {
+          const windowH = clamp(
+            params.windowHeightRatio * sh,
+            MIN_WINDOW_HEIGHT,
+            windowMaxH,
+          );
+          alignedHead = SILL_HEIGHT + windowH;
+        } else if (grid[s].includes("shopfront")) {
+          alignedHead = sh - SHOPFRONT_FASCIA;
+        }
+        // Defensive cap: alignment targets are ≤ sh − DOOR_HEAD_GAP by
+        // construction, but the head-gap clamp must always win.
+        h = Math.min(
+          Math.max(baseH, alignedHead - yOff),
+          sh - DOOR_HEAD_GAP - yOff,
+        );
         if (h < 1.6) continue;
         x = bayCenter - w / 2;
         y = floorY + yOff;
+        if (h >= DOOR_LEAF_HEIGHT + TRANSOM_MIN) {
+          transomH = h - DOOR_LEAF_HEIGHT;
+        }
       } else if (kind === "garage") {
         w = Math.min(GARAGE_WIDTH_MAX, maxW);
         h = Math.min(GARAGE_HEIGHT_MAX, sh - 0.4);
@@ -168,7 +198,9 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
         x = left;
         y = floorY;
       }
-      openings.push({ kind, storey: s, bay: b, x, y, w, h });
+      const rect: OpeningRect = { kind, storey: s, bay: b, x, y, w, h };
+      if (transomH !== undefined) rect.transomH = transomH;
+      openings.push(rect);
     }
   }
 

@@ -268,4 +268,93 @@ describe("computeLayout", () => {
     expect(garage.h).toBeLessThanOrEqual(2.4); // GARAGE_HEIGHT_MAX
     expect(garage.w).toBeLessThanOrEqual(2.6); // GARAGE_WIDTH_MAX
   });
+
+  it("door head aligns to the window head on a tall ground floor, with transom", () => {
+    // sh=3.4, ratio 0.55 → windowH=1.87, head=2.77; stoop raises door to y=0.3
+    // → door h = 2.77-0.3 = 2.47 ≥ 2.4 → transom 0.37
+    const layout = invariants(
+      p({ storeyHeight: 3.4, storeyHeights: [3.4, 3.4, 3.4] }),
+    );
+    const door = layout.openings.find((o) => o.kind === "door")!;
+    const win = layout.openings.find((o) => o.kind === "window" && o.storey === 0)!;
+    expect(door.y + door.h).toBeCloseTo(win.y + win.h, 9);
+    expect(door.h).toBeCloseTo(2.47, 9);
+    expect(door.transomH).toBeCloseTo(2.47 - 2.1, 9); // DOOR_LEAF_HEIGHT
+  });
+
+  it("no transom below threshold; door never shrinks below the base rule", () => {
+    // sh=2.8, ratio 0.45 → windowH=1.26, head=2.16 < base 2.3 → h stays 2.3, no transom
+    const layout = invariants(
+      p({
+        storeyHeight: 2.8,
+        storeyHeights: [2.8, 2.8, 2.8],
+        windowHeightRatio: 0.45,
+        groundFloor: { treatment: "residential", doorBay: 0, stoop: false },
+      }),
+    );
+    const door = layout.openings.find((o) => o.kind === "door")!;
+    expect(door.h).toBeCloseTo(2.3, 9); // DOOR_HEIGHT_MAX — unchanged
+    expect(door.transomH).toBeUndefined();
+  });
+
+  it("shopfront-row door aligns to the glazing head", () => {
+    // sh=3.4 → shopfront head = 3.4-0.5 = 2.9 → door h=2.9, transom 0.8
+    const layout = invariants(
+      p({
+        width: 9,
+        bays: 3,
+        storeyHeight: 3.4,
+        storeyHeights: [3.4, 3.4, 3.4],
+        groundFloor: { treatment: "shopfront", doorBay: 1, stoop: false },
+      }),
+    );
+    const door = layout.openings.find((o) => o.kind === "door")!;
+    const shop = layout.openings.find((o) => o.kind === "shopfront")!;
+    expect(door.y + door.h).toBeCloseTo(shop.y + shop.h, 9);
+    expect(door.transomH).toBeCloseTo(2.9 - 2.1, 9);
+  });
+
+  it("squat storey: door keeps the current rule, no transom", () => {
+    // sh=2.2 → window head 1.9 == base min(2.3, 1.9) → h=1.9 (same as v1), no transom
+    const layout = invariants(
+      p({
+        storeyHeight: 2.2,
+        storeyHeights: [2.2, 2.2, 2.2],
+        groundFloor: { treatment: "residential", doorBay: 0, stoop: false },
+      }),
+    );
+    const door = layout.openings.find((o) => o.kind === "door")!;
+    expect(door.h).toBeCloseTo(1.9, 9);
+    expect(door.transomH).toBeUndefined();
+  });
+
+  it("row with no windows or shopfronts: door keeps the base rule", () => {
+    // Ground row overridden to [door, blank, blank] → no alignment target
+    const layout = invariants(
+      p({
+        storeyHeight: 3.4,
+        storeyHeights: [3.4, 3.4, 3.4],
+        groundFloor: { treatment: "residential", doorBay: 0, stoop: false },
+        cellOverrides: [
+          { storey: 0, bay: 1, kind: "blank" },
+          { storey: 0, bay: 2, kind: "blank" },
+        ],
+      }),
+    );
+    const door = layout.openings.find((o) => o.kind === "door")!;
+    expect(door.h).toBeCloseTo(2.3, 9);
+    expect(door.transomH).toBeUndefined();
+  });
+
+  it("stoop + transom: leaf measures from the raised threshold", () => {
+    const layout = invariants(
+      p({ storeyHeight: 3.4, storeyHeights: [3.4, 3.4, 3.4] }),
+    );
+    const door = layout.openings.find((o) => o.kind === "door")!;
+    expect(door.y).toBeCloseTo(0.3, 9); // STOOP_RISE × STOOP_STEPS
+    expect(layout.stoop).not.toBeNull();
+    expect(door.transomH).toBeDefined();
+    // leaf top (door.y + 2.1) sits below the head by exactly transomH
+    expect(door.y + 2.1 + door.transomH!).toBeCloseTo(door.y + door.h, 9);
+  });
 });
