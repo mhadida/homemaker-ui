@@ -213,10 +213,15 @@ export default function SceneContents({
         />
       ))}
       {blocks.length === 1 && blocks[0].lots.length === 1 && context.show && (
-        <NeighborMasses
-          context={context}
-          facadeWidth={blocks[0].lots[0].params.width}
-        />
+        <group
+          position={lotPlacements(blocks[0])[0].position}
+          rotation={[0, lotPlacements(blocks[0])[0].rotationY, 0]}
+        >
+          <NeighborMasses
+            context={context}
+            facadeWidth={blocks[0].lots[0].params.width}
+          />
+        </group>
       )}
 
       {/* Ground plane — polygonOffset pushes it back so the sidewalk, road

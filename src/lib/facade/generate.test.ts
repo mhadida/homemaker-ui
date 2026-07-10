@@ -150,4 +150,18 @@ describe("generateBlock depthOffset", () => {
     expect(rerolled.lots[1].depthOffset).toBe(block.lots[1].depthOffset); // pinned
     expect(rerolled.lots[0].depthOffset).not.toBe(block.lots[0].depthOffset);
   });
+
+  it("patching a lot must spread the old LotState (depthOffset survives edits)", () => {
+    const lots = generateBlock(
+      { a: [0, 0], b: [30, 0] },
+      false,
+      DEFAULT_GEN,
+      7,
+    );
+    const patched = lots.map((l, i) =>
+      i === 1 ? { ...l, params: { ...l.params, storeys: 5 }, customized: true } : l,
+    );
+    expect(patched[1].depthOffset).toBe(lots[1].depthOffset);
+    expect(patched[1].customized).toBe(true);
+  });
 });

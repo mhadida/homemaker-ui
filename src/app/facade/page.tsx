@@ -198,7 +198,7 @@ export default function FacadePage() {
           const prev = b.lots[lotIndex].params;
           const value = typeof next === "function" ? next(prev) : next;
           const lots = b.lots.map((l, i) =>
-            i === lotIndex ? { params: value, customized: true } : l,
+            i === lotIndex ? { ...l, params: value, customized: true } : l,
           );
           return syncLineToLots({ ...b, lots });
         }),
