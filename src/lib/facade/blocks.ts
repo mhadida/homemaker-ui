@@ -11,6 +11,7 @@ export interface BlockGenSettings {
   variation: number;
 }
 
+/** Template — always structuredClone() when assigning to a block. */
 export const DEFAULT_GEN: BlockGenSettings = {
   lotWidth: { min: 5, max: 9 },
   storeys: { min: 2, max: 4 },
@@ -123,7 +124,7 @@ export function initialWorld(params: FacadeParams): FacadeBlock {
     id: nextBlockId(),
     line: { a: [-params.width / 2, 0], b: [params.width / 2, 0] },
     flipped: false,
-    gen: DEFAULT_GEN,
+    gen: structuredClone(DEFAULT_GEN),
     seed: 1,
     lots: [{ params, customized: false }],
   };
