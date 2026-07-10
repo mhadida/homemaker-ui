@@ -239,6 +239,7 @@ function NodeHandle({
           : undefined
       }
       onPointerOut={interactive ? () => setHover(false) : undefined}
+      onClick={(e) => e.stopPropagation()}
     >
       <circleGeometry args={[hover || active ? 0.8 : 0.55, 24]} />
       <meshBasicMaterial
@@ -276,17 +277,18 @@ function NodeHandles({
     setDrag(null);
     onDraggingChange(false);
   }, [onDraggingChange]);
+  const dragging = drag !== null;
   // A release outside the pane must not strand the drag.
   useEffect(() => {
-    if (!drag) return;
+    if (!dragging) return;
     window.addEventListener("pointerup", endDrag);
     return () => window.removeEventListener("pointerup", endDrag);
-  }, [drag, endDrag]);
+  }, [dragging, endDrag]);
   return (
     <>
       {nodes.map((n) => (
         <NodeHandle
-          key={`${n.pos[0]}:${n.pos[1]}`}
+          key={n.refs.map((r) => `${r.blockId}:${r.end}`).sort().join("|")}
           node={n}
           active={drag !== null && drag.pos[0] === n.pos[0] && drag.pos[1] === n.pos[1]}
           interactive={interactive && drag === null}
