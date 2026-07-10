@@ -241,26 +241,11 @@ export default function FacadePage() {
       <div className="flex flex-1 min-h-0 flex-col md:flex-row">
         <div className="flex-1 min-h-[40vh] md:min-h-0 relative">
           <FacadeViewer params={params} context={context} view={view} />
-
-          <div className="hidden md:block">
-            <PromptInput
-              onApply={handlePrompt}
-              isLoading={isAILoading}
-              variant="floating"
-              placeholder="Describe your facade — e.g. victorian shopfront, 4 bays"
-              suggestions={FACADE_SUGGESTIONS}
-            />
-          </div>
-          {aiStatus && (
-            <div className="pointer-events-none absolute bottom-24 left-1/2 -translate-x-1/2 rounded-full bg-black/55 backdrop-blur-md px-3 py-1 text-[10px] text-white/75">
-              {aiStatus}
-            </div>
-          )}
         </div>
 
         <div className="w-full md:w-80 border-t md:border-t-0 md:border-l border-[var(--border)] bg-[var(--panel-bg)] overflow-y-auto">
           <div className="p-4 space-y-5">
-            <div className="md:hidden">
+            <div>
               <PromptInput
                 onApply={handlePrompt}
                 isLoading={isAILoading}
