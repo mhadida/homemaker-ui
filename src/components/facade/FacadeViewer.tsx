@@ -239,7 +239,6 @@ function NodeHandle({
           : undefined
       }
       onPointerOut={interactive ? () => setHover(false) : undefined}
-      onClick={(e) => e.stopPropagation()}
     >
       <circleGeometry args={[hover || active ? 0.8 : 0.55, 24]} />
       <meshBasicMaterial
@@ -324,7 +323,6 @@ function NodeHandles({
               setDrag((d) => (d ? { ...d, pos: to } : d));
           }}
           onPointerUp={endDrag}
-          onClick={(e) => e.stopPropagation()}
         >
           <planeGeometry args={[600, 600]} />
           <meshBasicMaterial transparent opacity={0} depthWrite={false} />
@@ -356,6 +354,22 @@ function PlanPane({
   onMoveNode: (from: [number, number], to: [number, number]) => boolean;
 }) {
   const [nodeDrag, setNodeDrag] = useState(false);
+  const dragEndAt = useRef(0);
+  const handleDraggingChange = useCallback((dragging: boolean) => {
+    if (!dragging) dragEndAt.current = performance.now();
+    setNodeDrag(dragging);
+  }, []);
+  // R3F synthesizes a click right after a drag's release, and the lot under
+  // the release point was in the original pointerdown's hit set — no
+  // object-level stopPropagation can intercept it (initialHits is snapshotted
+  // before the drag catcher mounts). Suppress selection briefly instead.
+  const guardedSelectLot = useCallback(
+    (blockId: string, lot: number) => {
+      if (performance.now() - dragEndAt.current < 300) return;
+      onSelectLot(blockId, lot);
+    },
+    [onSelectLot],
+  );
   const bounds = useMemo(() => {
     let minX = Infinity,
       maxX = -Infinity,
@@ -401,7 +415,7 @@ function PlanPane({
       <SceneContents
         blocks={blocks}
         selected={selected}
-        onSelectLot={onSelectLot}
+        onSelectLot={guardedSelectLot}
         context={context}
         view={view}
       />
@@ -410,7 +424,7 @@ function PlanPane({
         blocks={blocks}
         interactive={!drawMode}
         onMoveNode={onMoveNode}
-        onDraggingChange={setNodeDrag}
+        onDraggingChange={handleDraggingChange}
       />
       {/* Top-down; up = -z puts the street (+z) at the bottom of the pane. */}
       <OrthographicCamera
