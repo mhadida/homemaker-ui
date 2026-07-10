@@ -26,6 +26,7 @@ import {
   type Selection,
 } from "@/lib/facade/blocks";
 import { rerollBlock, generateBlock } from "@/lib/facade/generate";
+import { moveNode } from "@/lib/facade/nodes";
 import type { ViewSettings } from "@/lib/building/types";
 import { WALL_SWATCHES } from "@/lib/building/types";
 import FacadeControls from "@/components/facade/FacadeControls";
@@ -270,6 +271,19 @@ export default function FacadePage() {
     [],
   );
 
+  const handleMoveNode = useCallback(
+    (from: [number, number], to: [number, number]) => {
+      // Computed OUTSIDE the updater so the boolean result is available
+      // synchronously; moveNode is pure. A stale-closure frame (blocks not
+      // yet re-rendered) returns null and is simply skipped — the drag
+      // recovers on the next frame.
+      const next = moveNode(blocks, from, to);
+      if (next && next !== blocks) setBlocks(next);
+      return next !== null;
+    },
+    [blocks],
+  );
+
   const layout = useMemo(() => computeLayout(params), [params]);
 
   const handlePrompt = useCallback(
@@ -351,6 +365,7 @@ export default function FacadePage() {
             selected={selected}
             onSelectLot={handleSelectLot}
             onCommitLine={handleCommitLine}
+            onMoveNode={handleMoveNode}
             context={context}
             view={view}
           />

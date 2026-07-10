@@ -21,6 +21,7 @@ import * as THREE from "three";
 import SceneContents from "./SceneContents";
 import { computeLayout } from "@/lib/facade/layout";
 import { fitOrthoZoom, elevationCameraPosition } from "@/lib/facade/camera";
+import { deriveNodes, type WorldNode } from "@/lib/facade/nodes";
 import type { LotContext } from "@/lib/facade/types";
 import { FACADE_DEFAULT_VIEW } from "@/lib/facade/types";
 import type { ViewSettings } from "@/lib/building/types";
@@ -39,6 +40,7 @@ interface FacadeViewerProps {
   selected: Selection;
   onSelectLot: (blockId: string, lot: number) => void;
   onCommitLine: (a: [number, number], b: [number, number]) => void;
+  onMoveNode: (from: [number, number], to: [number, number]) => boolean;
   context: LotContext;
   view?: ViewSettings;
 }
@@ -202,6 +204,133 @@ function PenSurface({
   );
 }
 
+/** One draggable node handle (plan pane). Flat circle just above the
+ * block lines; hover/drag states use the accent blue. */
+function NodeHandle({
+  node,
+  active,
+  interactive,
+  onStart,
+}: {
+  node: WorldNode;
+  active: boolean;
+  interactive: boolean;
+  onStart: () => void;
+}) {
+  const [hover, setHover] = useState(false);
+  return (
+    <mesh
+      position={[node.pos[0], 0.1, node.pos[1]]}
+      rotation={[-Math.PI / 2, 0, 0]}
+      onPointerDown={
+        interactive
+          ? (e) => {
+              e.stopPropagation();
+              onStart();
+            }
+          : undefined
+      }
+      onPointerOver={
+        interactive
+          ? (e) => {
+              e.stopPropagation();
+              setHover(true);
+            }
+          : undefined
+      }
+      onPointerOut={interactive ? () => setHover(false) : undefined}
+    >
+      <circleGeometry args={[hover || active ? 0.8 : 0.55, 24]} />
+      <meshBasicMaterial
+        color={active ? "#3b82f6" : hover ? "#93c5fd" : "#e5e7eb"}
+        transparent
+        opacity={0.95}
+        depthWrite={false}
+      />
+    </mesh>
+  );
+}
+
+/** All node handles + the drag interaction. Handles are always visible in
+ * the plan pane; dragging is disabled while the pen path is active. While
+ * dragging, moves apply LIVE via onMoveNode (which may reject — the node
+ * sticks), and the node snaps (1 m) to nodes of unattached blocks so
+ * releasing there welds them. */
+function NodeHandles({
+  blocks,
+  interactive,
+  onMoveNode,
+  onDraggingChange,
+}: {
+  blocks: FacadeBlock[];
+  interactive: boolean;
+  onMoveNode: (from: [number, number], to: [number, number]) => boolean;
+  onDraggingChange: (dragging: boolean) => void;
+}) {
+  const nodes = useMemo(() => deriveNodes(blocks), [blocks]);
+  const [drag, setDrag] = useState<null | {
+    pos: [number, number];
+    targets: [number, number][];
+  }>(null);
+  const endDrag = useCallback(() => {
+    setDrag(null);
+    onDraggingChange(false);
+  }, [onDraggingChange]);
+  // A release outside the pane must not strand the drag.
+  useEffect(() => {
+    if (!drag) return;
+    window.addEventListener("pointerup", endDrag);
+    return () => window.removeEventListener("pointerup", endDrag);
+  }, [drag, endDrag]);
+  return (
+    <>
+      {nodes.map((n) => (
+        <NodeHandle
+          key={`${n.pos[0]}:${n.pos[1]}`}
+          node={n}
+          active={drag !== null && drag.pos[0] === n.pos[0] && drag.pos[1] === n.pos[1]}
+          interactive={interactive && drag === null}
+          onStart={() => {
+            const attached = new Set(n.refs.map((r) => r.blockId));
+            const targets = nodes
+              .filter(
+                (m) => m !== n && !m.refs.some((r) => attached.has(r.blockId)),
+              )
+              .map((m) => m.pos);
+            setDrag({ pos: n.pos, targets });
+            onDraggingChange(true);
+          }}
+        />
+      ))}
+      {drag && (
+        <mesh
+          rotation={[-Math.PI / 2, 0, 0]}
+          position={[0, 0.03, 0]}
+          onPointerMove={(e) => {
+            const raw: [number, number] = [e.point.x, e.point.z];
+            let best: [number, number] | null = null;
+            let bestD = 1;
+            for (const t of drag.targets) {
+              const d = Math.hypot(raw[0] - t[0], raw[1] - t[1]);
+              if (d < bestD) {
+                bestD = d;
+                best = t;
+              }
+            }
+            const to = best ?? raw;
+            if (onMoveNode(drag.pos, to))
+              setDrag((d) => (d ? { ...d, pos: to } : d));
+          }}
+          onPointerUp={endDrag}
+        >
+          <planeGeometry args={[600, 600]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+      )}
+    </>
+  );
+}
+
 function PlanPane({
   blocks,
   selected,
@@ -211,6 +340,7 @@ function PlanPane({
   size,
   drawMode,
   onCommitLine,
+  onMoveNode,
 }: {
   blocks: FacadeBlock[];
   selected: Selection;
@@ -220,7 +350,9 @@ function PlanPane({
   size: { w: number; h: number };
   drawMode: boolean;
   onCommitLine: (a: [number, number], b: [number, number]) => void;
+  onMoveNode: (from: [number, number], to: [number, number]) => boolean;
 }) {
+  const [nodeDrag, setNodeDrag] = useState(false);
   const bounds = useMemo(() => {
     let minX = Infinity,
       maxX = -Infinity,
@@ -271,6 +403,12 @@ function PlanPane({
         view={view}
       />
       <PenSurface blocks={blocks} active={drawMode} onCommitLine={onCommitLine} />
+      <NodeHandles
+        blocks={blocks}
+        interactive={!drawMode}
+        onMoveNode={onMoveNode}
+        onDraggingChange={setNodeDrag}
+      />
       {/* Top-down; up = -z puts the street (+z) at the bottom of the pane. */}
       <OrthographicCamera
         ref={camRef}
@@ -286,7 +424,7 @@ function PlanPane({
         enableRotate={false}
         target={target}
         zoomSpeed={1}
-        enabled={!drawMode}
+        enabled={!drawMode && !nodeDrag}
       />
     </>
   );
@@ -452,6 +590,7 @@ export default function FacadeViewer({
   selected,
   onSelectLot,
   onCommitLine,
+  onMoveNode,
   context,
   view = FACADE_DEFAULT_VIEW,
 }: FacadeViewerProps) {
@@ -535,6 +674,7 @@ export default function FacadeViewer({
             size={planSize}
             drawMode={drawMode}
             onCommitLine={onCommitLine}
+            onMoveNode={onMoveNode}
           />
         );
       case "perspective":
