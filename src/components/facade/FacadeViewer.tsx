@@ -324,6 +324,7 @@ function NodeHandles({
               setDrag((d) => (d ? { ...d, pos: to } : d));
           }}
           onPointerUp={endDrag}
+          onClick={(e) => e.stopPropagation()}
         >
           <planeGeometry args={[600, 600]} />
           <meshBasicMaterial transparent opacity={0} depthWrite={false} />
