@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useFrame } from "@react-three/fiber";
 import {
   View,
   OrbitControls,
@@ -36,11 +36,11 @@ interface FacadeViewerProps {
 
 type PaneId = "plan" | "perspective" | "overview" | "detail";
 
-const PANES: { id: PaneId; label: string }[] = [
-  { id: "plan", label: "Plan" },
-  { id: "perspective", label: "3D" },
-  { id: "overview", label: "Elevation" },
-  { id: "detail", label: "Detail" },
+const PANES: { id: PaneId; label: string; index: number }[] = [
+  { id: "plan", label: "Plan", index: 1 },
+  { id: "perspective", label: "3D", index: 2 },
+  { id: "overview", label: "Elevation", index: 3 },
+  { id: "detail", label: "Detail", index: 4 },
 ];
 
 const ELEVATION_DISTANCE = 30;
@@ -56,20 +56,40 @@ const SKY_CSS = `linear-gradient(to bottom, ${SKY_STOPS.map(
   ([p, c]) => `${c} ${p * 100}%`,
 ).join(", ")})`;
 
-/** Track an element's content size (drives ortho fit math). */
-function useElementSize(ref: React.RefObject<HTMLDivElement | null>) {
+/** Track an element's content size (drives ortho fit math). Re-measures on
+ * ResizeObserver events AND whenever layoutEpoch changes — across
+ * maximize/restore the observer can deliver zero/stale sizes, so an
+ * explicit re-measure after the new layout commits is required. */
+function useElementSize(
+  ref: React.RefObject<HTMLDivElement | null>,
+  layoutEpoch: unknown,
+) {
   const [size, setSize] = useState({ w: 300, h: 300 });
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      const { width, height } = entry.contentRect;
-      if (width > 0 && height > 0) setSize({ w: width, h: height });
-    });
+    const measure = () => {
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) setSize({ w: r.width, h: r.height });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [ref]);
+  }, [ref, layoutEpoch]);
   return size;
+}
+
+/** drei Views scissor-paint their own regions with autoClear disabled and
+ * the buffer is preserved for capture — without a global clear, stale
+ * pixels from layout transitions persist forever. Runs before every View
+ * (their useFrame priority is >= 1). */
+function GlobalClear() {
+  useFrame(({ gl }) => {
+    gl.setScissorTest(false);
+    gl.clear(true, true, true);
+  }, 0.5);
+  return null;
 }
 
 // ── Pane contents (3D only — rendered inside <View>) ────────────────────────
@@ -257,9 +277,9 @@ export default function FacadeViewer({
     [isDesktop],
   );
 
-  const planSize = useElementSize(planRef);
-  const overviewSize = useElementSize(overviewRef);
-  const detailSize = useElementSize(detailRef);
+  const planSize = useElementSize(planRef, active);
+  const overviewSize = useElementSize(overviewRef, active);
+  const detailSize = useElementSize(detailRef, active);
 
   // Per-pane capture: crop the shared canvas to the pane's rect and
   // composite the sky gradient (Canvas has preserveDrawingBuffer for this).
@@ -344,7 +364,11 @@ export default function FacadeViewer({
             className={`relative ${paneVisible(p.id) ? "h-full" : "hidden"}`}
             onDoubleClick={() => isDesktop && toggleMaximize(p.id)}
           >
-            <View className="absolute inset-0">
+            <View
+              className="absolute inset-0"
+              index={p.index}
+              visible={paneVisible(p.id)}
+            >
               <Suspense fallback={null}>{paneContent(p.id)}</Suspense>
             </View>
             {/* HTML overlays — Views hold 3D content only */}
@@ -374,6 +398,7 @@ export default function FacadeViewer({
         gl={{ alpha: true, antialias: true, preserveDrawingBuffer: true }}
         dpr={[1, 2]}
       >
+        <GlobalClear />
         <View.Port />
       </Canvas>
 
