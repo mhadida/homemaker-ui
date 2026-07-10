@@ -105,54 +105,82 @@ function GlobalClear() {
 
 const MIN_BLOCK_LENGTH = 3;
 
-/** Invisible ground-plane pick surface + rubber-band line. Lives ONLY in
- * the plan pane, so drawing gestures can't fire from other panes. */
-function DrawSurface({
+/** Pen tool: click chains nodes into welded segments. Lives ONLY in the
+ * plan pane. Each click from the second on commits a block immediately;
+ * Escape (or leaving draw mode) ends the path; clicking near the FIRST
+ * node closes the loop. Consecutive segments share exact endpoint
+ * coordinates — welded by construction. */
+function PenSurface({
   blocks,
+  active,
   onCommitLine,
 }: {
   blocks: FacadeBlock[];
+  active: boolean;
   onCommitLine: (a: [number, number], b: [number, number]) => void;
 }) {
-  const [draft, setDraft] = useState<null | {
-    a: [number, number];
-    b: [number, number];
-  }>(null);
+  const [path, setPath] = useState<[number, number][]>([]);
+  const [cursor, setCursor] = useState<[number, number] | null>(null);
+
+  // Reset the in-progress path when draw mode is switched off. Adjusted
+  // during render (React's documented pattern for resetting state on a
+  // prop change) rather than in an effect, since setState-in-effect
+  // triggers a cascading-render lint error and a render-time reset is
+  // both simpler and paints one frame sooner.
+  const [wasActive, setWasActive] = useState(active);
+  if (active !== wasActive) {
+    setWasActive(active);
+    if (!active) {
+      setPath([]);
+      setCursor(null);
+    }
+  }
+
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPath([]);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active]);
+
+  if (!active) return null;
+  const first = path[0];
+  const last = path[path.length - 1];
   return (
     <>
       <mesh
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, 0.02, 0]}
         onPointerDown={(e) => {
-          try {
-            (e.target as unknown as Element).setPointerCapture?.(e.pointerId);
-          } catch {
-            // Synthetic/automation pointers have no active id — capture is a
-            // nice-to-have (keeps drags alive across pane edges), not load-bearing.
-          }
           e.stopPropagation();
           const p = snapPoint([e.point.x, e.point.z], blocks);
-          setDraft({ a: p, b: p });
+          if (path.length === 0) {
+            setPath([p]);
+            return;
+          }
+          const closing =
+            path.length >= 2 &&
+            Math.hypot(p[0] - first[0], p[1] - first[1]) <= 1;
+          const target = closing ? first : p;
+          const len = Math.hypot(target[0] - last[0], target[1] - last[1]);
+          if (len < MIN_BLOCK_LENGTH) return;
+          onCommitLine(last, target);
+          setPath(closing ? [] : [...path, target]);
         }}
-        onPointerMove={(e) => {
-          setDraft((d) => (d ? { a: d.a, b: [e.point.x, e.point.z] } : d));
-        }}
-        onPointerUp={(e) => {
-          if (!draft) return;
-          const b = snapPoint([e.point.x, e.point.z], blocks);
-          const len = Math.hypot(b[0] - draft.a[0], b[1] - draft.a[1]);
-          if (len >= MIN_BLOCK_LENGTH) onCommitLine(draft.a, b);
-          setDraft(null);
-        }}
+        onPointerMove={(e) =>
+          setCursor(snapPoint([e.point.x, e.point.z], blocks))
+        }
       >
         <planeGeometry args={[600, 600]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
-      {draft && (
+      {last && cursor && (
         <Line
           points={[
-            [draft.a[0], 0.08, draft.a[1]],
-            [draft.b[0], 0.08, draft.b[1]],
+            [last[0], 0.08, last[1]],
+            [cursor[0], 0.08, cursor[1]],
           ]}
           color="#3b82f6"
           lineWidth={3}
@@ -160,6 +188,15 @@ function DrawSurface({
           dashSize={0.5}
           gapSize={0.3}
         />
+      )}
+      {path.length >= 2 && (
+        <mesh
+          position={[first[0], 0.09, first[1]]}
+          rotation={[-Math.PI / 2, 0, 0]}
+        >
+          <ringGeometry args={[0.5, 0.7, 24]} />
+          <meshBasicMaterial color="#3b82f6" transparent opacity={0.9} />
+        </mesh>
       )}
     </>
   );
@@ -233,7 +270,7 @@ function PlanPane({
         context={context}
         view={view}
       />
-      {drawMode && <DrawSurface blocks={blocks} onCommitLine={onCommitLine} />}
+      <PenSurface blocks={blocks} active={drawMode} onCommitLine={onCommitLine} />
       {/* Top-down; up = -z puts the street (+z) at the bottom of the pane. */}
       <OrthographicCamera
         ref={camRef}
