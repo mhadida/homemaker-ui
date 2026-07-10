@@ -79,6 +79,18 @@ describe("lotPlacements", () => {
     expect(Math.sin(p.rotationY)).toBeCloseTo(f.normal[0], 9);
     expect(Math.cos(p.rotationY)).toBeCloseTo(f.normal[1], 9);
   });
+
+  it("applies depthOffset along the frame normal (straddles the line)", () => {
+    // default (+z normal) line: offset pushes +z
+    const b = block({ lots: [{ ...lot(10), depthOffset: 0.2 }] });
+    const [p] = lotPlacements(b);
+    expect(p.position[2]).toBeCloseTo(0.2, 9);
+
+    // flipped line: normal is -z, so the same offset pushes -z
+    const bf = block({ flipped: true, lots: [{ ...lot(10), depthOffset: 0.2 }] });
+    const [pf] = lotPlacements(bf);
+    expect(pf.position[2]).toBeCloseTo(-0.2, 9);
+  });
 });
 
 describe("syncLineToLots", () => {

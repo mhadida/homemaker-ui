@@ -9,6 +9,8 @@ export interface BlockGenSettings {
   shopfrontShare: number;
   /** 0–1 jitter on ratios/colors/ornament. */
   variation: number;
+  /** 0–0.3 m: lots offset ±depthJitter/2 around the line. */
+  depthJitter: number;
 }
 
 /** Template — always structuredClone() when assigning to a block. */
@@ -18,6 +20,7 @@ export const DEFAULT_GEN: BlockGenSettings = {
   presets: ["georgian", "victorian-shopfront", "modern"],
   shopfrontShare: 0.3,
   variation: 0.5,
+  depthJitter: 0.12,
 };
 
 export interface LotState {
@@ -25,6 +28,9 @@ export interface LotState {
   params: FacadeParams;
   /** Hand-edited → reroll must not touch it. */
   customized: boolean;
+  /** Signed setback along the block normal (m); + is street-side proud.
+   * Straddles the drawn line so streets get natural shadow lines. */
+  depthOffset?: number;
 }
 
 export interface FacadeBlock {
@@ -84,15 +90,20 @@ export interface LotPlacement {
 /** Lay the lots along the frame in order. rotationY maps the lot's local
  * +x to the frame dir and local +z to the frame normal. */
 export function lotPlacements(block: FacadeBlock): LotPlacement[] {
-  const { origin, dir } = blockFrame(block);
+  const { origin, dir, normal } = blockFrame(block);
   const rotationY = Math.atan2(-dir[1], dir[0]);
   let t = 0;
   return block.lots.map((lot) => {
     const w = lot.params.width;
     const mid = t + w / 2;
     t += w;
+    const off = lot.depthOffset ?? 0;
     return {
-      position: [origin[0] + dir[0] * mid, 0, origin[1] + dir[1] * mid],
+      position: [
+        origin[0] + dir[0] * mid + normal[0] * off,
+        0,
+        origin[1] + dir[1] * mid + normal[1] * off,
+      ],
       rotationY,
       width: w,
     };

@@ -126,6 +126,11 @@ export function generateLot(
  * an earlier lot's generation consumes a different number of samples. */
 const lotSeed = (seed: number, i: number) => (seed + (i + 1) * 7919) >>> 0;
 
+/** Separate stream from generateLot's draws so the offset never perturbs
+ * lot character determinism. */
+const offsetFor = (seed: number, i: number, jitter: number) =>
+  (mulberry32((lotSeed(seed, i) + 777) >>> 0)() - 0.5) * jitter;
+
 export function generateBlock(
   line: FacadeBlock["line"],
   flipped: boolean,
@@ -137,6 +142,7 @@ export function generateBlock(
   return widths.map((w, i) => ({
     params: generateLot(w, gen, mulberry32(lotSeed(seed, i))),
     customized: false,
+    depthOffset: offsetFor(seed, i, gen.depthJitter),
   }));
 }
 
@@ -155,6 +161,7 @@ export function rerollBlock(block: FacadeBlock, seed: number): FacadeBlock {
               mulberry32(lotSeed(seed, i)),
             ),
             customized: false,
+            depthOffset: offsetFor(seed, i, block.gen.depthJitter),
           },
     ),
   };

@@ -115,3 +115,39 @@ describe("generateBlock / rerollBlock", () => {
     expect(changed).toBe(true);
   });
 });
+
+describe("generateBlock depthOffset", () => {
+  const line = { a: [0, 0] as [number, number], b: [30, 0] as [number, number] };
+
+  it("depthJitter 0 → every lot's depthOffset is 0", () => {
+    const gen = { ...DEFAULT_GEN, depthJitter: 0 };
+    for (let seed = 1; seed <= 20; seed++) {
+      const lots = generateBlock(line, false, gen, seed);
+      for (const l of lots) expect(l.depthOffset).toBeCloseTo(0, 9);
+    }
+  });
+
+  it("DEFAULT_GEN → every |depthOffset| stays within depthJitter/2", () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const lots = generateBlock(line, false, DEFAULT_GEN, seed);
+      for (const l of lots) {
+        expect(Math.abs(l.depthOffset ?? 0)).toBeLessThanOrEqual(
+          DEFAULT_GEN.depthJitter / 2 + 1e-9,
+        );
+      }
+    }
+  });
+
+  it("reroll: pinned lot keeps its exact depthOffset, unpinned offsets change with the new seed", () => {
+    const lots = generateBlock(line, false, DEFAULT_GEN, 7);
+    const block: FacadeBlock = {
+      ...initialWorld(DEFAULT_FACADE),
+      line,
+      lots: lots.map((l, i) => (i === 1 ? { ...l, customized: true } : l)),
+      seed: 7,
+    };
+    const rerolled = rerollBlock(block, 99);
+    expect(rerolled.lots[1].depthOffset).toBe(block.lots[1].depthOffset); // pinned
+    expect(rerolled.lots[0].depthOffset).not.toBe(block.lots[0].depthOffset);
+  });
+});

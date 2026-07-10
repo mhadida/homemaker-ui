@@ -102,3 +102,12 @@ shopfrontShare 0 and 1 extremes. Drawing/selection verified visually.
 Corner buildings at junctions; curved lines; persistence of drawn worlds
 (refresh loses the street — if that stings in use, localStorage is a small
 follow-up); IFC/BIM export of streets.
+
+## Addendum (2026-07-10): per-lot depth offsets
+
+User request during implementation: generated lots offset slightly along the
+block normal so streets get natural shadow lines between buildings. Decision:
+offsets STRADDLE the drawn line — signed, drawn per lot from
+±`depthJitter`/2 (`BlockGenSettings.depthJitter`, 0–0.3 m, default 0.12,
+Block-inspector slider). Stored as `LotState.depthOffset`; applied in
+`lotPlacements`; pinned lots keep their offset through rerolls.

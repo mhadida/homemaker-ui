@@ -530,6 +530,15 @@ function BlockInspector({
           step={0.05}
           onChange={(variation) => update({ variation })}
         />
+        <SliderRow
+          label="Depth jitter"
+          value={gen.depthJitter}
+          display={`${Math.round(gen.depthJitter * 100)}cm`}
+          min={0}
+          max={0.3}
+          step={0.01}
+          onChange={(depthJitter) => update({ depthJitter })}
+        />
         <div>
           <span className="text-[10px] text-[var(--muted)] block mb-1">
             Preset pool
