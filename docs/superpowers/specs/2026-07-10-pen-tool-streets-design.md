@@ -16,7 +16,7 @@ the street while the buildings re-fit.
 
 | Question | Decision |
 |---|---|
-| Re-fit when a block's length changes | Stretch the unpinned lot nearest the moved end; past the block's `lotWidth.max` a new lot is generated from the seed stream, below `lotWidth.min` it is removed. Existing lots never reshuffle. |
+| Re-fit when a block's length changes | Stretch the unpinned lot nearest the moved end; once it reaches `lotWidth.max + lotWidth.min` a new lot (seed-drawn width) splits off at the moved end, below `lotWidth.min` it is removed. Existing lots never reshuffle. |
 | Lot-width edit on a welded endpoint | The endpoint still moves (today's `syncLineToLots` result), routed through `moveNode` — welded neighbors re-fit exactly as if the shared node were dragged. One mechanism; v1 single-block behavior unchanged; loops need no special case. |
 | When nodes are draggable | Always, in the plan pane, outside an active pen path. Handles are always visible; grabbing one suspends plan panning. During an active path, clicks mean place/snap/close instead. |
 | Data model | Coincidence welding: `FacadeBlock.line` keeps raw coordinates; a "node" is derived from endpoints with identical coordinates. No schema change. |
@@ -45,7 +45,9 @@ interface WorldNode {
 
 deriveNodes(blocks: FacadeBlock[]): WorldNode[]
 // Move every endpoint at `from` to `to`, then re-fit every attached block.
-// Returns null if any attached block cannot satisfy the move (see clamping).
+// Returns null if any attached block cannot satisfy the move (see clamping)
+// — and also when NO endpoint sits at `from` (moving a nonexistent node is
+// a failed move; this makes stale-frame drag events harmless no-ops).
 moveNode(blocks: FacadeBlock[], from: [number, number], to: [number, number]): FacadeBlock[] | null
 ```
 
@@ -91,10 +93,18 @@ When an endpoint of a block moves:
   too — facades rotate with the block (same as today's angled blocks).
 - **The lot nearest the moved node absorbs the length delta.** Lots at the
   fixed end keep their widths and positions.
-- If the absorbing lot would exceed the block's `gen.lotWidth.max`, it is
-  capped and a **new lot** is generated to take the remainder, drawn from
-  the block's seed stream offset by lot count — deterministic, and existing
-  lots never reshuffle. Repeat while remainder demands it.
+- When the absorbing lot reaches `gen.lotWidth.max + gen.lotWidth.min` — the
+  first width divisible into two legal lots — a **new lot** splits off at
+  the moved end. Its width is drawn from `[min, max]` via the block's seed
+  stream offset by lot count (deterministic; existing lots never reshuffle;
+  independent of the absorber's width, so final widths don't depend on the
+  drag path). The absorber keeps the remainder (≥ `min`); the new lot
+  becomes the next absorber. Repeat while growth demands it.
+  *Why not split exactly at `max`:* the overflow piece would start below
+  `min`, and the below-min removal rule would instantly delete it — an
+  add/remove oscillation. The `max + min` threshold means an absorbing lot
+  can render stretched up to just under `max + min` before splitting; that
+  transitional stretch is accepted.
 - If the absorbing lot would fall below `gen.lotWidth.min`, it is removed
   and the remainder folds into the next unpinned lot toward the fixed end.
 - **Pinned lots (`customized: true`) are never resized or removed.** The
