@@ -236,13 +236,13 @@ export default function FacadePage() {
   );
 
   const handleDeleteBlock = useCallback(() => {
-    setBlocks((bs) => {
-      const rest = bs.filter((b) => b.id !== selected.blockId);
-      const next = rest.length > 0 ? rest : [initialWorld(DEFAULT_FACADE)];
-      setSelected({ blockId: next[0].id, lot: 0, level: "lot" });
-      return next;
-    });
-  }, [selected.blockId]);
+    // Computed OUTSIDE the updater: initialWorld()/nextBlockId() are impure
+    // and Strict Mode double-invokes updater functions.
+    const rest = blocks.filter((b) => b.id !== selected.blockId);
+    const next = rest.length > 0 ? rest : [initialWorld(DEFAULT_FACADE)];
+    setBlocks(next);
+    setSelected({ blockId: next[0].id, lot: 0, level: "lot" });
+  }, [blocks, selected.blockId]);
 
   const handleSelectionLevel = useCallback(
     (level: "lot" | "block") => setSelected((s) => ({ ...s, level })),

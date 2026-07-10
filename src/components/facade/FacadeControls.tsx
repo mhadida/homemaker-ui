@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import type {
   FacadeParams,
   LotContext,
@@ -464,6 +464,13 @@ function BlockInspector({
   onDeleteBlock: () => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const confirmTimer = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (confirmTimer.current !== null) window.clearTimeout(confirmTimer.current);
+    },
+    [],
+  );
   const gen = block.gen;
   const update = (u: Partial<BlockGenSettings>) => onGenChange({ ...gen, ...u });
   return (
@@ -566,7 +573,10 @@ function BlockInspector({
               setConfirmDelete(false);
             } else {
               setConfirmDelete(true);
-              window.setTimeout(() => setConfirmDelete(false), 3000);
+              confirmTimer.current = window.setTimeout(
+                () => setConfirmDelete(false),
+                3000,
+              );
             }
           }}
           className={`w-full px-2 py-1.5 rounded text-[11px] transition-colors ${
