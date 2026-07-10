@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type {
   FacadeParams,
   LotContext,
@@ -15,6 +16,7 @@ import {
 } from "@/lib/facade/types";
 import type { ViewSettings } from "@/lib/building/types";
 import { WALL_SWATCHES, classicalStoreyHeights } from "@/lib/building/types";
+import type { Selection, FacadeBlock, BlockGenSettings } from "@/lib/facade/blocks";
 import BayGrid from "./BayGrid";
 
 interface FacadeControlsProps {
@@ -24,6 +26,14 @@ interface FacadeControlsProps {
   onContextChange: (c: LotContext) => void;
   view: ViewSettings;
   onViewChange: (v: ViewSettings) => void;
+  // block inspector (Task 4)
+  selection: Selection;
+  block: FacadeBlock;
+  onSelectionLevel: (level: "lot" | "block") => void;
+  onGenChange: (gen: BlockGenSettings) => void;
+  onReroll: () => void;
+  onFlip: () => void;
+  onDeleteBlock: () => void;
 }
 
 function SliderRow({
@@ -157,6 +167,13 @@ export default function FacadeControls({
   onContextChange,
   view,
   onViewChange,
+  selection,
+  block,
+  onSelectionLevel,
+  onGenChange,
+  onReroll,
+  onFlip,
+  onDeleteBlock,
 }: FacadeControlsProps) {
   const update = (u: Partial<FacadeParams>) => onChange({ ...params, ...u });
   const L = FACADE_LIMITS;
@@ -172,6 +189,31 @@ export default function FacadeControls({
 
   return (
     <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-1">
+        <Toggle
+          label={`Lot ${selection.lot + 1}/${block.lots.length}`}
+          on={selection.level === "lot"}
+          onClick={() => onSelectionLevel("lot")}
+        />
+        <Toggle
+          label="Block"
+          on={selection.level === "block"}
+          onClick={() => onSelectionLevel("block")}
+        />
+      </div>
+
+      {selection.level === "block" && (
+        <BlockInspector
+          block={block}
+          onGenChange={onGenChange}
+          onReroll={onReroll}
+          onFlip={onFlip}
+          onDeleteBlock={onDeleteBlock}
+        />
+      )}
+
+      {selection.level === "lot" && (
+        <>
       {/* Presets */}
       <div className="grid grid-cols-3 gap-1">
         {(Object.keys(FACADE_PRESETS) as PresetId[]).map((id) => (
@@ -401,6 +443,140 @@ export default function FacadeControls({
           step={1}
           onChange={(sunAltitude) => onViewChange({ ...view, sunAltitude })}
         />
+      </Section>
+        </>
+      )}
+    </div>
+  );
+}
+
+function BlockInspector({
+  block,
+  onGenChange,
+  onReroll,
+  onFlip,
+  onDeleteBlock,
+}: {
+  block: FacadeBlock;
+  onGenChange: (gen: BlockGenSettings) => void;
+  onReroll: () => void;
+  onFlip: () => void;
+  onDeleteBlock: () => void;
+}) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const gen = block.gen;
+  const update = (u: Partial<BlockGenSettings>) => onGenChange({ ...gen, ...u });
+  return (
+    <div className="space-y-5">
+      <Section title="Generation">
+        <SliderRow
+          label="Lot width min"
+          value={gen.lotWidth.min}
+          display={`${gen.lotWidth.min.toFixed(1)}m`}
+          min={4}
+          max={gen.lotWidth.max}
+          step={0.5}
+          onChange={(v) => update({ lotWidth: { ...gen.lotWidth, min: v } })}
+        />
+        <SliderRow
+          label="Lot width max"
+          value={gen.lotWidth.max}
+          display={`${gen.lotWidth.max.toFixed(1)}m`}
+          min={gen.lotWidth.min}
+          max={14}
+          step={0.5}
+          onChange={(v) => update({ lotWidth: { ...gen.lotWidth, max: v } })}
+        />
+        <SliderRow
+          label="Storeys min"
+          value={gen.storeys.min}
+          display={`${gen.storeys.min}`}
+          min={1}
+          max={gen.storeys.max}
+          step={1}
+          onChange={(v) => update({ storeys: { ...gen.storeys, min: v } })}
+        />
+        <SliderRow
+          label="Storeys max"
+          value={gen.storeys.max}
+          display={`${gen.storeys.max}`}
+          min={gen.storeys.min}
+          max={6}
+          step={1}
+          onChange={(v) => update({ storeys: { ...gen.storeys, max: v } })}
+        />
+        <SliderRow
+          label="Shopfront share"
+          value={gen.shopfrontShare}
+          display={`${Math.round(gen.shopfrontShare * 100)}%`}
+          min={0}
+          max={1}
+          step={0.05}
+          onChange={(shopfrontShare) => update({ shopfrontShare })}
+        />
+        <SliderRow
+          label="Variation"
+          value={gen.variation}
+          display={`${Math.round(gen.variation * 100)}%`}
+          min={0}
+          max={1}
+          step={0.05}
+          onChange={(variation) => update({ variation })}
+        />
+        <div>
+          <span className="text-[10px] text-[var(--muted)] block mb-1">
+            Preset pool
+          </span>
+          <div className="grid grid-cols-3 gap-1">
+            {(Object.keys(FACADE_PRESETS) as PresetId[]).map((id) => {
+              const on = gen.presets.includes(id);
+              return (
+                <Toggle
+                  key={id}
+                  label={FACADE_PRESETS[id].label}
+                  on={on}
+                  onClick={() =>
+                    update({
+                      presets: on
+                        ? gen.presets.filter((p) => p !== id)
+                        : [...gen.presets, id],
+                    })
+                  }
+                />
+              );
+            })}
+          </div>
+        </div>
+        <div className="text-[9px] text-[var(--muted)]">
+          Settings apply on the next reroll. Seed {block.seed} ·{" "}
+          {block.lots.length} lots.
+        </div>
+      </Section>
+
+      <Section title="Actions">
+        <div className="grid grid-cols-2 gap-1">
+          <Toggle label="Reroll" on={false} onClick={onReroll} />
+          <Toggle label="Flip side" on={block.flipped} onClick={onFlip} />
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            if (confirmDelete) {
+              onDeleteBlock();
+              setConfirmDelete(false);
+            } else {
+              setConfirmDelete(true);
+              window.setTimeout(() => setConfirmDelete(false), 3000);
+            }
+          }}
+          className={`w-full px-2 py-1.5 rounded text-[11px] transition-colors ${
+            confirmDelete
+              ? "bg-red-600 text-white"
+              : "bg-[var(--border)] text-zinc-500 hover:text-zinc-300"
+          }`}
+        >
+          {confirmDelete ? "Confirm delete?" : "Delete block"}
+        </button>
       </Section>
     </div>
   );

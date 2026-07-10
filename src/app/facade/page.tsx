@@ -19,9 +19,11 @@ import {
 import {
   initialWorld,
   syncLineToLots,
+  type BlockGenSettings,
   type FacadeBlock,
   type Selection,
 } from "@/lib/facade/blocks";
+import { rerollBlock } from "@/lib/facade/generate";
 import type { ViewSettings } from "@/lib/building/types";
 import { WALL_SWATCHES } from "@/lib/building/types";
 import FacadeControls from "@/components/facade/FacadeControls";
@@ -211,6 +213,42 @@ export default function FacadePage() {
     );
   }, []);
 
+  const updateSelectedBlock = useCallback(
+    (fn: (b: FacadeBlock) => FacadeBlock) => {
+      setBlocks((bs) => bs.map((b) => (b.id === selected.blockId ? fn(b) : b)));
+    },
+    [selected.blockId],
+  );
+
+  const handleGenChange = useCallback(
+    (gen: BlockGenSettings) => updateSelectedBlock((b) => ({ ...b, gen })),
+    [updateSelectedBlock],
+  );
+
+  const handleReroll = useCallback(() => {
+    const seed = Math.floor(Math.random() * 1e9);
+    updateSelectedBlock((b) => rerollBlock(b, seed));
+  }, [updateSelectedBlock]);
+
+  const handleFlip = useCallback(
+    () => updateSelectedBlock((b) => ({ ...b, flipped: !b.flipped })),
+    [updateSelectedBlock],
+  );
+
+  const handleDeleteBlock = useCallback(() => {
+    setBlocks((bs) => {
+      const rest = bs.filter((b) => b.id !== selected.blockId);
+      const next = rest.length > 0 ? rest : [initialWorld(DEFAULT_FACADE)];
+      setSelected({ blockId: next[0].id, lot: 0, level: "lot" });
+      return next;
+    });
+  }, [selected.blockId]);
+
+  const handleSelectionLevel = useCallback(
+    (level: "lot" | "block") => setSelected((s) => ({ ...s, level })),
+    [],
+  );
+
   const layout = useMemo(() => computeLayout(params), [params]);
 
   const handlePrompt = useCallback(
@@ -317,6 +355,13 @@ export default function FacadePage() {
               onContextChange={setContext}
               view={view}
               onViewChange={setView}
+              selection={selected}
+              block={selectedBlock}
+              onSelectionLevel={handleSelectionLevel}
+              onGenChange={handleGenChange}
+              onReroll={handleReroll}
+              onFlip={handleFlip}
+              onDeleteBlock={handleDeleteBlock}
             />
           </div>
         </div>
