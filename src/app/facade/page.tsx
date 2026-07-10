@@ -16,6 +16,12 @@ import {
   parseFacadePromptLocal,
   mergeFacadeParams,
 } from "@/lib/facade/prompt-parser";
+import {
+  initialWorld,
+  syncLineToLots,
+  type FacadeBlock,
+  type Selection,
+} from "@/lib/facade/blocks";
 import type { ViewSettings } from "@/lib/building/types";
 import { WALL_SWATCHES } from "@/lib/building/types";
 import FacadeControls from "@/components/facade/FacadeControls";
@@ -158,11 +164,52 @@ const FACADE_SUGGESTIONS = [
 export default function FacadePage() {
   // Everything is live — no draft/committed split. Client-side geometry
   // rebuilds are trivially fast, so every slider tick renders immediately.
-  const [params, setParams] = useState<FacadeParams>(DEFAULT_FACADE);
+  const [initial] = useState(() => initialWorld(DEFAULT_FACADE));
+  const [blocks, setBlocks] = useState<FacadeBlock[]>([initial]);
+  const [selected, setSelected] = useState<Selection>({
+    blockId: initial.id,
+    lot: 0,
+    level: "lot",
+  });
   const [context, setContext] = useState<LotContext>(DEFAULT_LOT_CONTEXT);
   const [view, setView] = useState<ViewSettings>(FACADE_DEFAULT_VIEW);
   const [isAILoading, setIsAILoading] = useState(false);
   const [aiStatus, setAiStatus] = useState<string | null>(null);
+
+  const selectedBlock =
+    blocks.find((b) => b.id === selected.blockId) ?? blocks[0];
+  const selectedLot =
+    selectedBlock.lots[Math.min(selected.lot, selectedBlock.lots.length - 1)];
+  const params = selectedLot.params;
+
+  // Every existing consumer (controls, prompt, AI, header) edits the
+  // SELECTED lot; hand edits pin it against reroll and keep the block
+  // line in sync with the new widths.
+  const setParams = useCallback(
+    (next: FacadeParams | ((prev: FacadeParams) => FacadeParams)) => {
+      setBlocks((bs) =>
+        bs.map((b) => {
+          if (b.id !== selected.blockId) return b;
+          const lotIndex = Math.min(selected.lot, b.lots.length - 1);
+          const prev = b.lots[lotIndex].params;
+          const value = typeof next === "function" ? next(prev) : next;
+          const lots = b.lots.map((l, i) =>
+            i === lotIndex ? { params: value, customized: true } : l,
+          );
+          return syncLineToLots({ ...b, lots });
+        }),
+      );
+    },
+    [selected],
+  );
+
+  const handleSelectLot = useCallback((blockId: string, lot: number) => {
+    setSelected((s) =>
+      s.blockId === blockId && s.lot === lot && s.level === "lot"
+        ? { blockId, lot, level: "block" } // second click promotes to block
+        : { blockId, lot, level: "lot" },
+    );
+  }, []);
 
   const layout = useMemo(() => computeLayout(params), [params]);
 
@@ -240,7 +287,13 @@ export default function FacadePage() {
 
       <div className="flex flex-1 min-h-0 flex-col md:flex-row">
         <div className="flex-1 min-h-[40vh] md:min-h-0 relative">
-          <FacadeViewer params={params} context={context} view={view} />
+          <FacadeViewer
+            blocks={blocks}
+            selected={selected}
+            onSelectLot={handleSelectLot}
+            context={context}
+            view={view}
+          />
         </div>
 
         <div className="w-full md:w-80 border-t md:border-t-0 md:border-l border-[var(--border)] bg-[var(--panel-bg)] overflow-y-auto">

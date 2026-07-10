@@ -24,12 +24,15 @@ import {
   fitOrthoZoom,
   elevationCameraPosition,
 } from "@/lib/facade/camera";
-import type { FacadeParams, LotContext } from "@/lib/facade/types";
+import type { LotContext } from "@/lib/facade/types";
 import { FACADE_DEFAULT_VIEW } from "@/lib/facade/types";
 import type { ViewSettings } from "@/lib/building/types";
+import type { FacadeBlock, Selection } from "@/lib/facade/blocks";
 
 interface FacadeViewerProps {
-  params: FacadeParams;
+  blocks: FacadeBlock[];
+  selected: Selection;
+  onSelectLot: (blockId: string, lot: number) => void;
   context: LotContext;
   view?: ViewSettings;
 }
@@ -95,17 +98,24 @@ function GlobalClear() {
 // ── Pane contents (3D only — rendered inside <View>) ────────────────────────
 
 function PlanPane({
-  params,
+  blocks,
+  selected,
+  onSelectLot,
   context,
   view,
   size,
 }: {
-  params: FacadeParams;
+  blocks: FacadeBlock[];
+  selected: Selection;
+  onSelectLot: (blockId: string, lot: number) => void;
   context: LotContext;
   view: ViewSettings;
   size: { w: number; h: number };
 }) {
-  const layout = useMemo(() => computeLayout(params), [params]);
+  const selBlock = blocks.find((b) => b.id === selected.blockId) ?? blocks[0];
+  const selParams =
+    selBlock.lots[Math.min(selected.lot, selBlock.lots.length - 1)].params;
+  const layout = useMemo(() => computeLayout(selParams), [selParams]);
   // Fit the lot + neighbors (8m each side) + sidewalk/road depth.
   const worldW = layout.width + 18;
   const worldD = 26;
@@ -119,7 +129,13 @@ function PlanPane({
   }, [zoom]);
   return (
     <>
-      <SceneContents params={params} context={context} view={view} />
+      <SceneContents
+        blocks={blocks}
+        selected={selected}
+        onSelectLot={onSelectLot}
+        context={context}
+        view={view}
+      />
       {/* Top-down; up = -z puts the street (+z) at the bottom of the pane. */}
       <OrthographicCamera
         ref={camRef}
@@ -141,17 +157,27 @@ function PlanPane({
 }
 
 function PerspectivePane({
-  params,
+  blocks,
+  selected,
+  onSelectLot,
   context,
   view,
 }: {
-  params: FacadeParams;
+  blocks: FacadeBlock[];
+  selected: Selection;
+  onSelectLot: (blockId: string, lot: number) => void;
   context: LotContext;
   view: ViewSettings;
 }) {
   return (
     <>
-      <SceneContents params={params} context={context} view={view} />
+      <SceneContents
+        blocks={blocks}
+        selected={selected}
+        onSelectLot={onSelectLot}
+        context={context}
+        view={view}
+      />
       <PerspectiveCamera
         makeDefault
         position={[6, 5, 14]}
@@ -185,19 +211,26 @@ function PerspectivePane({
 }
 
 function ElevationPane({
-  params,
+  blocks,
+  selected,
+  onSelectLot,
   context,
   view,
   size,
   mode,
 }: {
-  params: FacadeParams;
+  blocks: FacadeBlock[];
+  selected: Selection;
+  onSelectLot: (blockId: string, lot: number) => void;
   context: LotContext;
   view: ViewSettings;
   size: { w: number; h: number };
   mode: "overview" | "detail";
 }) {
-  const layout = useMemo(() => computeLayout(params), [params]);
+  const selBlock = blocks.find((b) => b.id === selected.blockId) ?? blocks[0];
+  const selParams =
+    selBlock.lots[Math.min(selected.lot, selBlock.lots.length - 1)].params;
+  const layout = useMemo(() => computeLayout(selParams), [selParams]);
   // Overview frames the whole facade; detail frames the ground storey.
   const worldH =
     mode === "overview"
@@ -219,7 +252,13 @@ function ElevationPane({
   }, [zoom]);
   return (
     <>
-      <SceneContents params={params} context={context} view={view} />
+      <SceneContents
+        blocks={blocks}
+        selected={selected}
+        onSelectLot={onSelectLot}
+        context={context}
+        view={view}
+      />
       <OrthographicCamera
         ref={camRef}
         makeDefault
@@ -242,7 +281,9 @@ function ElevationPane({
 // ── Workspace shell ─────────────────────────────────────────────────────────
 
 export default function FacadeViewer({
-  params,
+  blocks,
+  selected,
+  onSelectLot,
   context,
   view = FACADE_DEFAULT_VIEW,
 }: FacadeViewerProps) {
@@ -316,14 +357,31 @@ export default function FacadeViewer({
     switch (id) {
       case "plan":
         return (
-          <PlanPane params={params} context={context} view={view} size={planSize} />
+          <PlanPane
+            blocks={blocks}
+            selected={selected}
+            onSelectLot={onSelectLot}
+            context={context}
+            view={view}
+            size={planSize}
+          />
         );
       case "perspective":
-        return <PerspectivePane params={params} context={context} view={view} />;
+        return (
+          <PerspectivePane
+            blocks={blocks}
+            selected={selected}
+            onSelectLot={onSelectLot}
+            context={context}
+            view={view}
+          />
+        );
       case "overview":
         return (
           <ElevationPane
-            params={params}
+            blocks={blocks}
+            selected={selected}
+            onSelectLot={onSelectLot}
             context={context}
             view={view}
             size={overviewSize}
@@ -333,7 +391,9 @@ export default function FacadeViewer({
       case "detail":
         return (
           <ElevationPane
-            params={params}
+            blocks={blocks}
+            selected={selected}
+            onSelectLot={onSelectLot}
             context={context}
             view={view}
             size={detailSize}

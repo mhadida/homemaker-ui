@@ -1,11 +1,13 @@
 "use client";
 
 import { useMemo } from "react";
-import { Environment, ContactShadows, Grid } from "@react-three/drei";
+import { Environment, ContactShadows, Grid, Edges, Line } from "@react-three/drei";
 import * as THREE from "three";
 import FacadeMesh from "./FacadeMesh";
 import type { FacadeParams, LotContext } from "@/lib/facade/types";
 import type { ViewSettings } from "@/lib/building/types";
+import { blockFrame, lotPlacements, type FacadeBlock, type Selection } from "@/lib/facade/blocks";
+import { computeLayout } from "@/lib/facade/layout";
 
 /** Copied from BuildingViewer — sun azimuth/altitude → directional light pos. */
 function sunPositionFromAngles(
@@ -86,12 +88,83 @@ function NeighborMasses({
   );
 }
 
+function SelectionMarker({ params }: { params: FacadeParams }) {
+  const h = useMemo(() => computeLayout(params).totalHeight, [params]);
+  return (
+    <mesh position={[0, h / 2, -0.15]}>
+      <boxGeometry args={[params.width + 0.15, h + 0.15, 0.7]} />
+      <meshBasicMaterial visible={false} />
+      <Edges color="#3b82f6" lineWidth={1.5} />
+    </mesh>
+  );
+}
+
+function BlockGroup({
+  block,
+  selected,
+  onSelectLot,
+}: {
+  block: FacadeBlock;
+  selected: Selection;
+  onSelectLot: (blockId: string, lot: number) => void;
+}) {
+  const placements = useMemo(() => lotPlacements(block), [block]);
+  const frame = useMemo(() => blockFrame(block), [block]);
+  const isSelectedBlock = selected.blockId === block.id;
+  const mid: [number, number, number] = [
+    frame.origin[0] + (frame.dir[0] * frame.length) / 2,
+    0,
+    frame.origin[1] + (frame.dir[1] * frame.length) / 2,
+  ];
+  const yaw = Math.atan2(-frame.dir[1], frame.dir[0]);
+  return (
+    <group>
+      {block.lots.map((lot, i) => (
+        <group
+          key={`${block.id}-${i}`}
+          position={placements[i].position}
+          rotation={[0, placements[i].rotationY, 0]}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelectLot(block.id, i);
+          }}
+        >
+          <FacadeMesh params={lot.params} />
+          {isSelectedBlock && selected.lot === i && (
+            <SelectionMarker params={lot.params} />
+          )}
+        </group>
+      ))}
+      {/* Per-block sidewalk strip on the street side of the line */}
+      <group position={mid} rotation={[0, yaw, 0]}>
+        <mesh position={[0, 0.005, 1.25]} receiveShadow>
+          <boxGeometry args={[frame.length, 0.01, 2.5]} />
+          <meshStandardMaterial color="#8f8a80" roughness={0.9} />
+        </mesh>
+      </group>
+      {/* The block's line — always visible in plan, accented when selected */}
+      <Line
+        points={[
+          [block.line.a[0], 0.06, block.line.a[1]],
+          [block.line.b[0], 0.06, block.line.b[1]],
+        ]}
+        color={isSelectedBlock && selected.level === "block" ? "#3b82f6" : "#4a4a48"}
+        lineWidth={isSelectedBlock && selected.level === "block" ? 3 : 1.5}
+      />
+    </group>
+  );
+}
+
 export default function SceneContents({
-  params,
+  blocks,
+  selected,
+  onSelectLot,
   context,
   view,
 }: {
-  params: FacadeParams;
+  blocks: FacadeBlock[];
+  selected: Selection;
+  onSelectLot: (blockId: string, lot: number) => void;
   context: LotContext;
   view: ViewSettings;
 }) {
@@ -125,8 +198,20 @@ export default function SceneContents({
         background={false}
       />
 
-      <FacadeMesh params={params} />
-      <NeighborMasses context={context} facadeWidth={params.width} />
+      {blocks.map((block) => (
+        <BlockGroup
+          key={block.id}
+          block={block}
+          selected={selected}
+          onSelectLot={onSelectLot}
+        />
+      ))}
+      {blocks.length === 1 && blocks[0].lots.length === 1 && context.show && (
+        <NeighborMasses
+          context={context}
+          facadeWidth={blocks[0].lots[0].params.width}
+        />
+      )}
 
       {/* Ground plane — polygonOffset pushes it back so the sidewalk, road
        * strip, and grid lines all win the depth test (same trick as the
@@ -141,17 +226,6 @@ export default function SceneContents({
           polygonOffsetFactor={1}
           polygonOffsetUnits={1}
         />
-      </mesh>
-
-      {/* Sidewalk strip in front of the facade (z 0 → 2.5) */}
-      <mesh position={[0, 0, 1.25]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <planeGeometry args={[60, 2.5]} />
-        <meshStandardMaterial color="#8f8a80" roughness={0.9} />
-      </mesh>
-      {/* Road beyond the sidewalk (z 2.5 → 9) */}
-      <mesh position={[0, 0, 5.75]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <planeGeometry args={[60, 6.5]} />
-        <meshStandardMaterial color="#57544f" roughness={0.95} />
       </mesh>
 
       <Grid

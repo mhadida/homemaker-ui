@@ -39,6 +39,12 @@ export interface FacadeBlock {
   lots: LotState[];
 }
 
+export interface Selection {
+  blockId: string;
+  lot: number;
+  level: "lot" | "block";
+}
+
 export interface BlockFrame {
   origin: [number, number];
   /** Unit vector along the effective line. */
