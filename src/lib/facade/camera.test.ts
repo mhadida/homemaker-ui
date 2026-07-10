@@ -22,6 +22,12 @@ describe("fitOrthoZoom", () => {
     expect(fitOrthoZoom(0, 600, 10, 20)).toBe(1);
     expect(fitOrthoZoom(800, 600, -5, 20)).toBe(1);
   });
+
+  it("non-finite and non-positive margins return 1", () => {
+    expect(fitOrthoZoom(NaN, 600, 10, 20)).toBe(1);
+    expect(fitOrthoZoom(800, 600, Infinity, 20)).toBe(1);
+    expect(fitOrthoZoom(800, 600, 10, 20, 0)).toBe(1);
+  });
 });
 
 describe("elevationCameraPosition", () => {

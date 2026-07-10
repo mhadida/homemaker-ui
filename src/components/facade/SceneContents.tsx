@@ -6,7 +6,13 @@ import * as THREE from "three";
 import FacadeMesh from "./FacadeMesh";
 import type { FacadeParams, LotContext } from "@/lib/facade/types";
 import type { ViewSettings } from "@/lib/building/types";
-import { blockFrame, lotPlacements, type FacadeBlock, type Selection } from "@/lib/facade/blocks";
+import {
+  blockFrame,
+  lotPlacements,
+  NEIGHBOR_WIDTH,
+  type FacadeBlock,
+  type Selection,
+} from "@/lib/facade/blocks";
 import { computeLayout } from "@/lib/facade/layout";
 
 /** Copied from BuildingViewer — sun azimuth/altitude → directional light pos. */
@@ -64,7 +70,7 @@ function NeighborMasses({
   facadeWidth: number;
 }) {
   if (!context.show) return null;
-  const W = 8; // neighbor visible width
+  const W = NEIGHBOR_WIDTH; // neighbor visible width
   const D = 9; // neighbor depth behind the street line
   return (
     <>

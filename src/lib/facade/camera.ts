@@ -5,7 +5,8 @@ export const FACADE_NORMAL: [number, number, number] = [0, 0, 1];
 
 /** Orthographic zoom (pixels per world unit) that fits a worldW×worldH
  * rectangle into a viewW×viewH viewport. margin > 1 leaves breathing room
- * (1.15 = 15%). Degenerate inputs return 1 (visible, never NaN/Infinity). */
+ * (1.15 = 15%). Non-finite or non-positive inputs (including margin)
+ * return 1 — visible, never NaN/Infinity. */
 export function fitOrthoZoom(
   viewW: number,
   viewH: number,
@@ -13,7 +14,8 @@ export function fitOrthoZoom(
   worldH: number,
   margin = 1.15,
 ): number {
-  if (viewW <= 0 || viewH <= 0 || worldW <= 0 || worldH <= 0) return 1;
+  const args = [viewW, viewH, worldW, worldH, margin];
+  if (args.some((v) => !Number.isFinite(v) || v <= 0)) return 1;
   return Math.min(viewW / (worldW * margin), viewH / (worldH * margin));
 }
 

@@ -20,15 +20,19 @@ import {
 import * as THREE from "three";
 import SceneContents from "./SceneContents";
 import { computeLayout } from "@/lib/facade/layout";
-import {
-  FACADE_NORMAL,
-  fitOrthoZoom,
-  elevationCameraPosition,
-} from "@/lib/facade/camera";
+import { fitOrthoZoom, elevationCameraPosition } from "@/lib/facade/camera";
 import type { LotContext } from "@/lib/facade/types";
 import { FACADE_DEFAULT_VIEW } from "@/lib/facade/types";
 import type { ViewSettings } from "@/lib/building/types";
-import { snapPoint, type FacadeBlock, type Selection } from "@/lib/facade/blocks";
+import {
+  snapPoint,
+  blockFrame,
+  lotPlacements,
+  totalLotsWidth,
+  NEIGHBOR_WIDTH,
+  type FacadeBlock,
+  type Selection,
+} from "@/lib/facade/blocks";
 
 interface FacadeViewerProps {
   blocks: FacadeBlock[];
@@ -180,14 +184,28 @@ function PlanPane({
   drawMode: boolean;
   onCommitLine: (a: [number, number], b: [number, number]) => void;
 }) {
-  const selBlock = blocks.find((b) => b.id === selected.blockId) ?? blocks[0];
-  const selParams =
-    selBlock.lots[Math.min(selected.lot, selBlock.lots.length - 1)].params;
-  const layout = useMemo(() => computeLayout(selParams), [selParams]);
-  // Fit the lot + neighbors (8m each side) + sidewalk/road depth.
-  const worldW = layout.width + 18;
-  const worldD = 26;
-  const zoom = fitOrthoZoom(size.w, size.h, worldW, worldD);
+  const bounds = useMemo(() => {
+    let minX = Infinity,
+      maxX = -Infinity,
+      minZ = Infinity,
+      maxZ = -Infinity;
+    for (const b of blocks) {
+      for (const e of [b.line.a, b.line.b]) {
+        minX = Math.min(minX, e[0]);
+        maxX = Math.max(maxX, e[0]);
+        minZ = Math.min(minZ, e[1]);
+        maxZ = Math.max(maxZ, e[1]);
+      }
+    }
+    const pad = 2 * NEIGHBOR_WIDTH + 4;
+    return {
+      w: Math.max(maxX - minX + pad, 30),
+      d: Math.max(maxZ - minZ + pad, 30),
+      cx: (minX + maxX) / 2,
+      cz: (minZ + maxZ) / 2,
+    };
+  }, [blocks]);
+  const zoom = fitOrthoZoom(size.w, size.h, bounds.w, bounds.d);
   const camRef = useRef<THREE.OrthographicCamera>(null);
   useEffect(() => {
     const cam = camRef.current;
@@ -209,7 +227,7 @@ function PlanPane({
       <OrthographicCamera
         ref={camRef}
         makeDefault
-        position={[0, 60, -2]}
+        position={[bounds.cx, 60, bounds.cz - 2]}
         up={[0, 0, -1]}
         zoom={zoom}
         near={0.1}
@@ -218,7 +236,7 @@ function PlanPane({
       <MapControls
         makeDefault
         enableRotate={false}
-        target={[0, 0, -2]}
+        target={[bounds.cx, 0, bounds.cz - 2]}
         zoomSpeed={1}
         enabled={!drawMode}
       />
@@ -297,29 +315,49 @@ function ElevationPane({
   size: { w: number; h: number };
   mode: "overview" | "detail";
 }) {
-  const selBlock = blocks.find((b) => b.id === selected.blockId) ?? blocks[0];
-  const selParams =
-    selBlock.lots[Math.min(selected.lot, selBlock.lots.length - 1)].params;
-  const layout = useMemo(() => computeLayout(selParams), [selParams]);
-  // Overview frames the whole facade; detail frames the ground storey.
+  const block = blocks.find((b) => b.id === selected.blockId) ?? blocks[0];
+  const frame = useMemo(() => blockFrame(block), [block]);
+  const lots = block.lots;
+  const maxH = useMemo(
+    () => Math.max(...lots.map((l) => computeLayout(l.params).totalHeight)),
+    [lots],
+  );
+  const length = totalLotsWidth(block);
+  // Overview frames the whole block strip; detail frames the SELECTED
+  // lot's ground storey.
+  const lotIndex = Math.min(selected.lot, lots.length - 1);
+  const lotParams = lots[lotIndex].params;
+  const lotLayout = useMemo(() => computeLayout(lotParams), [lotParams]);
+  const placements = useMemo(() => lotPlacements(block), [block]);
+  const lotPos = placements[lotIndex].position;
+
+  const worldW = mode === "overview" ? length : lotParams.width;
   const worldH =
     mode === "overview"
-      ? layout.totalHeight
-      : Math.min(layout.storeyLevels[1] + 0.8, layout.totalHeight);
+      ? maxH
+      : Math.min(lotLayout.storeyLevels[1] + 0.8, lotLayout.totalHeight);
   const targetY = worldH / 2;
-  const zoom = fitOrthoZoom(size.w, size.h, layout.width, worldH);
-  const position = elevationCameraPosition(
-    [0, targetY, 0],
-    FACADE_NORMAL,
-    ELEVATION_DISTANCE,
-  );
+  const mid: [number, number, number] =
+    mode === "overview"
+      ? [
+          frame.origin[0] + (frame.dir[0] * length) / 2,
+          targetY,
+          frame.origin[1] + (frame.dir[1] * length) / 2,
+        ]
+      : [lotPos[0], targetY, lotPos[2]];
+  const normal3: [number, number, number] = [frame.normal[0], 0, frame.normal[1]];
+  const zoom = fitOrthoZoom(size.w, size.h, worldW, worldH);
+  const position = elevationCameraPosition(mid, normal3, ELEVATION_DISTANCE);
   const camRef = useRef<THREE.OrthographicCamera>(null);
   useEffect(() => {
     const cam = camRef.current;
     if (!cam) return;
+    cam.position.set(position[0], position[1], position[2]);
+    cam.lookAt(mid[0], mid[1], mid[2]);
     cam.zoom = zoom;
     cam.updateProjectionMatrix();
-  }, [zoom]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoom, position[0], position[1], position[2], mid[0], mid[1], mid[2]]);
   return (
     <>
       <SceneContents
@@ -335,12 +373,12 @@ function ElevationPane({
         position={position}
         zoom={zoom}
         near={0.1}
-        far={200}
+        far={400}
       />
       <MapControls
         makeDefault
         enableRotate={false}
-        target={[0, targetY, 0]}
+        target={mid}
         screenSpacePanning
         zoomSpeed={1}
       />
