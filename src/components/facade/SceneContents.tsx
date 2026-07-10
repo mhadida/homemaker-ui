@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { OrbitControls, Environment, ContactShadows, Grid } from "@react-three/drei";
+import { Environment, ContactShadows, Grid } from "@react-three/drei";
 import * as THREE from "three";
 import FacadeMesh from "./FacadeMesh";
 import type { FacadeParams, LotContext } from "@/lib/facade/types";
@@ -175,30 +175,6 @@ export default function SceneContents({
         blur={2.5}
         far={20}
         resolution={1024}
-      />
-
-      {/* Orbit constrained to the front hemisphere — nothing exists behind
-       * the facade. Azimuth 0 = camera on +z looking at the wall face. */}
-      <OrbitControls
-        makeDefault
-        enableDamping
-        dampingFactor={0.08}
-        target={[0, 4, 0]}
-        minDistance={3}
-        maxDistance={60}
-        minAzimuthAngle={-Math.PI * 0.44}
-        maxAzimuthAngle={Math.PI * 0.44}
-        maxPolarAngle={Math.PI / 2.05}
-        enablePan
-        panSpeed={0.8}
-        rotateSpeed={0.5}
-        zoomSpeed={1.0}
-        touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
-        mouseButtons={{
-          LEFT: THREE.MOUSE.ROTATE,
-          MIDDLE: THREE.MOUSE.DOLLY,
-          RIGHT: THREE.MOUSE.PAN,
-        }}
       />
     </>
   );
