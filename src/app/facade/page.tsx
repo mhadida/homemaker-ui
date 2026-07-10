@@ -19,11 +19,13 @@ import {
 import {
   initialWorld,
   syncLineToLots,
+  nextBlockId,
+  DEFAULT_GEN,
   type BlockGenSettings,
   type FacadeBlock,
   type Selection,
 } from "@/lib/facade/blocks";
-import { rerollBlock } from "@/lib/facade/generate";
+import { rerollBlock, generateBlock } from "@/lib/facade/generate";
 import type { ViewSettings } from "@/lib/building/types";
 import { WALL_SWATCHES } from "@/lib/building/types";
 import FacadeControls from "@/components/facade/FacadeControls";
@@ -249,6 +251,25 @@ export default function FacadePage() {
     [],
   );
 
+  const handleCommitLine = useCallback(
+    (a: [number, number], b: [number, number]) => {
+      const seed = Math.floor(Math.random() * 1e9);
+      const line = { a, b };
+      const gen = structuredClone(DEFAULT_GEN);
+      const newBlock: FacadeBlock = {
+        id: nextBlockId(),
+        line,
+        flipped: false,
+        gen,
+        seed,
+        lots: generateBlock(line, false, gen, seed),
+      };
+      setBlocks((bs) => [...bs, newBlock]);
+      setSelected({ blockId: newBlock.id, lot: 0, level: "block" });
+    },
+    [],
+  );
+
   const layout = useMemo(() => computeLayout(params), [params]);
 
   const handlePrompt = useCallback(
@@ -329,6 +350,7 @@ export default function FacadePage() {
             blocks={blocks}
             selected={selected}
             onSelectLot={handleSelectLot}
+            onCommitLine={handleCommitLine}
             context={context}
             view={view}
           />

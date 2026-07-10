@@ -15,6 +15,7 @@ import {
   MapControls,
   OrthographicCamera,
   PerspectiveCamera,
+  Line,
 } from "@react-three/drei";
 import * as THREE from "three";
 import SceneContents from "./SceneContents";
@@ -27,12 +28,13 @@ import {
 import type { LotContext } from "@/lib/facade/types";
 import { FACADE_DEFAULT_VIEW } from "@/lib/facade/types";
 import type { ViewSettings } from "@/lib/building/types";
-import type { FacadeBlock, Selection } from "@/lib/facade/blocks";
+import { snapPoint, type FacadeBlock, type Selection } from "@/lib/facade/blocks";
 
 interface FacadeViewerProps {
   blocks: FacadeBlock[];
   selected: Selection;
   onSelectLot: (blockId: string, lot: number) => void;
+  onCommitLine: (a: [number, number], b: [number, number]) => void;
   context: LotContext;
   view?: ViewSettings;
 }
@@ -97,6 +99,63 @@ function GlobalClear() {
 
 // ── Pane contents (3D only — rendered inside <View>) ────────────────────────
 
+const MIN_BLOCK_LENGTH = 3;
+
+/** Invisible ground-plane pick surface + rubber-band line. Lives ONLY in
+ * the plan pane, so drawing gestures can't fire from other panes. */
+function DrawSurface({
+  blocks,
+  onCommitLine,
+}: {
+  blocks: FacadeBlock[];
+  onCommitLine: (a: [number, number], b: [number, number]) => void;
+}) {
+  const [draft, setDraft] = useState<null | {
+    a: [number, number];
+    b: [number, number];
+  }>(null);
+  return (
+    <>
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, 0.02, 0]}
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          const p = snapPoint([e.point.x, e.point.z], blocks);
+          setDraft({ a: p, b: p });
+        }}
+        onPointerMove={(e) => {
+          if (!draft) return;
+          setDraft({ a: draft.a, b: [e.point.x, e.point.z] });
+        }}
+        onPointerUp={(e) => {
+          if (!draft) return;
+          const b = snapPoint([e.point.x, e.point.z], blocks);
+          const len = Math.hypot(b[0] - draft.a[0], b[1] - draft.a[1]);
+          if (len >= MIN_BLOCK_LENGTH) onCommitLine(draft.a, b);
+          setDraft(null);
+        }}
+      >
+        <planeGeometry args={[600, 600]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+      {draft && (
+        <Line
+          points={[
+            [draft.a[0], 0.08, draft.a[1]],
+            [draft.b[0], 0.08, draft.b[1]],
+          ]}
+          color="#3b82f6"
+          lineWidth={3}
+          dashed
+          dashSize={0.5}
+          gapSize={0.3}
+        />
+      )}
+    </>
+  );
+}
+
 function PlanPane({
   blocks,
   selected,
@@ -104,6 +163,8 @@ function PlanPane({
   context,
   view,
   size,
+  drawMode,
+  onCommitLine,
 }: {
   blocks: FacadeBlock[];
   selected: Selection;
@@ -111,6 +172,8 @@ function PlanPane({
   context: LotContext;
   view: ViewSettings;
   size: { w: number; h: number };
+  drawMode: boolean;
+  onCommitLine: (a: [number, number], b: [number, number]) => void;
 }) {
   const selBlock = blocks.find((b) => b.id === selected.blockId) ?? blocks[0];
   const selParams =
@@ -136,6 +199,7 @@ function PlanPane({
         context={context}
         view={view}
       />
+      {drawMode && <DrawSurface blocks={blocks} onCommitLine={onCommitLine} />}
       {/* Top-down; up = -z puts the street (+z) at the bottom of the pane. */}
       <OrthographicCamera
         ref={camRef}
@@ -151,6 +215,7 @@ function PlanPane({
         enableRotate={false}
         target={[0, 0, -2]}
         zoomSpeed={1}
+        enabled={!drawMode}
       />
     </>
   );
@@ -284,6 +349,7 @@ export default function FacadeViewer({
   blocks,
   selected,
   onSelectLot,
+  onCommitLine,
   context,
   view = FACADE_DEFAULT_VIEW,
 }: FacadeViewerProps) {
@@ -300,6 +366,7 @@ export default function FacadeViewer({
   };
 
   const [maximized, setMaximized] = useState<PaneId | null>(null);
+  const [drawMode, setDrawMode] = useState(false);
   const [isDesktop, setIsDesktop] = useState(true);
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 768px)");
@@ -364,6 +431,8 @@ export default function FacadeViewer({
             context={context}
             view={view}
             size={planSize}
+            drawMode={drawMode}
+            onCommitLine={onCommitLine}
           />
         );
       case "perspective":
@@ -435,6 +504,20 @@ export default function FacadeViewer({
             <div className="absolute top-1.5 left-2 text-[10px] font-mono text-white/70 bg-black/40 rounded px-1.5 py-0.5 pointer-events-none">
               {p.label}
             </div>
+            {p.id === "plan" && (
+              <button
+                type="button"
+                onClick={() => setDrawMode((d) => !d)}
+                aria-label={drawMode ? "Exit draw mode" : "Draw a block"}
+                className={`absolute top-1 left-16 grid h-6 px-2 place-items-center rounded text-[10px] transition-colors ${
+                  drawMode
+                    ? "bg-[var(--accent)] text-white"
+                    : "bg-black/40 text-white/70 hover:bg-black/60"
+                }`}
+              >
+                {drawMode ? "drawing…" : "✏ draw"}
+              </button>
+            )}
             {isDesktop && (
               <button
                 type="button"
