@@ -64,6 +64,7 @@ src/
       FacadeMesh.tsx     — FacadeLayout → meshes (wall, openings, ornament)
       FacadeControls.tsx — presets + sliders + toggles panel
       BayGrid.tsx        — tappable per-cell opening editor
+      SceneContents.tsx  — shared world scene (blocks, ground, lights)
   lib/
     blender.ts        — TCP socket client to Blender (port 9876)
     python-server.ts  — Long-running Python child process serving pipeline requests (local dev)
@@ -76,6 +77,9 @@ src/
       types.ts         — FacadeParams, presets, defaults, LotContext
       layout.ts        — pure layout engine (params → rectangles, all clamps)
       prompt-parser.ts — local keyword parser + deep merge
+      camera.ts        — ortho fit + normal-derived elevation cameras
+      blocks.ts        — street blocks: frames, lot placement, selection types
+      generate.ts      — seeded generator: subdivision, lot params, reroll
   types/
     mapbox-gl-draw.d.ts — Type declarations (legacy; no map UI currently exists)
 python/
@@ -94,11 +98,19 @@ NOT involved; every edit is live (no Update button). Spec:
 
 - **Layout engine**: `src/lib/facade/layout.ts` is a pure function
   (FacadeParams → rectangles) holding ALL validity clamps; the mesh renders
-  whatever it returns. Corner conditions (two facades) plug in at this seam later.
+  whatever it returns.
 - **Grid model**: (storeys × bays) cells, treatment-derived defaults + sparse
   `cellOverrides` patches.
+- **Quad workspace**: plan / perspective / elevation overview / detail as
+  drei `<View>` viewports over one Canvas (`FacadeViewer.tsx`); elevation
+  cameras always aim along the facade normal (`src/lib/facade/camera.ts`).
+- **Blocks & streets**: draw lines in the plan pane; `src/lib/facade/blocks.ts`
+  (frames/placement) + `generate.ts` (seeded subdivision + lot params) turn
+  them into editable streets. Every lot is a full `FacadeParams`; hand edits
+  pin lots against reroll.
 - **AI prompt**: `/api/facade-prompt` (flat fully-required zod spec — OpenAI
-  structured output rejects optionals), plus an instant local keyword parser.
+  structured output rejects optionals) targets the selected lot, plus an
+  instant local keyword parser.
 
 ## Tailwind v4
 
