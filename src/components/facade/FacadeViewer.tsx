@@ -213,6 +213,17 @@ function PlanPane({
     cam.zoom = zoom;
     cam.updateProjectionMatrix();
   }, [zoom]);
+  // Stable identity — MapControls target/OrthographicCamera position reset
+  // an in-progress pan when they receive a freshly-built array on every
+  // render; memoize on the underlying scalars instead.
+  const target = useMemo<[number, number, number]>(
+    () => [bounds.cx, 0, bounds.cz - 2],
+    [bounds.cx, bounds.cz],
+  );
+  const camPosition = useMemo<[number, number, number]>(
+    () => [bounds.cx, 60, bounds.cz - 2],
+    [bounds.cx, bounds.cz],
+  );
   return (
     <>
       <SceneContents
@@ -227,7 +238,7 @@ function PlanPane({
       <OrthographicCamera
         ref={camRef}
         makeDefault
-        position={[bounds.cx, 60, bounds.cz - 2]}
+        position={camPosition}
         up={[0, 0, -1]}
         zoom={zoom}
         near={0.1}
@@ -236,7 +247,7 @@ function PlanPane({
       <MapControls
         makeDefault
         enableRotate={false}
-        target={[bounds.cx, 0, bounds.cz - 2]}
+        target={target}
         zoomSpeed={1}
         enabled={!drawMode}
       />
@@ -337,17 +348,28 @@ function ElevationPane({
       ? maxH
       : Math.min(lotLayout.storeyLevels[1] + 0.8, lotLayout.totalHeight);
   const targetY = worldH / 2;
-  const mid: [number, number, number] =
+  const midX =
     mode === "overview"
-      ? [
-          frame.origin[0] + (frame.dir[0] * length) / 2,
-          targetY,
-          frame.origin[1] + (frame.dir[1] * length) / 2,
-        ]
-      : [lotPos[0], targetY, lotPos[2]];
+      ? frame.origin[0] + (frame.dir[0] * length) / 2
+      : lotPos[0];
+  const midZ =
+    mode === "overview"
+      ? frame.origin[1] + (frame.dir[1] * length) / 2
+      : lotPos[2];
+  // Stable identity — drei's MapControls target/OrthographicCamera position
+  // props reset any in-progress pan when they receive a freshly-built array
+  // on every render; memoize on the underlying scalars instead.
+  const mid = useMemo<[number, number, number]>(
+    () => [midX, targetY, midZ],
+    [midX, targetY, midZ],
+  );
   const normal3: [number, number, number] = [frame.normal[0], 0, frame.normal[1]];
   const zoom = fitOrthoZoom(size.w, size.h, worldW, worldH);
-  const position = elevationCameraPosition(mid, normal3, ELEVATION_DISTANCE);
+  const position = useMemo<[number, number, number]>(
+    () => elevationCameraPosition(mid, normal3, ELEVATION_DISTANCE),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [mid, frame.normal[0], frame.normal[1]],
+  );
   const camRef = useRef<THREE.OrthographicCamera>(null);
   useEffect(() => {
     const cam = camRef.current;
