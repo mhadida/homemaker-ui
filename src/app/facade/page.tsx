@@ -247,7 +247,7 @@ export default function FacadePage() {
         setIsAILoading(false);
       }
     },
-    [params],
+    [params, setParams],
   );
 
   return (
