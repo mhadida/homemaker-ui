@@ -381,6 +381,7 @@ export default function FacadeViewer({
                 onClick={() => toggleMaximize(p.id)}
                 className="absolute top-1 right-1 grid h-6 w-6 place-items-center rounded bg-black/40 text-white/70 text-[11px] hover:bg-black/60 transition-colors"
                 title={maximized === p.id ? "Restore grid" : "Maximize"}
+                aria-label={maximized === p.id ? "Restore grid" : "Maximize pane"}
               >
                 {maximized === p.id ? "⤡" : "⤢"}
               </button>
@@ -423,7 +424,7 @@ export default function FacadeViewer({
       <button
         type="button"
         onClick={saveImage}
-        className="absolute top-3 right-3 rounded-lg bg-black/55 backdrop-blur-md px-3 py-1.5 text-[11px] text-white/85 hover:bg-black/70 transition-colors"
+        className="absolute top-3 right-12 rounded-lg bg-black/55 backdrop-blur-md px-3 py-1.5 text-[11px] text-white/85 hover:bg-black/70 transition-colors"
       >
         Save image
       </button>
