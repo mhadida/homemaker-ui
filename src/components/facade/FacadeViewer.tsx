@@ -120,7 +120,12 @@ function DrawSurface({
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, 0.02, 0]}
         onPointerDown={(e) => {
-          (e.target as unknown as HTMLElement).setPointerCapture?.(e.pointerId);
+          try {
+            (e.target as unknown as Element).setPointerCapture?.(e.pointerId);
+          } catch {
+            // Synthetic/automation pointers have no active id — capture is a
+            // nice-to-have (keeps drags alive across pane edges), not load-bearing.
+          }
           e.stopPropagation();
           const p = snapPoint([e.point.x, e.point.z], blocks);
           setDraft({ a: p, b: p });
