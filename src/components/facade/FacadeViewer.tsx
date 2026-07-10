@@ -120,13 +120,13 @@ function DrawSurface({
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, 0.02, 0]}
         onPointerDown={(e) => {
+          (e.target as unknown as HTMLElement).setPointerCapture?.(e.pointerId);
           e.stopPropagation();
           const p = snapPoint([e.point.x, e.point.z], blocks);
           setDraft({ a: p, b: p });
         }}
         onPointerMove={(e) => {
-          if (!draft) return;
-          setDraft({ a: draft.a, b: [e.point.x, e.point.z] });
+          setDraft((d) => (d ? { a: d.a, b: [e.point.x, e.point.z] } : d));
         }}
         onPointerUp={(e) => {
           if (!draft) return;
