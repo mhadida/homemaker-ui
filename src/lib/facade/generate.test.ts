@@ -5,8 +5,9 @@ import {
   generateLot,
   generateBlock,
   rerollBlock,
+  refit,
 } from "./generate";
-import { DEFAULT_GEN, initialWorld, type FacadeBlock } from "./blocks";
+import { DEFAULT_GEN, initialWorld, type FacadeBlock, type LotState } from "./blocks";
 import { DEFAULT_FACADE, FACADE_LIMITS, FACADE_PRESETS } from "./types";
 import { computeLayout } from "./layout";
 
@@ -163,5 +164,134 @@ describe("generateBlock depthOffset", () => {
     );
     expect(patched[1].depthOffset).toBe(lots[1].depthOffset);
     expect(patched[1].customized).toBe(true);
+  });
+});
+
+// ── refit ────────────────────────────────────────────────────────────────
+
+const mkLot = (width: number, customized = false): LotState => ({
+  params: { ...DEFAULT_FACADE, width },
+  customized,
+});
+
+const mkRefitBlock = (
+  lots: LotState[],
+  opts: Partial<Pick<FacadeBlock, "flipped" | "seed">> = {},
+): FacadeBlock => ({
+  id: "t",
+  line: {
+    a: [0, 0],
+    b: [lots.reduce((s, l) => s + l.params.width, 0), 0],
+  },
+  flipped: opts.flipped ?? false,
+  gen: structuredClone(DEFAULT_GEN),
+  seed: opts.seed ?? 42,
+  lots,
+});
+
+/** Re-line the block to a new length along +x (a stays at the origin). */
+const withLength = (b: FacadeBlock, len: number): FacadeBlock => ({
+  ...b,
+  line: { a: [0, 0], b: [len, 0] },
+});
+
+describe("refit", () => {
+  it("grows the lot nearest the moved end; fixed-end lots untouched", () => {
+    const b = mkRefitBlock([mkLot(5), mkLot(6)]);
+    const r = refit(withLength(b, 13), "b")!;
+    expect(r.lots.map((l) => l.params.width)).toEqual([5, 8]);
+  });
+
+  it("absorbs at the head when line.a moved (unflipped)", () => {
+    const b = mkRefitBlock([mkLot(5), mkLot(6)]);
+    const r = refit({ ...b, line: { a: [-2, 0], b: [11, 0] } }, "a")!;
+    expect(r.lots.map((l) => l.params.width)).toEqual([7, 6]);
+  });
+
+  it("flipped swaps which array end absorbs", () => {
+    // Flipped: frame origin = line.b, so lots[0] sits nearest b.
+    const b = mkRefitBlock([mkLot(5), mkLot(6)], { flipped: true });
+    const r = refit(withLength(b, 13), "b")!;
+    expect(r.lots.map((l) => l.params.width)).toEqual([7, 6]);
+  });
+
+  it("skips pinned lots when picking the absorber", () => {
+    const b = mkRefitBlock([mkLot(5), mkLot(6), mkLot(5, true)]);
+    const r = refit(withLength(b, 18), "b")!;
+    expect(r.lots.map((l) => l.params.width)).toEqual([5, 8, 5]);
+    expect(r.lots[2].customized).toBe(true);
+  });
+
+  it("rejects when every lot is pinned", () => {
+    const b = mkRefitBlock([mkLot(5, true), mkLot(6, true)]);
+    expect(refit(withLength(b, 12), "b")).toBeNull();
+  });
+
+  it("shrinking below lotWidth.min removes the absorber and folds onward", () => {
+    const b = mkRefitBlock([mkLot(5), mkLot(6)]);
+    const r = refit(withLength(b, 9), "b")!;
+    expect(r.lots.map((l) => l.params.width)).toEqual([9]);
+  });
+
+  it("rejects when the only lot would drop below lotWidth.min", () => {
+    const b = mkRefitBlock([mkLot(7.5)]);
+    expect(refit(withLength(b, 4), "b")).toBeNull();
+  });
+
+  it("rejects when removal leaves only pinned lots that cannot fit", () => {
+    const b = mkRefitBlock([mkLot(5, true), mkLot(6)]);
+    expect(refit(withLength(b, 4), "b")).toBeNull();
+  });
+
+  it("splits once the absorber reaches max + min", () => {
+    const b = mkRefitBlock([mkLot(5), mkLot(6)]);
+    const r = refit(withLength(b, 25), "b")!;
+    const widths = r.lots.map((l) => l.params.width);
+    const T = DEFAULT_GEN.lotWidth.max + DEFAULT_GEN.lotWidth.min;
+    expect(widths[0]).toBe(5); // fixed-end lot untouched
+    expect(widths.length).toBeGreaterThan(2); // at least one new lot
+    expect(widths.reduce((s, w) => s + w, 0)).toBeCloseTo(25, 9);
+    for (const w of widths.slice(1)) {
+      expect(w).toBeGreaterThanOrEqual(DEFAULT_GEN.lotWidth.min);
+      expect(w).toBeLessThan(T);
+    }
+    for (const l of r.lots.slice(2)) expect(l.customized).toBe(false);
+  });
+
+  it("final widths are drag-path independent", () => {
+    const b = mkRefitBlock([mkLot(5), mkLot(6)]);
+    const direct = refit(withLength(b, 25), "b")!;
+    const stepped = refit(withLength(refit(withLength(b, 18), "b")!, 25), "b")!;
+    expect(stepped.lots.map((l) => l.params.width)).toEqual(
+      direct.lots.map((l) => l.params.width),
+    );
+  });
+
+  it("is deterministic", () => {
+    const b = mkRefitBlock([mkLot(5), mkLot(6)]);
+    const r1 = refit(withLength(b, 25), "b")!;
+    const r2 = refit(withLength(b, 25), "b")!;
+    expect(r2.lots.map((l) => l.params)).toEqual(r1.lots.map((l) => l.params));
+  });
+
+  it("preserves depthOffset on surviving lots and assigns one to new lots", () => {
+    const lots: LotState[] = [{ ...mkLot(5), depthOffset: 0.05 }, mkLot(6)];
+    const b = mkRefitBlock(lots);
+    const r = refit(withLength(b, 25), "b")!;
+    expect(r.lots[0].depthOffset).toBe(0.05);
+    for (const l of r.lots.slice(2)) expect(typeof l.depthOffset).toBe("number");
+  });
+
+  it("returns lots unchanged when the length already matches", () => {
+    const b = mkRefitBlock([mkLot(5), mkLot(6)]);
+    const r = refit(b, "b")!;
+    expect(r.lots).toEqual(b.lots);
+  });
+
+  it("does not mutate its input", () => {
+    const b = mkRefitBlock([mkLot(5), mkLot(6)]);
+    const snapshot = structuredClone(b);
+    refit(withLength(b, 25), "b");
+    expect(b).toEqual(snapshot);
   });
 });

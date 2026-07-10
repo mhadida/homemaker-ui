@@ -166,3 +166,77 @@ export function rerollBlock(block: FacadeBlock, seed: number): FacadeBlock {
     ),
   };
 }
+
+const REFIT_EPS = 1e-6;
+
+/** Re-fit a block's lots after its line changed (node drag / weld ripple).
+ * `block` already carries the NEW line; `movedEnd` names the raw endpoint
+ * that moved. The unpinned lot nearest the moved end absorbs the delta:
+ * below lotWidth.min it is removed (remainder folds onward), and at
+ * lotWidth.max + lotWidth.min it splits — a seed-drawn new lot appears at
+ * the moved side and becomes the next absorber, which is exactly what
+ * frame-by-frame dragging produces, so final widths are drag-path
+ * independent. Pinned lots are never resized or removed. Returns null when
+ * the move cannot be satisfied (caller rejects it). Pure — never mutates. */
+export function refit(
+  block: FacadeBlock,
+  movedEnd: "a" | "b",
+): FacadeBlock | null {
+  const { min, max } = block.gen.lotWidth;
+  const T = max + min; // split threshold: first width divisible into two legal lots
+  const target = blockFrame(block).length;
+  if (target < REFIT_EPS) return null;
+  // Process lots ordered fixed end → moved end. The frame origin sits at
+  // line.a unless flipped, so lots[last] is nearest line.b when unflipped.
+  const movedAtTail = (movedEnd === "b") !== block.flipped;
+  const arr = movedAtTail ? [...block.lots] : [...block.lots].reverse();
+
+  for (let guard = 0; guard <= block.lots.length; guard++) {
+    const sum = arr.reduce((s, l) => s + l.params.width, 0);
+    const delta = target - sum;
+    if (Math.abs(delta) < REFIT_EPS) {
+      const lots = movedAtTail ? arr : arr.reverse();
+      return { ...block, lots };
+    }
+    let i = arr.length - 1;
+    while (i >= 0 && arr[i].customized) i--;
+    if (i < 0) return null; // every lot pinned — nothing may resize
+    let aw = arr[i].params.width + delta;
+    if (aw < min - REFIT_EPS) {
+      if (arr.length === 1) return null; // a block never drops its last lot
+      arr.splice(i, 1); // remove; the loop folds the remainder onward
+      continue;
+    }
+    // Grow (or shrink within limits). Split while the absorber can make
+    // two legal lots; each split freezes the current absorber at T - nw
+    // and hands the remaining growth to the new lot.
+    const drawn: { nw: number; r: () => number; idx: number }[] = [];
+    let count = arr.length;
+    while (aw >= T) {
+      const r = mulberry32(lotSeed(block.seed, count));
+      const nw = min + r() * (max - min);
+      drawn.push({ nw, r, idx: count });
+      aw = nw + (aw - T);
+      count++;
+    }
+    const absorberW = drawn.length === 0 ? aw : T - drawn[0].nw;
+    arr[i] = {
+      ...arr[i],
+      params: { ...arr[i].params, width: absorberW },
+    };
+    const newLots: LotState[] = drawn.map(({ nw, r, idx }, k) => ({
+      // Character comes from the seed-drawn width; the final width is the
+      // frozen split remainder (or the leftover growth for the newest lot).
+      params: {
+        ...generateLot(nw, block.gen, r),
+        width: k === drawn.length - 1 ? aw : T - drawn[k + 1].nw,
+      },
+      customized: false,
+      depthOffset: offsetFor(block.seed, idx, block.gen.depthJitter),
+    }));
+    arr.splice(i + 1, 0, ...newLots);
+    const lots = movedAtTail ? arr : arr.reverse();
+    return { ...block, lots };
+  }
+  return null;
+}
