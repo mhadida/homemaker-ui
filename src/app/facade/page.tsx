@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import type { FacadeParams, LotContext } from "@/lib/facade/types";
@@ -25,7 +25,7 @@ import {
   type FacadeBlock,
   type Selection,
 } from "@/lib/facade/blocks";
-import { rerollBlock, generateBlock } from "@/lib/facade/generate";
+import { rerollBlock, generateBlock, deleteLot } from "@/lib/facade/generate";
 import { moveNode } from "@/lib/facade/nodes";
 import type { ViewSettings } from "@/lib/building/types";
 import { WALL_SWATCHES } from "@/lib/building/types";
@@ -262,6 +262,47 @@ export default function FacadePage() {
     setBlocks(next);
     setSelected({ blockId: next[0].id, lot: 0, level: "lot" });
   }, [blocks, selected.blockId]);
+
+  // Delete/Backspace removes the selection: the selected lot (street refits,
+  // length preserved) or the whole block at block level / last lot. Direct —
+  // no two-step confirm for keyboard deletion. Skipped while typing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      const t = e.target;
+      if (
+        t instanceof HTMLElement &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.tagName === "SELECT" ||
+          t.isContentEditable)
+      )
+        return;
+      const block = blocks.find((b) => b.id === selected.blockId);
+      if (!block) return;
+      if (selected.level === "lot" && block.lots.length > 1) {
+        const lotIndex = Math.min(selected.lot, block.lots.length - 1);
+        const next = deleteLot(block, lotIndex);
+        if (!next) return; // nothing can absorb — deletion rejected
+        setBlocks((bs) => bs.map((b) => (b.id === block.id ? next : b)));
+        setSelected((s) => ({
+          ...s,
+          lot: Math.min(lotIndex, next.lots.length - 1),
+        }));
+        return;
+      }
+      // Block level, or the block's last lot: delete the whole block.
+      // Computed OUTSIDE the updater — initialWorld() is impure and Strict
+      // Mode double-invokes updater functions (same pattern as
+      // handleDeleteBlock above).
+      const rest = blocks.filter((b) => b.id !== selected.blockId);
+      const nextBlocks = rest.length > 0 ? rest : [initialWorld(DEFAULT_FACADE)];
+      setBlocks(nextBlocks);
+      setSelected({ blockId: nextBlocks[0].id, lot: 0, level: "lot" });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [blocks, selected]);
 
   const handleSelectionLevel = useCallback(
     (level: "lot" | "block") => setSelected((s) => ({ ...s, level })),

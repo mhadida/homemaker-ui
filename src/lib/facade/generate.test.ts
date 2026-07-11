@@ -6,6 +6,7 @@ import {
   generateBlock,
   rerollBlock,
   refit,
+  deleteLot,
 } from "./generate";
 import { DEFAULT_GEN, initialWorld, type FacadeBlock, type LotState } from "./blocks";
 import { DEFAULT_FACADE, FACADE_LIMITS, FACADE_PRESETS } from "./types";
@@ -292,6 +293,68 @@ describe("refit", () => {
     const b = mkRefitBlock([mkLot(5), mkLot(6)]);
     const snapshot = structuredClone(b);
     refit(withLength(b, 25), "b");
+    expect(b).toEqual(snapshot);
+  });
+});
+
+describe("deleteLot", () => {
+  it("removes a middle lot; the near-side lot absorbs; far side keeps position", () => {
+    // [5(A) 6(B) 5(C)]: B deleted, A grows over B's space, C stays put.
+    const b = mkRefitBlock([mkLot(5), mkLot(6), mkLot(5)]);
+    const r = deleteLot(b, 1)!;
+    expect(r.lots.map((l) => l.params.width)).toEqual([11, 5]);
+    expect(r.line).toEqual(b.line); // street length preserved
+  });
+
+  it("removes an end lot; the remaining lot absorbs", () => {
+    const b = mkRefitBlock([mkLot(5), mkLot(6)]);
+    const r = deleteLot(b, 1)!;
+    expect(r.lots.map((l) => l.params.width)).toEqual([11]);
+  });
+
+  it("skips pinned lots when absorbing", () => {
+    const b = mkRefitBlock([mkLot(5), mkLot(6), mkLot(5, true)]);
+    const r = deleteLot(b, 1)!;
+    expect(r.lots.map((l) => l.params.width)).toEqual([11, 5]);
+    expect(r.lots[1].customized).toBe(true);
+  });
+
+  it("a pinned lot may itself be deleted", () => {
+    const b = mkRefitBlock([mkLot(5), mkLot(6, true), mkLot(5)]);
+    const r = deleteLot(b, 1)!;
+    expect(r.lots.map((l) => l.params.width)).toEqual([11, 5]);
+  });
+
+  it("rejects when all remaining lots are pinned", () => {
+    const b = mkRefitBlock([mkLot(5, true), mkLot(6), mkLot(5, true)]);
+    expect(deleteLot(b, 1)).toBeNull();
+  });
+
+  it("rejects for single-lot blocks (caller deletes the block)", () => {
+    const b = mkRefitBlock([mkLot(7.5)]);
+    expect(deleteLot(b, 0)).toBeNull();
+  });
+
+  it("splits deterministically when the freed width overflows max+min", () => {
+    // Absorber 5 + freed 9 = 14 = max+min → split: a seed-drawn "new"
+    // building replaces the deleted one.
+    const b = mkRefitBlock([mkLot(5), mkLot(9), mkLot(5)]);
+    const r1 = deleteLot(b, 1)!;
+    const r2 = deleteLot(b, 1)!;
+    const widths = r1.lots.map((l) => l.params.width);
+    expect(widths.reduce((s, w) => s + w, 0)).toBeCloseTo(19, 9);
+    const T = DEFAULT_GEN.lotWidth.max + DEFAULT_GEN.lotWidth.min;
+    for (const w of widths) {
+      expect(w).toBeGreaterThanOrEqual(DEFAULT_GEN.lotWidth.min);
+      expect(w).toBeLessThan(T);
+    }
+    expect(r2.lots.map((l) => l.params)).toEqual(r1.lots.map((l) => l.params));
+  });
+
+  it("does not mutate its input", () => {
+    const b = mkRefitBlock([mkLot(5), mkLot(6), mkLot(5)]);
+    const snapshot = structuredClone(b);
+    deleteLot(b, 1);
     expect(b).toEqual(snapshot);
   });
 });

@@ -240,3 +240,25 @@ export function refit(
   }
   return null;
 }
+
+/** Remove one lot; the street keeps its length — the freed width is
+ * absorbed by the unpinned lot nearest the removal site via refit
+ * (movedEnd = the raw endpoint nearer the deleted lot, so lots at the far
+ * side keep their positions). Absorption can split (>= max+min): a
+ * seed-drawn "new" building may replace the deleted one. Returns null when
+ * nothing can absorb, or for single-lot blocks (callers delete the block
+ * instead). A pinned lot may itself be deleted — pinning protects against
+ * resizing, not explicit deletion. Pure. */
+export function deleteLot(
+  block: FacadeBlock,
+  lotIndex: number,
+): FacadeBlock | null {
+  if (block.lots.length <= 1) return null;
+  if (lotIndex < 0 || lotIndex >= block.lots.length) return null;
+  const lots = block.lots.filter((_, i) => i !== lotIndex);
+  const nearOrigin = lotIndex < block.lots.length / 2;
+  // Frame origin sits at line.a unless flipped (see blockFrame): absorbing
+  // at the origin side needs movedEnd "a" when unflipped, "b" when flipped.
+  const movedEnd: "a" | "b" = nearOrigin === !block.flipped ? "a" : "b";
+  return refit({ ...block, lots }, movedEnd);
+}
