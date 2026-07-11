@@ -156,6 +156,25 @@ to today.
 - Loop closure: last segment welds to the first node.
 - Pen gesture, rubber band, handle feel: verified visually in the browser.
 
+## Addendum (2026-07-11): Delete key deletes the selection
+
+User request during implementation. Delete or Backspace deletes what is
+selected (decision: "follows selection"):
+
+- **Lot level**: the lot is removed; the street keeps its length — the
+  freed width is absorbed by the unpinned lot nearest the removal site via
+  the existing `refit` machinery (`deleteLot(block, lotIndex)` in
+  `generate.ts`, pure; `movedEnd` = the raw endpoint nearer the deleted
+  lot, so lots at the far side keep their positions). Absorption can split
+  (≥ max+min) — a seed-drawn "new" building may replace the deleted one.
+  If nothing can absorb (all remaining lots pinned), the deletion is
+  rejected (no-op). A pinned lot may itself be deleted — pinning protects
+  against resizing, not explicit deletion.
+- **Block level, or deleting a block's last lot**: the whole block is
+  deleted immediately (same semantics as the existing Delete block button,
+  but without the two-step confirm — keyboard deletion is direct).
+- Ignored while typing (input/textarea/select/contenteditable focus).
+
 ## Not in scope (deferred)
 
 Unwelding/detaching a node; inserting a node mid-segment; corner buildings
