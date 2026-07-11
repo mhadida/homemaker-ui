@@ -29,7 +29,7 @@ Four parts work together:
 | MCP server (dev only) | `uv run ../homemaker-blender/mcp_server.py` | Bridges agents to a running Blender; lives in the sibling repo |
 | Tests | `npm test` | vitest — src/lib/facade unit tests |
 
-**Tests:** vitest covers the pure facade layout engine and prompt parser (`src/lib/facade/*.test.ts`) — run `npm test`. No e2e/playwright; everything else is verified visually.
+**Tests:** vitest covers the pure facade modules — layout engine, prompt parser, street generator (`refit`/`deleteLot`), and node welding (`src/lib/facade/*.test.ts`) — run `npm test`. No e2e/playwright; everything else is verified visually.
 
 ## Blender is NOT a runtime dependency of the web app
 
