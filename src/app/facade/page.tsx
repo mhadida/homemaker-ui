@@ -258,7 +258,7 @@ export default function FacadePage() {
   const handleDeleteBlock = useCallback(() => {
     if (!selected) return;
     // The world may become empty — no fallback block is respawned.
-    const rest = blocks.filter((b) => b.id !== selected?.blockId);
+    const rest = blocks.filter((b) => b.id !== selected.blockId);
     setBlocks(rest);
     setSelected(
       rest.length > 0 ? { blockId: rest[0].id, lot: 0, level: "lot" } : null,

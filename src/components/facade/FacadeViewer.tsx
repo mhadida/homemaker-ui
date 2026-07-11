@@ -664,6 +664,11 @@ export default function FacadeViewer({
   useEffect(() => {
     onDrawModeChange?.(drawMode);
   }, [drawMode, onDrawModeChange]);
+  // Re-arm the pen whenever the world returns to blank (e.g. the last block
+  // was deleted) — the blank-canvas copy promises an armed pen.
+  useEffect(() => {
+    if (blocks.length === 0) setDrawMode(true);
+  }, [blocks.length]);
   const [isDesktop, setIsDesktop] = useState(true);
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 768px)");
