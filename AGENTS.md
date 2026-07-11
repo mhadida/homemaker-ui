@@ -80,6 +80,7 @@ src/
       camera.ts        — ortho fit + normal-derived elevation cameras
       blocks.ts        — street blocks: frames, lot placement, selection types
       generate.ts      — seeded generator: subdivision, lot params, reroll
+      nodes.ts         — derived nodes (coincidence welds), moveNode + refit ripple
   types/
     mapbox-gl-draw.d.ts — Type declarations (legacy; no map UI currently exists)
 python/
@@ -104,10 +105,14 @@ NOT involved; every edit is live (no Update button). Spec:
 - **Quad workspace**: plan / perspective / elevation overview / detail as
   drei `<View>` viewports over one Canvas (`FacadeViewer.tsx`); elevation
   cameras always aim along the facade normal (`src/lib/facade/camera.ts`).
-- **Blocks & streets**: draw lines in the plan pane; `src/lib/facade/blocks.ts`
-  (frames/placement) + `generate.ts` (seeded subdivision + lot params) turn
-  them into editable streets. Every lot is a full `FacadeParams`; hand edits
-  pin lots against reroll.
+- **Blocks & streets**: pen-tool drawing in the plan pane — click chains
+  nodes into welded segments (Escape ends, clicking the first node closes
+  the loop); every segment is a generated block (`src/lib/facade/blocks.ts`
+  + `generate.ts`). Nodes are derived from exactly-equal endpoints
+  (`nodes.ts`); dragging one re-fits every attached block (`refit` in
+  `generate.ts` — absorb at the moved end, split at lotWidth.max+min,
+  remove below min). Width edits ripple through welds the same way. Hand
+  edits pin lots against reroll.
 - **AI prompt**: `/api/facade-prompt` (flat fully-required zod spec — OpenAI
   structured output rejects optionals) targets the selected lot, plus an
   instant local keyword parser.

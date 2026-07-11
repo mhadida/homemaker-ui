@@ -192,18 +192,34 @@ export default function FacadePage() {
   // line in sync with the new widths.
   const setParams = useCallback(
     (next: FacadeParams | ((prev: FacadeParams) => FacadeParams)) => {
-      setBlocks((bs) =>
-        bs.map((b) => {
-          if (b.id !== selected.blockId) return b;
-          const lotIndex = Math.min(selected.lot, b.lots.length - 1);
-          const prev = b.lots[lotIndex].params;
-          const value = typeof next === "function" ? next(prev) : next;
-          const lots = b.lots.map((l, i) =>
-            i === lotIndex ? { ...l, params: value, customized: true } : l,
-          );
-          return syncLineToLots({ ...b, lots });
-        }),
-      );
+      setBlocks((bs) => {
+        const b = bs.find((x) => x.id === selected.blockId);
+        if (!b) return bs;
+        const lotIndex = Math.min(selected.lot, b.lots.length - 1);
+        const prev = b.lots[lotIndex].params;
+        const value = typeof next === "function" ? next(prev) : next;
+        const lots = b.lots.map((l, i) =>
+          i === lotIndex ? { ...l, params: value, customized: true } : l,
+        );
+        const updated = syncLineToLots({ ...b, lots });
+        const replaced = bs.map((x) => (x.id === b.id ? updated : x));
+        const endKey = b.flipped ? ("a" as const) : ("b" as const);
+        const oldEnd = b.line[endKey];
+        const newEnd = updated.line[endKey];
+        if (oldEnd[0] === newEnd[0] && oldEnd[1] === newEnd[1]) return replaced;
+        const welded = bs.some(
+          (x) =>
+            x.id !== b.id &&
+            ((x.line.a[0] === oldEnd[0] && x.line.a[1] === oldEnd[1]) ||
+              (x.line.b[0] === oldEnd[0] && x.line.b[1] === oldEnd[1])),
+        );
+        if (!welded) return replaced;
+        // The computed end is a node move: welded neighbors re-fit exactly
+        // as if the shared node were dragged. If any cannot absorb, the
+        // whole edit is rejected (the slider clamps). moveNode is pure, so
+        // it is Strict Mode-safe inside this updater.
+        return moveNode(replaced, oldEnd, newEnd) ?? bs;
+      });
     },
     [selected],
   );
