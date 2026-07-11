@@ -17,7 +17,6 @@ import {
   mergeFacadeParams,
 } from "@/lib/facade/prompt-parser";
 import {
-  initialWorld,
   syncLineToLots,
   nextBlockId,
   DEFAULT_GEN,
@@ -169,30 +168,30 @@ const FACADE_SUGGESTIONS = [
 export default function FacadePage() {
   // Everything is live — no draft/committed split. Client-side geometry
   // rebuilds are trivially fast, so every slider tick renders immediately.
-  const [initial] = useState(() => initialWorld(DEFAULT_FACADE));
-  const [blocks, setBlocks] = useState<FacadeBlock[]>([initial]);
-  const [selected, setSelected] = useState<Selection>({
-    blockId: initial.id,
-    lot: 0,
-    level: "lot",
-  });
+  // The scene starts BLANK: no buildings until the user draws a street with
+  // the pen tool (auto-armed in FacadeViewer when blocks is empty).
+  const [blocks, setBlocks] = useState<FacadeBlock[]>([]);
+  const [selected, setSelected] = useState<Selection | null>(null);
   const [context, setContext] = useState<LotContext>(DEFAULT_LOT_CONTEXT);
   const [view, setView] = useState<ViewSettings>(FACADE_DEFAULT_VIEW);
   const [isAILoading, setIsAILoading] = useState(false);
   const [aiStatus, setAiStatus] = useState<string | null>(null);
   const [drawActive, setDrawActive] = useState(false);
 
-  const selectedBlock =
-    blocks.find((b) => b.id === selected.blockId) ?? blocks[0];
-  const selectedLot =
-    selectedBlock.lots[Math.min(selected.lot, selectedBlock.lots.length - 1)];
-  const params = selectedLot.params;
+  const selectedBlock = selected
+    ? (blocks.find((b) => b.id === selected.blockId) ?? null)
+    : null;
+  const selectedLot = selectedBlock
+    ? selectedBlock.lots[Math.min(selected!.lot, selectedBlock.lots.length - 1)]
+    : null;
+  const params = selectedLot ? selectedLot.params : null;
 
   // Every existing consumer (controls, prompt, AI, header) edits the
   // SELECTED lot; hand edits pin it against reroll and keep the block
   // line in sync with the new widths.
   const setParams = useCallback(
     (next: FacadeParams | ((prev: FacadeParams) => FacadeParams)) => {
+      if (!selected) return;
       setBlocks((bs) => {
         const b = bs.find((x) => x.id === selected.blockId);
         if (!b) return bs;
@@ -227,7 +226,7 @@ export default function FacadePage() {
 
   const handleSelectLot = useCallback((blockId: string, lot: number) => {
     setSelected((s) =>
-      s.blockId === blockId && s.lot === lot && s.level === "lot"
+      s?.blockId === blockId && s.lot === lot && s.level === "lot"
         ? { blockId, lot, level: "block" } // second click promotes to block
         : { blockId, lot, level: "lot" },
     );
@@ -235,9 +234,10 @@ export default function FacadePage() {
 
   const updateSelectedBlock = useCallback(
     (fn: (b: FacadeBlock) => FacadeBlock) => {
+      if (!selected) return;
       setBlocks((bs) => bs.map((b) => (b.id === selected.blockId ? fn(b) : b)));
     },
-    [selected.blockId],
+    [selected],
   );
 
   const handleGenChange = useCallback(
@@ -256,13 +256,14 @@ export default function FacadePage() {
   );
 
   const handleDeleteBlock = useCallback(() => {
-    // Computed OUTSIDE the updater: initialWorld()/nextBlockId() are impure
-    // and Strict Mode double-invokes updater functions.
-    const rest = blocks.filter((b) => b.id !== selected.blockId);
-    const next = rest.length > 0 ? rest : [initialWorld(DEFAULT_FACADE)];
-    setBlocks(next);
-    setSelected({ blockId: next[0].id, lot: 0, level: "lot" });
-  }, [blocks, selected.blockId]);
+    if (!selected) return;
+    // The world may become empty — no fallback block is respawned.
+    const rest = blocks.filter((b) => b.id !== selected?.blockId);
+    setBlocks(rest);
+    setSelected(
+      rest.length > 0 ? { blockId: rest[0].id, lot: 0, level: "lot" } : null,
+    );
+  }, [blocks, selected]);
 
   // Delete/Backspace removes the selection: the selected lot (street refits,
   // length preserved) or the whole block at block level / last lot. Direct —
@@ -283,6 +284,7 @@ export default function FacadePage() {
       // Backspace muscle-memory from pen tools must not nuke the selection
       // while the user is mid-sketch on a street.
       if (drawActive) return;
+      if (!selected) return;
       const block = blocks.find((b) => b.id === selected.blockId);
       if (!block) return;
       e.preventDefault(); // Backspace can navigate back in some browsers
@@ -291,10 +293,9 @@ export default function FacadePage() {
         const next = deleteLot(block, lotIndex);
         if (!next) return; // nothing can absorb — deletion rejected
         setBlocks((bs) => bs.map((b) => (b.id === block.id ? next : b)));
-        setSelected((s) => ({
-          ...s,
-          lot: Math.min(lotIndex, next.lots.length - 1),
-        }));
+        setSelected((s) =>
+          s ? { ...s, lot: Math.min(lotIndex, next.lots.length - 1) } : s,
+        );
         return;
       }
       // Block level, or the block's last lot: delete the whole block. Reuses
@@ -306,7 +307,7 @@ export default function FacadePage() {
   }, [blocks, selected, drawActive, handleDeleteBlock]);
 
   const handleSelectionLevel = useCallback(
-    (level: "lot" | "block") => setSelected((s) => ({ ...s, level })),
+    (level: "lot" | "block") => setSelected((s) => (s ? { ...s, level } : s)),
     [],
   );
 
@@ -342,10 +343,15 @@ export default function FacadePage() {
     [blocks],
   );
 
-  const layout = useMemo(() => computeLayout(params), [params]);
+  const layout = useMemo(
+    () => (params ? computeLayout(params) : null),
+    [params],
+  );
 
   const handlePrompt = useCallback(
     async (prompt: string) => {
+      // No lot selected (blank canvas) — nothing for a prompt to edit.
+      if (!params) return;
       // Instant local parse, then the AI refines on top of that same state
       // (not the pre-parse closure value — otherwise the AI's echoed
       // "current" reverts the just-applied local parse when it responds).
@@ -406,13 +412,19 @@ export default function FacadePage() {
           </Link>
         </div>
         <div className="flex items-center gap-3 text-[11px] text-[var(--muted)] font-mono">
-          <span>{params.storeys}F</span>
-          <span>·</span>
-          <span>{params.bays} bays</span>
-          <span>·</span>
-          <span>{params.width.toFixed(1)}m</span>
-          <span>·</span>
-          <span>{layout.totalHeight.toFixed(1)}m ↑</span>
+          {params && layout ? (
+            <>
+              <span>{params.storeys}F</span>
+              <span>·</span>
+              <span>{params.bays} bays</span>
+              <span>·</span>
+              <span>{params.width.toFixed(1)}m</span>
+              <span>·</span>
+              <span>{layout.totalHeight.toFixed(1)}m ↑</span>
+            </>
+          ) : (
+            <span>draw a street to begin</span>
+          )}
         </div>
       </header>
 
@@ -432,33 +444,50 @@ export default function FacadePage() {
 
         <div className="w-full md:w-80 border-t md:border-t-0 md:border-l border-[var(--border)] bg-[var(--panel-bg)] overflow-y-auto">
           <div className="p-4 space-y-5">
-            <div>
-              <PromptInput
-                onApply={handlePrompt}
-                isLoading={isAILoading}
-                variant="inline"
-                placeholder="Describe your facade…"
-                suggestions={FACADE_SUGGESTIONS}
-              />
-              {aiStatus && (
-                <div className="mt-1 text-[10px] text-[var(--muted)]">{aiStatus}</div>
-              )}
-            </div>
-            <FacadeControls
-              params={params}
-              onChange={setParams}
-              context={context}
-              onContextChange={setContext}
-              view={view}
-              onViewChange={setView}
-              selection={selected}
-              block={selectedBlock}
-              onSelectionLevel={handleSelectionLevel}
-              onGenChange={handleGenChange}
-              onReroll={handleReroll}
-              onFlip={handleFlip}
-              onDeleteBlock={handleDeleteBlock}
-            />
+            {selected && selectedBlock && params ? (
+              <>
+                <div>
+                  <PromptInput
+                    onApply={handlePrompt}
+                    isLoading={isAILoading}
+                    variant="inline"
+                    placeholder="Describe your facade…"
+                    suggestions={FACADE_SUGGESTIONS}
+                  />
+                  {aiStatus && (
+                    <div className="mt-1 text-[10px] text-[var(--muted)]">
+                      {aiStatus}
+                    </div>
+                  )}
+                </div>
+                <FacadeControls
+                  params={params}
+                  onChange={setParams}
+                  context={context}
+                  onContextChange={setContext}
+                  view={view}
+                  onViewChange={setView}
+                  selection={selected}
+                  block={selectedBlock}
+                  onSelectionLevel={handleSelectionLevel}
+                  onGenChange={handleGenChange}
+                  onReroll={handleReroll}
+                  onFlip={handleFlip}
+                  onDeleteBlock={handleDeleteBlock}
+                />
+              </>
+            ) : (
+              <div className="text-sm text-[var(--muted)] leading-relaxed space-y-2 p-1">
+                <div className="font-medium text-[var(--foreground)]">
+                  Blank canvas
+                </div>
+                <p>
+                  Sketch your first street: the pen tool in the Plan pane is
+                  armed — click to place nodes, Escape to finish, click the
+                  first node to close a loop.
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>

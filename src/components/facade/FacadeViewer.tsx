@@ -37,7 +37,7 @@ import {
 
 interface FacadeViewerProps {
   blocks: FacadeBlock[];
-  selected: Selection;
+  selected: Selection | null;
   onSelectLot: (blockId: string, lot: number) => void;
   onCommitLine: (a: [number, number], b: [number, number]) => void;
   onMoveNode: (from: [number, number], to: [number, number]) => boolean;
@@ -345,7 +345,7 @@ function PlanPane({
   onMoveNode,
 }: {
   blocks: FacadeBlock[];
-  selected: Selection;
+  selected: Selection | null;
   onSelectLot: (blockId: string, lot: number) => void;
   context: LotContext;
   view: ViewSettings;
@@ -372,6 +372,7 @@ function PlanPane({
     [onSelectLot],
   );
   const bounds = useMemo(() => {
+    if (blocks.length === 0) return { w: 30, d: 30, cx: 0, cz: 0 };
     let minX = Infinity,
       maxX = -Infinity,
       minZ = Infinity,
@@ -456,7 +457,7 @@ function PerspectivePane({
   view,
 }: {
   blocks: FacadeBlock[];
-  selected: Selection;
+  selected: Selection | null;
   onSelectLot: (blockId: string, lot: number) => void;
   context: LotContext;
   view: ViewSettings;
@@ -512,42 +513,64 @@ function ElevationPane({
   mode,
 }: {
   blocks: FacadeBlock[];
-  selected: Selection;
+  selected: Selection | null;
   onSelectLot: (blockId: string, lot: number) => void;
   context: LotContext;
   view: ViewSettings;
   size: { w: number; h: number };
   mode: "overview" | "detail";
 }) {
-  const block = blocks.find((b) => b.id === selected.blockId) ?? blocks[0];
-  const frame = useMemo(() => blockFrame(block), [block]);
-  const lots = block.lots;
+  // Zero-block world: `block` is undefined. Hooks below must still run
+  // unconditionally (Rules of Hooks) — every derived value falls back to a
+  // safe default so the memos never throw, and the JSX branches at the end
+  // to render just the ground plane behind a default fitted camera.
+  const block = blocks.find((b) => b.id === selected?.blockId) ?? blocks[0];
+  const frame = useMemo(() => (block ? blockFrame(block) : null), [block]);
+  // Memoized (not `block?.lots ?? []`) — a fresh `[]` literal on every
+  // render would change identity even when `block` doesn't, defeating the
+  // maxH memo below.
+  const lots = useMemo(() => block?.lots ?? [], [block]);
   const maxH = useMemo(
-    () => Math.max(...lots.map((l) => computeLayout(l.params).totalHeight)),
+    () =>
+      lots.length > 0
+        ? Math.max(...lots.map((l) => computeLayout(l.params).totalHeight))
+        : 12,
     [lots],
   );
-  const length = totalLotsWidth(block);
+  const length = block ? totalLotsWidth(block) : 30;
   // Overview frames the whole block strip; detail frames the SELECTED
   // lot's ground storey.
-  const lotIndex = Math.min(selected.lot, lots.length - 1);
-  const lotParams = lots[lotIndex].params;
-  const lotLayout = useMemo(() => computeLayout(lotParams), [lotParams]);
-  const placements = useMemo(() => lotPlacements(block), [block]);
-  const lotPos = placements[lotIndex].position;
+  const lotIndex = Math.min(selected?.lot ?? 0, Math.max(lots.length - 1, 0));
+  const lotParams = lots[lotIndex]?.params ?? null;
+  const lotLayout = useMemo(
+    () => (lotParams ? computeLayout(lotParams) : null),
+    [lotParams],
+  );
+  const placements = useMemo(
+    () => (block ? lotPlacements(block) : []),
+    [block],
+  );
+  const lotPos = placements[lotIndex]?.position ?? ([0, 0, 0] as [
+    number,
+    number,
+    number,
+  ]);
 
-  const worldW = mode === "overview" ? length : lotParams.width;
+  const worldW = mode === "overview" ? length : (lotParams?.width ?? 30);
   const worldH =
     mode === "overview"
       ? maxH
-      : Math.min(lotLayout.storeyLevels[1] + 0.8, lotLayout.totalHeight);
-  const targetY = worldH / 2;
+      : lotLayout
+        ? Math.min(lotLayout.storeyLevels[1] + 0.8, lotLayout.totalHeight)
+        : 12;
+  const targetY = block ? worldH / 2 : 4;
   const midX =
     mode === "overview"
-      ? frame.origin[0] + (frame.dir[0] * length) / 2
+      ? (frame ? frame.origin[0] + (frame.dir[0] * length) / 2 : 0)
       : lotPos[0];
   const midZ =
     mode === "overview"
-      ? frame.origin[1] + (frame.dir[1] * length) / 2
+      ? (frame ? frame.origin[1] + (frame.dir[1] * length) / 2 : 0)
       : lotPos[2];
   // Stable identity — drei's MapControls target/OrthographicCamera position
   // props reset any in-progress pan when they receive a freshly-built array
@@ -556,12 +579,19 @@ function ElevationPane({
     () => [midX, targetY, midZ],
     [midX, targetY, midZ],
   );
-  const normal3: [number, number, number] = [frame.normal[0], 0, frame.normal[1]];
-  const zoom = fitOrthoZoom(size.w, size.h, worldW, worldH);
+  const normal3: [number, number, number] = frame
+    ? [frame.normal[0], 0, frame.normal[1]]
+    : [0, 0, 1];
+  const zoom = block
+    ? fitOrthoZoom(size.w, size.h, worldW, worldH)
+    : fitOrthoZoom(size.w, size.h, 30, 12);
   const position = useMemo<[number, number, number]>(
-    () => elevationCameraPosition(mid, normal3, ELEVATION_DISTANCE),
+    () =>
+      block
+        ? elevationCameraPosition(mid, normal3, ELEVATION_DISTANCE)
+        : [0, 8, ELEVATION_DISTANCE],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mid, frame.normal[0], frame.normal[1]],
+    [block, mid, normal3[0], normal3[2]],
   );
   const camRef = useRef<THREE.OrthographicCamera>(null);
   useEffect(() => {
@@ -590,13 +620,15 @@ function ElevationPane({
         near={0.1}
         far={400}
       />
-      <MapControls
-        makeDefault
-        enableRotate={false}
-        target={mid}
-        screenSpacePanning
-        zoomSpeed={1}
-      />
+      {block && (
+        <MapControls
+          makeDefault
+          enableRotate={false}
+          target={mid}
+          screenSpacePanning
+          zoomSpeed={1}
+        />
+      )}
     </>
   );
 }
@@ -626,7 +658,9 @@ export default function FacadeViewer({
   };
 
   const [maximized, setMaximized] = useState<PaneId | null>(null);
-  const [drawMode, setDrawMode] = useState(false);
+  // A blank world starts with the pen armed — the empty-state copy on the
+  // right panel promises the pen is ready immediately.
+  const [drawMode, setDrawMode] = useState(blocks.length === 0);
   useEffect(() => {
     onDrawModeChange?.(drawMode);
   }, [drawMode, onDrawModeChange]);

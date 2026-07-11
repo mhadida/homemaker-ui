@@ -111,12 +111,12 @@ function BlockGroup({
   onSelectLot,
 }: {
   block: FacadeBlock;
-  selected: Selection;
+  selected: Selection | null;
   onSelectLot: (blockId: string, lot: number) => void;
 }) {
   const placements = useMemo(() => lotPlacements(block), [block]);
   const frame = useMemo(() => blockFrame(block), [block]);
-  const isSelectedBlock = selected.blockId === block.id;
+  const isSelectedBlock = selected?.blockId === block.id;
   const mid: [number, number, number] = [
     frame.origin[0] + (frame.dir[0] * frame.length) / 2,
     0,
@@ -136,7 +136,7 @@ function BlockGroup({
           }}
         >
           <FacadeMesh params={lot.params} />
-          {isSelectedBlock && selected.lot === i && (
+          {isSelectedBlock && selected?.lot === i && (
             <SelectionMarker params={lot.params} />
           )}
         </group>
@@ -154,8 +154,12 @@ function BlockGroup({
           [block.line.a[0], 0.06, block.line.a[1]],
           [block.line.b[0], 0.06, block.line.b[1]],
         ]}
-        color={isSelectedBlock && selected.level === "block" ? "#3b82f6" : "#4a4a48"}
-        lineWidth={isSelectedBlock && selected.level === "block" ? 3 : 1.5}
+        color={
+          isSelectedBlock && selected?.level === "block"
+            ? "#3b82f6"
+            : "#4a4a48"
+        }
+        lineWidth={isSelectedBlock && selected?.level === "block" ? 3 : 1.5}
       />
     </group>
   );
@@ -169,7 +173,7 @@ export default function SceneContents({
   view,
 }: {
   blocks: FacadeBlock[];
-  selected: Selection;
+  selected: Selection | null;
   onSelectLot: (blockId: string, lot: number) => void;
   context: LotContext;
   view: ViewSettings;
