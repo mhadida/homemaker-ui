@@ -180,6 +180,7 @@ export default function FacadePage() {
   const [view, setView] = useState<ViewSettings>(FACADE_DEFAULT_VIEW);
   const [isAILoading, setIsAILoading] = useState(false);
   const [aiStatus, setAiStatus] = useState<string | null>(null);
+  const [drawActive, setDrawActive] = useState(false);
 
   const selectedBlock =
     blocks.find((b) => b.id === selected.blockId) ?? blocks[0];
@@ -269,6 +270,7 @@ export default function FacadePage() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Delete" && e.key !== "Backspace") return;
+      if (e.repeat) return; // OS key-repeat must not cascade-delete lots
       const t = e.target;
       if (
         t instanceof HTMLElement &&
@@ -278,8 +280,12 @@ export default function FacadePage() {
           t.isContentEditable)
       )
         return;
+      // Backspace muscle-memory from pen tools must not nuke the selection
+      // while the user is mid-sketch on a street.
+      if (drawActive) return;
       const block = blocks.find((b) => b.id === selected.blockId);
       if (!block) return;
+      e.preventDefault(); // Backspace can navigate back in some browsers
       if (selected.level === "lot" && block.lots.length > 1) {
         const lotIndex = Math.min(selected.lot, block.lots.length - 1);
         const next = deleteLot(block, lotIndex);
@@ -291,18 +297,13 @@ export default function FacadePage() {
         }));
         return;
       }
-      // Block level, or the block's last lot: delete the whole block.
-      // Computed OUTSIDE the updater — initialWorld() is impure and Strict
-      // Mode double-invokes updater functions (same pattern as
-      // handleDeleteBlock above).
-      const rest = blocks.filter((b) => b.id !== selected.blockId);
-      const nextBlocks = rest.length > 0 ? rest : [initialWorld(DEFAULT_FACADE)];
-      setBlocks(nextBlocks);
-      setSelected({ blockId: nextBlocks[0].id, lot: 0, level: "lot" });
+      // Block level, or the block's last lot: delete the whole block. Reuses
+      // handleDeleteBlock rather than re-implementing block deletion here.
+      handleDeleteBlock();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [blocks, selected]);
+  }, [blocks, selected, drawActive, handleDeleteBlock]);
 
   const handleSelectionLevel = useCallback(
     (level: "lot" | "block") => setSelected((s) => ({ ...s, level })),
@@ -425,6 +426,7 @@ export default function FacadePage() {
             onMoveNode={handleMoveNode}
             context={context}
             view={view}
+            onDrawModeChange={setDrawActive}
           />
         </div>
 

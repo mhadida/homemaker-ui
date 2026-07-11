@@ -43,6 +43,7 @@ interface FacadeViewerProps {
   onMoveNode: (from: [number, number], to: [number, number]) => boolean;
   context: LotContext;
   view?: ViewSettings;
+  onDrawModeChange?: (drawMode: boolean) => void;
 }
 
 type PaneId = "plan" | "perspective" | "overview" | "detail";
@@ -610,6 +611,7 @@ export default function FacadeViewer({
   onMoveNode,
   context,
   view = FACADE_DEFAULT_VIEW,
+  onDrawModeChange,
 }: FacadeViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null!);
   const planRef = useRef<HTMLDivElement>(null);
@@ -625,6 +627,9 @@ export default function FacadeViewer({
 
   const [maximized, setMaximized] = useState<PaneId | null>(null);
   const [drawMode, setDrawMode] = useState(false);
+  useEffect(() => {
+    onDrawModeChange?.(drawMode);
+  }, [drawMode, onDrawModeChange]);
   const [isDesktop, setIsDesktop] = useState(true);
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 768px)");
