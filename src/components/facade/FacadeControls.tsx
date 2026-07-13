@@ -17,6 +17,13 @@ import type { ViewSettings } from "@/lib/building/types";
 import { WALL_SWATCHES, classicalStoreyHeights } from "@/lib/building/types";
 import type { Selection, FacadeBlock, BlockGenSettings } from "@/lib/facade/blocks";
 import type { Corner, CornerChoice } from "@/lib/facade/corners";
+import { resolveSections, SECTION_OFFSET_MAX } from "@/lib/facade/layout";
+import {
+  withSectionCount,
+  withSectionOffset,
+  withSectionBays,
+  withSectionsSymmetry,
+} from "@/lib/facade/sections";
 import BayGrid from "./BayGrid";
 
 interface FacadeControlsProps {
@@ -182,6 +189,7 @@ export default function FacadeControls({
 }: FacadeControlsProps) {
   const update = (u: Partial<FacadeParams>) => onChange({ ...params, ...u });
   const L = FACADE_LIMITS;
+  const sections = resolveSections(params);
 
   const applyPreset = (id: PresetId) => {
     onChange({
@@ -341,6 +349,91 @@ export default function FacadeControls({
           </div>
         </div>
         <BayGrid params={params} onChange={onChange} />
+      </Section>
+
+      <Section title="Sections">
+        <SliderRow
+          label="Sections"
+          value={sections.length}
+          display={`${sections.length}`}
+          min={1}
+          max={params.bays}
+          step={1}
+          onChange={(n) =>
+            onChange({ ...withSectionCount(params, n), preset: undefined })
+          }
+        />
+        {sections.length >= 2 && (
+          <>
+            <Toggle
+              label={
+                params.sectionsSymmetrical
+                  ? "Symmetrical: on"
+                  : "Symmetrical: off"
+              }
+              on={!!params.sectionsSymmetrical}
+              onClick={() =>
+                onChange({
+                  ...withSectionsSymmetry(params, !params.sectionsSymmetrical),
+                  preset: undefined,
+                })
+              }
+            />
+            {sections.map((s, i) => (
+              <div key={i} className="rounded bg-[var(--border)]/40 p-2 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-[var(--muted)]">
+                    S{i + 1} · {s.bays} bay{s.bays > 1 ? "s" : ""}
+                  </span>
+                  {!params.sectionsSymmetrical && (
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        aria-label={`Shrink section ${i + 1}`}
+                        onClick={() =>
+                          onChange({
+                            ...withSectionBays(params, i, -1),
+                            preset: undefined,
+                          })
+                        }
+                        className="w-5 h-5 rounded bg-[var(--border)] text-zinc-400 hover:text-zinc-200 text-[11px] leading-none"
+                      >
+                        −
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Grow section ${i + 1}`}
+                        onClick={() =>
+                          onChange({
+                            ...withSectionBays(params, i, 1),
+                            preset: undefined,
+                          })
+                        }
+                        className="w-5 h-5 rounded bg-[var(--border)] text-zinc-400 hover:text-zinc-200 text-[11px] leading-none"
+                      >
+                        +
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <SliderRow
+                  label="Offset"
+                  value={s.offset}
+                  display={`${s.offset > 0 ? "+" : ""}${Math.round(s.offset * 100)}cm`}
+                  min={-SECTION_OFFSET_MAX}
+                  max={SECTION_OFFSET_MAX}
+                  step={0.01}
+                  onChange={(o) =>
+                    onChange({
+                      ...withSectionOffset(params, i, o),
+                      preset: undefined,
+                    })
+                  }
+                />
+              </div>
+            ))}
+          </>
+        )}
       </Section>
 
       <Section title="Ground Floor">
