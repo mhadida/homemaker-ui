@@ -1,4 +1,5 @@
 import type { FacadeParams, OpeningKind } from "./types";
+import { resolveRoof, type RoofPlan } from "./roof";
 
 function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
@@ -200,6 +201,8 @@ export interface FacadeLayout {
   /** clamped building-body depth (m); the mesh renders one box per section
    * strip using this + each strip's x0/x1 */
   massingDepth: number;
+  /** roof plan over the mass, or null for a flat roof (no roof mesh) */
+  roof: RoofPlan | null;
   /** wallTop + cornice + parapet */
   totalHeight: number;
   /** y of each storey floor, length storeys+1 (last = wallTop) */
@@ -393,6 +396,7 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
     width,
     wallTop,
     massingDepth,
+    roof: resolveRoof(params, wallTop, massingDepth),
     totalHeight,
     storeyLevels,
     grid,

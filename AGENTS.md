@@ -132,8 +132,14 @@ NOT involved; every edit is live (no Update button). Spec:
 - **Massing**: each building gets a body — one wall-colored box per section
   strip behind the facade, front flush with the wall back, extending back
   by a per-lot `massingDepth` (clamped 3–20 m in `layout.ts`, default 8, a
-  panel Depth slider). Flat-topped for now; v7 roofs cap it. Spec:
+  panel Depth slider). Flat-topped; roofs cap it. Spec:
   `docs/superpowers/specs/2026-07-14-massing-design.md`.
+- **Roofs**: flat / gable / hip, ridge parallel or perpendicular to street,
+  per-lot height (`src/lib/facade/roof.ts`, pure — `resolveRoof` → clamped
+  `RoofPlan`, `roofTriangles` → soup the mesh auto-orients by normal).
+  Default flat (no mesh); generator seeds variety; `roofType`+`roofHeight`
+  are corner shell fields (orientation stays per-wing). Corner hip-valley
+  merge deferred. Spec: `docs/superpowers/specs/2026-07-14-roofs-design.md`.
 - **AI prompt**: `/api/facade-prompt` (flat fully-required zod spec — OpenAI
   structured output rejects optionals) targets the selected lot, plus an
   instant local keyword parser.

@@ -108,6 +108,8 @@ export const SHELL_FIELDS = [
   "trimColor",
   "ornament",
   "windowStyle",
+  "roofType",
+  "roofHeight",
 ] as const;
 
 const lotOf = (blocks: FacadeBlock[], side: CornerSide) =>
@@ -176,6 +178,10 @@ function syncedParams(
     trimColor: source.trimColor,
     ornament: { ...source.ornament },
     windowStyle: source.windowStyle,
+    // Roof style + height are shell (both wings match); roofOrientation is
+    // per-wing (each faces its own street) — deliberately not copied.
+    roofType: source.roofType,
+    roofHeight: source.roofHeight,
   };
   if (unified) {
     const rhythm = source.width / source.bays;
@@ -203,6 +209,8 @@ function syncedParams(
     next.ornament.parapet === target.ornament.parapet &&
     next.ornament.sills === target.ornament.sills &&
     next.ornament.surrounds === target.ornament.surrounds &&
+    next.roofType === target.roofType &&
+    next.roofHeight === target.roofHeight &&
     (!unified ||
       (next.bays === target.bays &&
         next.windowWidthRatio === target.windowWidthRatio &&

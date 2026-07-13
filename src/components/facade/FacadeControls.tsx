@@ -25,6 +25,11 @@ import {
   MASSING_DEPTH_DEFAULT,
 } from "@/lib/facade/layout";
 import {
+  ROOF_HEIGHT_MIN,
+  ROOF_HEIGHT_MAX,
+  ROOF_HEIGHT_DEFAULT,
+} from "@/lib/facade/roof";
+import {
   withSectionCount,
   withSectionOffset,
   withSectionBays,
@@ -452,6 +457,42 @@ export default function FacadeControls({
           step={0.5}
           onChange={(massingDepth) => update({ massingDepth })}
         />
+      </Section>
+
+      <Section title="Roof">
+        <div className="grid grid-cols-3 gap-1">
+          {(["flat", "gable", "hip"] as const).map((t) => (
+            <Toggle
+              key={t}
+              label={t[0].toUpperCase() + t.slice(1)}
+              on={(params.roofType ?? "flat") === t}
+              onClick={() => update({ roofType: t })}
+            />
+          ))}
+        </div>
+        {(params.roofType ?? "flat") !== "flat" && (
+          <>
+            <div className="grid grid-cols-2 gap-1">
+              {(["parallel", "perpendicular"] as const).map((o) => (
+                <Toggle
+                  key={o}
+                  label={o === "parallel" ? "∥ street" : "⊥ street"}
+                  on={(params.roofOrientation ?? "parallel") === o}
+                  onClick={() => update({ roofOrientation: o })}
+                />
+              ))}
+            </div>
+            <SliderRow
+              label="Height"
+              value={params.roofHeight ?? ROOF_HEIGHT_DEFAULT}
+              display={`${(params.roofHeight ?? ROOF_HEIGHT_DEFAULT).toFixed(2)}m`}
+              min={ROOF_HEIGHT_MIN}
+              max={ROOF_HEIGHT_MAX}
+              step={0.25}
+              onChange={(roofHeight) => update({ roofHeight })}
+            />
+          </>
+        )}
       </Section>
 
       <Section title="Ground Floor">

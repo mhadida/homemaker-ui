@@ -139,6 +139,8 @@ const rightAngle = () => {
     storeys: 4,
     wallColor: "#111111",
     ornament: { cornice: true, parapet: true, sills: false, surrounds: true },
+    roofType: "hip",
+    roofHeight: 4.5,
   };
   return { A, B };
 };

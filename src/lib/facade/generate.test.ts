@@ -95,6 +95,20 @@ describe("generateLot", () => {
       expect(a.massingDepth).toBe(b.massingDepth); // deterministic
     }
   });
+
+  it("emits a seeded roof (type/orientation/height), deterministic per seed", () => {
+    for (let seed = 1; seed <= 50; seed++) {
+      const a = generateLot(7, DEFAULT_GEN, mulberry32(seed));
+      const b = generateLot(7, DEFAULT_GEN, mulberry32(seed));
+      expect(["flat", "gable", "hip"]).toContain(a.roofType);
+      expect(["parallel", "perpendicular"]).toContain(a.roofOrientation);
+      expect(a.roofHeight).toBeGreaterThanOrEqual(2);
+      expect(a.roofHeight).toBeLessThanOrEqual(4.5);
+      expect(a.roofType).toBe(b.roofType);
+      expect(a.roofOrientation).toBe(b.roofOrientation);
+      expect(a.roofHeight).toBe(b.roofHeight);
+    }
+  });
 });
 
 describe("generateBlock / rerollBlock", () => {

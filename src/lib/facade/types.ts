@@ -81,6 +81,13 @@ export interface FacadeParams {
    * [MASSING_DEPTH_MIN, MASSING_DEPTH_MAX] by the layout engine. Absent =
    * MASSING_DEPTH_DEFAULT (every building has a body). */
   massingDepth?: number;
+  /** Roof form. Absent = "flat" (the flat mass top, no roof mesh). */
+  roofType?: "flat" | "gable" | "hip";
+  /** Ridge direction. Absent = "parallel" (to street). Ignored when flat. */
+  roofOrientation?: "parallel" | "perpendicular";
+  /** Ridge rise above the eaves, metres. Clamped [ROOF_HEIGHT_MIN,
+   * ROOF_HEIGHT_MAX]. Absent = ROOF_HEIGHT_DEFAULT. Ignored when flat. */
+  roofHeight?: number;
   groundFloor: GroundFloorConfig;
   ornament: OrnamentConfig;
   /** #RRGGBB — wall render color */

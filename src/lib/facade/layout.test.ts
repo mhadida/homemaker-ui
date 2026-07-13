@@ -657,3 +657,24 @@ describe("computeLayout massing", () => {
     );
   });
 });
+
+describe("computeLayout roof", () => {
+  it("default (flat) → layout.roof is null and nothing else changes", () => {
+    expect(computeLayout(DEFAULT_FACADE).roof).toBeNull();
+    expect(computeLayout(p({ roofType: "flat" })).roof).toBeNull();
+  });
+
+  it("a pitched roof populates layout.roof without altering other output", () => {
+    const withRoof = computeLayout(p({ roofType: "gable", roofHeight: 3 }));
+    expect(withRoof.roof).not.toBeNull();
+    expect(withRoof.roof!.ridgeY).toBe(withRoof.wallTop + 3);
+    // Everything except `roof` matches the flat default.
+    const strip = (l: ReturnType<typeof computeLayout>) => ({ ...l, roof: null });
+    expect(strip(withRoof)).toEqual(strip(computeLayout(DEFAULT_FACADE)));
+  });
+
+  it("roof footprint depth follows the clamped massingDepth", () => {
+    const l = computeLayout(p({ roofType: "hip", massingDepth: 12 }));
+    expect(l.roof!.zBack).toBe(-12);
+  });
+});

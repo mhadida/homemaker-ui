@@ -12,6 +12,44 @@ import {
 } from "@/lib/facade/layout";
 import type { FacadeParams, WindowStyleId } from "@/lib/facade/types";
 import type { LotMiter } from "@/lib/facade/corners";
+import { roofTriangles, type RoofPlan } from "@/lib/facade/roof";
+
+const ROOF_COLOR = "#4a4e57"; // slate
+
+/** Roof BufferGeometry from a plan. Non-indexed (crisp faceted faces) with
+ * each triangle auto-oriented so its normal points away from the mass
+ * interior — so roofTriangles() needn't hand-wind faces correctly. */
+function buildRoofGeometry(plan: RoofPlan): THREE.BufferGeometry {
+  const tris = roofTriangles(plan);
+  const ref = new THREE.Vector3(0, plan.eaveY, (plan.zFront + plan.zBack) / 2);
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  const ab = new THREE.Vector3();
+  const ac = new THREE.Vector3();
+  const n = new THREE.Vector3();
+  const cen = new THREE.Vector3();
+  const positions: number[] = [];
+  for (let i = 0; i < tris.length; i += 3) {
+    a.set(...tris[i]);
+    b.set(...tris[i + 1]);
+    c.set(...tris[i + 2]);
+    ab.subVectors(b, a);
+    ac.subVectors(c, a);
+    n.crossVectors(ab, ac);
+    cen.copy(a).add(b).add(c).multiplyScalar(1 / 3).sub(ref);
+    if (n.dot(cen) < 0) {
+      // flip winding so the normal points outward
+      positions.push(...tris[i], ...tris[i + 2], ...tris[i + 1]);
+    } else {
+      positions.push(...tris[i], ...tris[i + 1], ...tris[i + 2]);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
 
 const FRAME_T = 0.07; // window frame member thickness
 const FRAME_D = 0.06; // frame depth
@@ -376,6 +414,11 @@ export default function FacadeMesh({
   // R3F does NOT auto-dispose geometry passed via the `geometry` prop —
   // without this, every slider tick leaks GPU buffers.
   useEffect(() => () => stripGeos.forEach((g) => g.dispose()), [stripGeos]);
+  const roofGeo = useMemo(
+    () => (layout.roof ? buildRoofGeometry(layout.roof) : null),
+    [layout.roof],
+  );
+  useEffect(() => () => roofGeo?.dispose(), [roofGeo]);
 
   // Everything renders per section strip inside a group carrying the strip's
   // perpendicular relief offset — openings, sills, surrounds, cornice,
@@ -551,6 +594,14 @@ export default function FacadeMesh({
           </group>
         );
       })}
+
+      {/* Roof — one mesh per lot, spanning all sections, capping the mass.
+       * Lot-local coords, so it sits in the outer group (not a strip group). */}
+      {roofGeo && (
+        <mesh geometry={roofGeo} castShadow receiveShadow>
+          <meshStandardMaterial color={ROOF_COLOR} roughness={0.8} />
+        </mesh>
+      )}
     </group>
   );
 }

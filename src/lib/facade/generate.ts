@@ -119,8 +119,11 @@ export function generateLot(
       rand() < v * 0.3
         ? pick(rand, ["georgian", "sash", "victorian", "none"] as WindowStyleId[])
         : base.windowStyle,
-    // Drawn LAST so it never perturbs any earlier draw's determinism.
+    // Drawn LAST so they never perturb any earlier draw's determinism.
     massingDepth: +randIn(rand, 6, 12).toFixed(1),
+    roofType: pick(rand, ["flat", "gable", "gable", "hip"] as const),
+    roofOrientation: pick(rand, ["parallel", "parallel", "perpendicular"] as const),
+    roofHeight: +randIn(rand, 2, 4.5).toFixed(1),
   };
 }
 
