@@ -126,7 +126,16 @@ Today the two end walls stop at the party-wall plane, leaving a wedge gap
   bisector plane of the corner. Implementation: per-lot end extension
   `extend = clamp(tan(turnRad / 2) * WALL_THICKNESS, 0, 3 * WALL_THICKNESS)`
   applied to the wall shape's mitered end (convex: extend outward to close
-  the wedge; concave: negative — trim — so slabs don't z-fight). Computed in
+  the wedge; concave: negative — trim — so slabs don't z-fight).
+- **Concave trim cap (review finding, 2026-07-13):** concave slabs already
+  interpenetrate (overlapping opaque solids are invisible); the trim exists
+  ONLY to break face coplanarity, which occurs near 90° turns. Uncapped,
+  the trim (up to 1.5×wall) slices into edge-bay openings — the layout
+  engine guarantees just MIN_PIER/2 = 0.15 m of wall at a lot edge. So:
+  `concaveTrim = −min(tan(turnRad/2) · WALL_THICKNESS / 2, 0.12)`. The
+  0.12 m cap stays below every possible opening margin, buries the end
+  face inside the partner slab at the coplanar angle, and loses nothing
+  elsewhere. Computed in
   `miterFor`, consumed by `FacadeMesh` via a new optional `miter` prop
   (`{ left?: number; right?: number }` metres of wall extension at each
   side; ornament bands — cornice boxes, parapet, its coping — extend by the
