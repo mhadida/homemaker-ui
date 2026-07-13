@@ -136,6 +136,30 @@ const clamp = (v: number, min: number, max: number) =>
  * slab. */
 const CONCAVE_TRIM_MAX = 0.12;
 
+/** A corner-side END section with nonzero offset would shear the miter
+ * joint open (miters assume flush slabs), so sync flattens it — the exact
+ * depthOffset precedent: destructive, not restored on dissolve, never marks
+ * `customized`. Sections stay per-frontage otherwise (FACE, not shell).
+ * For symmetric lots the stored FIRST section is zeroed — resolveSections
+ * mirrors stored[0] onto the far end, so both ends sit flush and the
+ * symmetric composition survives. Identity return when already flush. */
+function flattenEndSection(
+  params: FacadeParams,
+  lotSide: "left" | "right",
+): FacadeParams {
+  const secs = params.sections;
+  if (!secs || secs.length === 0) return params;
+  // resolveSections renders at most `bays` sections; the rendered end is
+  // the last SURVIVING stored entry, not the last stored one.
+  const count = Math.min(secs.length, params.bays);
+  const idx = lotSide === "left" || params.sectionsSymmetrical ? 0 : count - 1;
+  if (!secs[idx] || secs[idx].offset === 0) return params;
+  return {
+    ...params,
+    sections: secs.map((s, i) => (i === idx ? { ...s, offset: 0 } : s)),
+  };
+}
+
 /** Copy the shell (and, when unified, the face) from source to target.
  * Returns null when the target already matches (idempotence). */
 function syncedParams(
@@ -220,11 +244,13 @@ export function syncCorners(
   ) => {
     const block = get(side.blockId);
     const lot = block.lots[side.lotIndex];
+    const merged = flattenEndSection(params ?? lot.params, side.lotSide);
+    const paramsChanged = merged !== lot.params;
     const needsDepth = zeroDepth && (lot.depthOffset ?? 0) !== 0;
-    if (!params && !needsDepth) return;
+    if (!paramsChanged && !needsDepth) return;
     const lots = block.lots.map((l, i) =>
       i === side.lotIndex
-        ? { ...l, params: params ?? l.params, ...(needsDepth ? { depthOffset: 0 } : {}) }
+        ? { ...l, params: merged, ...(needsDepth ? { depthOffset: 0 } : {}) }
         : l,
     );
     work.set(side.blockId, { ...block, lots });

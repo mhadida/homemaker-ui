@@ -325,3 +325,91 @@ describe("miterFor", () => {
     expect(Math.abs(m.a)).toBeCloseTo(3 * WALL_THICKNESS, 9);
   });
 });
+
+describe("syncCorners section flattening", () => {
+  const withSections = (
+    b: FacadeBlock,
+    lotIndex: number,
+    sections: { bays: number; offset: number }[],
+    symmetrical = false,
+  ): FacadeBlock => ({
+    ...b,
+    lots: b.lots.map((l, i) =>
+      i === lotIndex
+        ? {
+            ...l,
+            params: {
+              ...l.params,
+              bays: 3,
+              sections,
+              sectionsSymmetrical: symmetrical,
+            },
+          }
+        : l,
+    ),
+  });
+
+  it("zeroes the corner-side end section's offset on both sides", () => {
+    let A = mkBlock("A", [0, 0], [10, 0], [5, 5]);
+    let B = mkBlock("B", [10, 0], [10, 10], [5, 5]);
+    // A's corner lot is index 1, corner at its RIGHT end
+    A = withSections(A, 1, [
+      { bays: 1, offset: 0.1 },
+      { bays: 1, offset: 0 },
+      { bays: 1, offset: -0.1 },
+    ]);
+    // B's corner lot is index 0, corner at its LEFT end
+    B = withSections(B, 0, [
+      { bays: 1, offset: 0.12 },
+      { bays: 2, offset: 0 },
+    ]);
+    const out = syncCorners([A, B], new Map(), 150);
+    const aSecs = out[0].lots[1].params.sections!;
+    expect(aSecs.map((s) => s.offset)).toEqual([0.1, 0, 0]); // right end zeroed
+    const bSecs = out[1].lots[0].params.sections!;
+    expect(bSecs.map((s) => s.offset)).toEqual([0, 0]); // left end zeroed
+  });
+
+  it("symmetric corner lot zeroes stored[0] (resolve mirrors it to the far end)", () => {
+    let A = mkBlock("A", [0, 0], [10, 0], [5, 5]);
+    const B = mkBlock("B", [10, 0], [10, 10], [5, 5]);
+    A = withSections(
+      A,
+      1,
+      [
+        { bays: 1, offset: 0.1 },
+        { bays: 1, offset: -0.1 },
+        { bays: 1, offset: 0.1 },
+      ],
+      true,
+    );
+    const out = syncCorners([A, B], new Map(), 150);
+    const secs = out[0].lots[1].params.sections!;
+    expect(secs[0].offset).toBe(0);
+    expect(secs[1].offset).toBe(-0.1); // middle relief survives
+  });
+
+  it("is idempotent and returns identity when end sections are already flush", () => {
+    let A = mkBlock("A", [0, 0], [10, 0], [5, 5]);
+    const B = mkBlock("B", [10, 0], [10, 10], [5, 5]);
+    A = withSections(A, 1, [
+      { bays: 2, offset: 0 },
+      { bays: 1, offset: 0 },
+    ]);
+    const once = syncCorners([A, B], new Map(), 150);
+    const twice = syncCorners(once, new Map(), 150);
+    expect(twice).toBe(once);
+  });
+
+  it("non-corner lots keep their sections untouched", () => {
+    let A = mkBlock("A", [0, 0], [10, 0], [5, 5]);
+    const B = mkBlock("B", [10, 0], [10, 10], [5, 5]);
+    A = withSections(A, 0, [
+      { bays: 1, offset: 0.15 },
+      { bays: 2, offset: -0.15 },
+    ]);
+    const before = A.lots[0].params.sections;
+    const out = syncCorners([A, B], new Map(), 150);
+    expect(out[0].lots[0].params.sections).toBe(before);
+  });
+});
