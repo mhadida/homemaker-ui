@@ -29,7 +29,7 @@ Four parts work together:
 | MCP server (dev only) | `uv run ../homemaker-blender/mcp_server.py` | Bridges agents to a running Blender; lives in the sibling repo |
 | Tests | `npm test` | vitest — src/lib/facade unit tests |
 
-**Tests:** vitest covers the pure facade modules — layout engine, prompt parser, street generator (`refit`/`deleteLot`), node welding, and corner detection/sync/miters (`src/lib/facade/*.test.ts`) — run `npm test`. No e2e/playwright; everything else is verified visually.
+**Tests:** vitest covers the pure facade modules — layout engine (incl. section strips), prompt parser, street generator (`refit`/`deleteLot`), node welding, corner detection/sync/miters, and section edit helpers (`src/lib/facade/*.test.ts`) — run `npm test`. No e2e/playwright; everything else is verified visually.
 
 ## Blender is NOT a runtime dependency of the web app
 
@@ -82,6 +82,7 @@ src/
       generate.ts      — seeded generator: subdivision, lot params, reroll
       nodes.ts         — derived nodes (coincidence welds), moveNode + refit ripple
       corners.ts       — corner detection (turn/convexity), shell sync, miters
+      sections.ts      — facade-section edit helpers (canonical writes, AI patterns)
   types/
     mapbox-gl-draw.d.ts — Type declarations (legacy; no map UI currently exists)
 python/
@@ -120,6 +121,14 @@ NOT involved; every edit is live (no Update button). Spec:
   point on every mutation; walls miter so cornice/parapet run continuously;
   corner nodes tint gold and a stationary click opens the corner inspector
   (unified ↔ 2-facades, primary side, global angle).
+- **Sections**: one lot's facade divides into vertical strips of whole bays
+  with ±15 cm perpendicular relief (`FacadeParams.sections`, sparse — absent
+  means one flush strip). `resolveSections` in `layout.ts` holds all clamps
+  (proportional refit of stale partitions, live symmetry enforcement);
+  `sections.ts` holds the canonical edit helpers + AI patterns; cornice/
+  parapet step with the offsets; `syncCorners` flattens corner-side end
+  sections so miters stay closed. Spec:
+  `docs/superpowers/specs/2026-07-14-facade-sections-design.md`.
 - **AI prompt**: `/api/facade-prompt` (flat fully-required zod spec — OpenAI
   structured output rejects optionals) targets the selected lot, plus an
   instant local keyword parser.
