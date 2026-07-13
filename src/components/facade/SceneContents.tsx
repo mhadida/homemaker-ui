@@ -4,12 +4,11 @@ import { useMemo } from "react";
 import { Environment, ContactShadows, Grid, Edges, Line } from "@react-three/drei";
 import * as THREE from "three";
 import FacadeMesh from "./FacadeMesh";
-import type { FacadeParams, LotContext } from "@/lib/facade/types";
+import type { FacadeParams } from "@/lib/facade/types";
 import type { ViewSettings } from "@/lib/building/types";
 import {
   blockFrame,
   lotPlacements,
-  NEIGHBOR_WIDTH,
   type FacadeBlock,
   type Selection,
 } from "@/lib/facade/blocks";
@@ -59,39 +58,6 @@ function useGroundGeometry() {
     geo.setAttribute("color", new THREE.BufferAttribute(colors, 4));
     return geo;
   }, []);
-}
-
-/** Grey party-wall neighbor volumes flanking the lot. */
-function NeighborMasses({
-  context,
-  facadeWidth,
-}: {
-  context: LotContext;
-  facadeWidth: number;
-}) {
-  if (!context.show) return null;
-  const W = NEIGHBOR_WIDTH; // neighbor visible width
-  const D = 9; // neighbor depth behind the street line
-  return (
-    <>
-      <mesh
-        position={[-facadeWidth / 2 - W / 2, context.leftNeighborHeight / 2, -D / 2 + 0.2]}
-        castShadow
-        receiveShadow
-      >
-        <boxGeometry args={[W, context.leftNeighborHeight, D]} />
-        <meshStandardMaterial color="#6f6b64" roughness={0.95} />
-      </mesh>
-      <mesh
-        position={[facadeWidth / 2 + W / 2, context.rightNeighborHeight / 2, -D / 2 + 0.2]}
-        castShadow
-        receiveShadow
-      >
-        <boxGeometry args={[W, context.rightNeighborHeight, D]} />
-        <meshStandardMaterial color="#67635c" roughness={0.95} />
-      </mesh>
-    </>
-  );
 }
 
 function SelectionMarker({ params }: { params: FacadeParams }) {
@@ -169,13 +135,11 @@ export default function SceneContents({
   blocks,
   selected,
   onSelectLot,
-  context,
   view,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
   onSelectLot: (blockId: string, lot: number) => void;
-  context: LotContext;
   view: ViewSettings;
 }) {
   const groundGeo = useGroundGeometry();
@@ -216,18 +180,6 @@ export default function SceneContents({
           onSelectLot={onSelectLot}
         />
       ))}
-      {blocks.length === 1 && blocks[0].lots.length === 1 && context.show && (
-        <group
-          position={lotPlacements(blocks[0])[0].position}
-          rotation={[0, lotPlacements(blocks[0])[0].rotationY, 0]}
-        >
-          <NeighborMasses
-            context={context}
-            facadeWidth={blocks[0].lots[0].params.width}
-          />
-        </group>
-      )}
-
       {/* Ground plane — polygonOffset pushes it back so the sidewalk, road
        * strip, and grid lines all win the depth test (same trick as the
        * main viewer). */}

@@ -74,7 +74,7 @@ src/
       prompt-parser.ts — Local keyword parser + AI prompt builder
       index.ts         — Re-exports
     facade/
-      types.ts         — FacadeParams, presets, defaults, LotContext
+      types.ts         — FacadeParams, presets, defaults
       layout.ts        — pure layout engine (params → rectangles, all clamps)
       prompt-parser.ts — local keyword parser + deep merge
       camera.ts        — ortho fit + normal-derived elevation cameras

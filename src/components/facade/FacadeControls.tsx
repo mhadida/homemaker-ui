@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect } from "react";
 import type {
   FacadeParams,
-  LotContext,
   PresetId,
   GroundTreatment,
 } from "@/lib/facade/types";
@@ -22,8 +21,6 @@ import BayGrid from "./BayGrid";
 interface FacadeControlsProps {
   params: FacadeParams;
   onChange: (p: FacadeParams) => void;
-  context: LotContext;
-  onContextChange: (c: LotContext) => void;
   view: ViewSettings;
   onViewChange: (v: ViewSettings) => void;
   // block inspector (Task 4)
@@ -163,8 +160,6 @@ const TREATMENTS: { id: GroundTreatment; label: string }[] = [
 export default function FacadeControls({
   params,
   onChange,
-  context,
-  onContextChange,
   view,
   onViewChange,
   selection,
@@ -397,34 +392,7 @@ export default function FacadeControls({
         />
       </Section>
 
-      <Section title="Context & Sun">
-        <Toggle
-          label={context.show ? "Neighbors: shown" : "Neighbors: hidden"}
-          on={context.show}
-          onClick={() => onContextChange({ ...context, show: !context.show })}
-        />
-        <SliderRow
-          label="Left neighbor"
-          value={context.leftNeighborHeight}
-          display={`${context.leftNeighborHeight.toFixed(0)}m`}
-          min={L.neighborHeight.min}
-          max={L.neighborHeight.max}
-          step={1}
-          onChange={(leftNeighborHeight) =>
-            onContextChange({ ...context, leftNeighborHeight })
-          }
-        />
-        <SliderRow
-          label="Right neighbor"
-          value={context.rightNeighborHeight}
-          display={`${context.rightNeighborHeight.toFixed(0)}m`}
-          min={L.neighborHeight.min}
-          max={L.neighborHeight.max}
-          step={1}
-          onChange={(rightNeighborHeight) =>
-            onContextChange({ ...context, rightNeighborHeight })
-          }
-        />
+      <Section title="Sun">
         <SliderRow
           label="Sun azimuth"
           value={view.sunAzimuth}

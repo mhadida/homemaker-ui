@@ -72,14 +72,6 @@ export interface FacadeParams {
   preset?: PresetId;
 }
 
-/** Grey party-wall neighbor masses. Separate from FacadeParams so tweaking
- * them never rebuilds the facade geometry. */
-export interface LotContext {
-  leftNeighborHeight: number;
-  rightNeighborHeight: number;
-  show: boolean;
-}
-
 export const FACADE_LIMITS = {
   width: { min: 4, max: 20 },
   storeys: { min: 1, max: 6 },
@@ -87,7 +79,6 @@ export const FACADE_LIMITS = {
   bays: { min: 1, max: 9 },
   windowWidthRatio: { min: 0.2, max: 0.8 },
   windowHeightRatio: { min: 0.3, max: 0.8 },
-  neighborHeight: { min: 3, max: 20 },
 } as const;
 
 export const DEFAULT_FACADE: FacadeParams = {
@@ -104,12 +95,6 @@ export const DEFAULT_FACADE: FacadeParams = {
   wallColor: "#c7bca8",
   trimColor: "#ece8e0",
   doorColor: "#3d4a42",
-};
-
-export const DEFAULT_LOT_CONTEXT: LotContext = {
-  leftNeighborHeight: 9,
-  rightNeighborHeight: 7,
-  show: true,
 };
 
 /** Facade-specific sun default. The facade faces +z (azimuth 0), so unlike

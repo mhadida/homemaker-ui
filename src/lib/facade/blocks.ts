@@ -51,9 +51,6 @@ export interface Selection {
   level: "lot" | "block";
 }
 
-/** Grey party-wall neighbor mass width (shared by the scene and plan fit). */
-export const NEIGHBOR_WIDTH = 8;
-
 export interface BlockFrame {
   origin: [number, number];
   /** Unit vector along the effective line. */

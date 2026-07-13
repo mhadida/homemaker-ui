@@ -3,10 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import type { FacadeParams, LotContext } from "@/lib/facade/types";
+import type { FacadeParams } from "@/lib/facade/types";
 import {
   DEFAULT_FACADE,
-  DEFAULT_LOT_CONTEXT,
   FACADE_DEFAULT_VIEW,
   DOOR_SWATCHES,
   FACADE_PRESETS,
@@ -172,7 +171,6 @@ export default function FacadePage() {
   // the pen tool (auto-armed in FacadeViewer when blocks is empty).
   const [blocks, setBlocks] = useState<FacadeBlock[]>([]);
   const [selected, setSelected] = useState<Selection | null>(null);
-  const [context, setContext] = useState<LotContext>(DEFAULT_LOT_CONTEXT);
   const [view, setView] = useState<ViewSettings>(FACADE_DEFAULT_VIEW);
   const [isAILoading, setIsAILoading] = useState(false);
   const [aiStatus, setAiStatus] = useState<string | null>(null);
@@ -436,7 +434,6 @@ export default function FacadePage() {
             onSelectLot={handleSelectLot}
             onCommitLine={handleCommitLine}
             onMoveNode={handleMoveNode}
-            context={context}
             view={view}
             onDrawModeChange={setDrawActive}
           />
@@ -463,8 +460,6 @@ export default function FacadePage() {
                 <FacadeControls
                   params={params}
                   onChange={setParams}
-                  context={context}
-                  onContextChange={setContext}
                   view={view}
                   onViewChange={setView}
                   selection={selected}

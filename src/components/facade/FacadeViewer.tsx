@@ -22,7 +22,6 @@ import SceneContents from "./SceneContents";
 import { computeLayout } from "@/lib/facade/layout";
 import { fitOrthoZoom, elevationCameraPosition } from "@/lib/facade/camera";
 import { deriveNodes, type WorldNode } from "@/lib/facade/nodes";
-import type { LotContext } from "@/lib/facade/types";
 import { FACADE_DEFAULT_VIEW } from "@/lib/facade/types";
 import type { ViewSettings } from "@/lib/building/types";
 import {
@@ -30,7 +29,6 @@ import {
   blockFrame,
   lotPlacements,
   totalLotsWidth,
-  NEIGHBOR_WIDTH,
   type FacadeBlock,
   type Selection,
 } from "@/lib/facade/blocks";
@@ -41,7 +39,6 @@ interface FacadeViewerProps {
   onSelectLot: (blockId: string, lot: number) => void;
   onCommitLine: (a: [number, number], b: [number, number]) => void;
   onMoveNode: (from: [number, number], to: [number, number]) => boolean;
-  context: LotContext;
   view?: ViewSettings;
   onDrawModeChange?: (drawMode: boolean) => void;
 }
@@ -337,7 +334,6 @@ function PlanPane({
   blocks,
   selected,
   onSelectLot,
-  context,
   view,
   size,
   drawMode,
@@ -347,7 +343,6 @@ function PlanPane({
   blocks: FacadeBlock[];
   selected: Selection | null;
   onSelectLot: (blockId: string, lot: number) => void;
-  context: LotContext;
   view: ViewSettings;
   size: { w: number; h: number };
   drawMode: boolean;
@@ -385,7 +380,7 @@ function PlanPane({
         maxZ = Math.max(maxZ, e[1]);
       }
     }
-    const pad = 2 * NEIGHBOR_WIDTH + 4;
+    const pad = 20; // breathing room around the drawn world
     return {
       w: Math.max(maxX - minX + pad, 30),
       d: Math.max(maxZ - minZ + pad, 30),
@@ -418,7 +413,6 @@ function PlanPane({
         blocks={blocks}
         selected={selected}
         onSelectLot={guardedSelectLot}
-        context={context}
         view={view}
       />
       <PenSurface blocks={blocks} active={drawMode} onCommitLine={onCommitLine} />
@@ -453,13 +447,11 @@ function PerspectivePane({
   blocks,
   selected,
   onSelectLot,
-  context,
   view,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
   onSelectLot: (blockId: string, lot: number) => void;
-  context: LotContext;
   view: ViewSettings;
 }) {
   return (
@@ -468,7 +460,6 @@ function PerspectivePane({
         blocks={blocks}
         selected={selected}
         onSelectLot={onSelectLot}
-        context={context}
         view={view}
       />
       <PerspectiveCamera
@@ -507,7 +498,6 @@ function ElevationPane({
   blocks,
   selected,
   onSelectLot,
-  context,
   view,
   size,
   mode,
@@ -515,7 +505,6 @@ function ElevationPane({
   blocks: FacadeBlock[];
   selected: Selection | null;
   onSelectLot: (blockId: string, lot: number) => void;
-  context: LotContext;
   view: ViewSettings;
   size: { w: number; h: number };
   mode: "overview" | "detail";
@@ -609,7 +598,6 @@ function ElevationPane({
         blocks={blocks}
         selected={selected}
         onSelectLot={onSelectLot}
-        context={context}
         view={view}
       />
       <OrthographicCamera
@@ -641,7 +629,6 @@ export default function FacadeViewer({
   onSelectLot,
   onCommitLine,
   onMoveNode,
-  context,
   view = FACADE_DEFAULT_VIEW,
   onDrawModeChange,
 }: FacadeViewerProps) {
@@ -730,7 +717,6 @@ export default function FacadeViewer({
             blocks={blocks}
             selected={selected}
             onSelectLot={onSelectLot}
-            context={context}
             view={view}
             size={planSize}
             drawMode={drawMode}
@@ -744,7 +730,6 @@ export default function FacadeViewer({
             blocks={blocks}
             selected={selected}
             onSelectLot={onSelectLot}
-            context={context}
             view={view}
           />
         );
@@ -754,7 +739,6 @@ export default function FacadeViewer({
             blocks={blocks}
             selected={selected}
             onSelectLot={onSelectLot}
-            context={context}
             view={view}
             size={overviewSize}
             mode="overview"
@@ -766,7 +750,6 @@ export default function FacadeViewer({
             blocks={blocks}
             selected={selected}
             onSelectLot={onSelectLot}
-            context={context}
             view={view}
             size={detailSize}
             mode="detail"
