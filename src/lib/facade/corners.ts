@@ -60,6 +60,15 @@ export function detectCorners(
       `${r1.blockId}:${r1.end}` < `${r2.blockId}:${r2.end}` ? [r1, r2] : [r2, r1];
     const A = byId.get(ra.blockId)!;
     const B = byId.get(rb.blockId)!;
+    // Continuous-frontage requirement: the two facades only meet as a
+    // corner when one block's node-end sits at its frame ORIGIN and the
+    // other's at its frame END (opposite atOrigin parity). Same-parity
+    // junctions are discontinuous frontage (one street flipped relative
+    // to the chain) — not a corner, and convexity is ill-defined there
+    // (order-dependent), so skip.
+    const atOriginA = (ra.end === "a") !== A.flipped;
+    const atOriginB = (rb.end === "a") !== B.flipped;
+    if (atOriginA === atOriginB) continue;
     const uA = awayDir(A, ra.end);
     const uB = awayDir(B, rb.end);
     const dot = Math.max(-1, Math.min(1, uA[0] * uB[0] + uA[1] * uB[1]));

@@ -51,10 +51,13 @@ describe("detectCorners", () => {
   });
 
   it("flipped blocks resolve lotIndex/lotSide via the frame, not raw ends", () => {
-    // B flipped: frame origin = line.b = (10,10); node (10,0) = line.a = frame END.
-    const A = mkBlock("A", [0, 0], [10, 0], [5, 5]);
+    // Both flipped: A's frame origin = line.b = (10,0) -> node at ORIGIN,
+    // lot 0 / left; B's frame origin = line.b = (10,10) -> node at END,
+    // lot 1 / right.
+    const A = mkBlock("A", [0, 0], [10, 0], [5, 5], true);
     const B = mkBlock("B", [10, 0], [10, 10], [5, 5], true);
     const [c] = detectCorners([A, B], 150);
+    expect(c.a).toEqual({ blockId: "A", end: "b", lotIndex: 0, lotSide: "left" });
     expect(c.b).toEqual({ blockId: "B", end: "a", lotIndex: 1, lotSide: "right" });
   });
 
@@ -94,5 +97,28 @@ describe("detectCorners", () => {
     const B2 = { ...B, line: { a: [11, 2] as [number, number], b: [10, 10] as [number, number] } };
     const k2 = detectCorners([A2, B2], 150)[0].key;
     expect(k2).toBe(k1);
+  });
+
+  it("mixed flip parity (discontinuous frontage) never merges", () => {
+    const A = mkBlock("A", [0, 0], [10, 0], [10]);
+    const B = mkBlock("B", [10, 0], [10, 10], [10], true); // flipped
+    expect(detectCorners([A, B], 180)).toHaveLength(0);
+  });
+
+  it("convexity is invariant under block relabeling", () => {
+    const mk = (idA: string, idB: string) => {
+      const A = mkBlock(idA, [0, 0], [10, 0], [10]);
+      const B = mkBlock(idB, [10, 0], [10, 10], [10]);
+      return detectCorners([A, B], 150)[0].convex;
+    };
+    expect(mk("A", "B")).toBe(mk("Z", "AA")); // sort order swaps sides
+  });
+
+  it("both-flipped chains stay continuous and merge", () => {
+    // Flipping BOTH blocks keeps parity opposite -> still a corner.
+    const A = mkBlock("A", [0, 0], [10, 0], [10], true);
+    const B = mkBlock("B", [10, 0], [10, 10], [10], true);
+    const corners = detectCorners([A, B], 150);
+    expect(corners).toHaveLength(1);
   });
 });
