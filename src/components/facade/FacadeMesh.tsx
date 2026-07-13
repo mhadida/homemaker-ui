@@ -10,6 +10,7 @@ import {
   type OpeningRect,
 } from "@/lib/facade/layout";
 import type { FacadeParams, WindowStyleId } from "@/lib/facade/types";
+import type { LotMiter } from "@/lib/facade/corners";
 
 const FRAME_T = 0.07; // window frame member thickness
 const FRAME_D = 0.06; // frame depth
@@ -334,7 +335,7 @@ export default function FacadeMesh({
   miter,
 }: {
   params: FacadeParams;
-  miter?: { left: number; right: number };
+  miter?: LotMiter;
 }) {
   const ml = miter?.left ?? 0;
   const mr = miter?.right ?? 0;

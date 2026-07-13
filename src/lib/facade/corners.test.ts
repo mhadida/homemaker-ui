@@ -290,8 +290,21 @@ describe("miterFor", () => {
     const B2 = mkBlock("B2", [10, 0], [10, -10], [10]);
     const [c] = detectCorners([A, B2], 150);
     const m = miterFor(c);
-    expect(m.a).toBeCloseTo(-WALL_THICKNESS / 2, 9);
+    // At 90°, tan(45°)·T/2 = 0.175 > 0.12 → capped: CONCAVE_TRIM_MAX
+    expect(m.a).toBeCloseTo(-0.12, 9);
     expect(m.b).toBe(0);
+  });
+
+  it("concave trims never exceed the opening-safe cap", () => {
+    // Sharp concave turn: uncapped trim would be far above 0.12.
+    const A = mkBlock("A", [0, 0], [10, 0], [10]);
+    const B = mkBlock("B", [10, 0], [1, -1], [10]);
+    const corners = detectCorners([A, B], 179);
+    expect(corners).toHaveLength(1);
+    expect(corners[0].convex).toBe(false);
+    const m = miterFor(corners[0]);
+    expect(m.a).toBeLessThan(0);
+    expect(Math.abs(m.a)).toBeLessThanOrEqual(0.12 + 1e-12);
   });
 
   it("straight through: no correction", () => {

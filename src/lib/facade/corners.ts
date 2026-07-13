@@ -128,6 +128,14 @@ export function cornerChoice(
 const clamp = (v: number, min: number, max: number) =>
   Math.max(min, Math.min(max, v));
 
+/** Concave slabs already interpenetrate (overlapping opaque solids are
+ * invisible); the trim exists only to break face coplanarity, which
+ * occurs near 90° turns. Capped at 0.12 m — below the layout engine's
+ * minimum edge pier (MIN_PIER / 2 = 0.15 m) — so a trim can never reach
+ * an opening, and small enough that it can never overshoot the partner
+ * slab. */
+const CONCAVE_TRIM_MAX = 0.12;
+
 /** Copy the shell (and, when unified, the face) from source to target.
  * Returns null when the target already matches (idempotence). */
 function syncedParams(
@@ -339,5 +347,10 @@ export function miterFor(corner: Corner): { a: number; b: number } {
     3 * WALL_THICKNESS,
   );
   if (base < 1e-9) return { a: 0, b: 0 };
-  return { a: corner.convex ? base : -base / 2, b: 0 };
+  return {
+    a: corner.convex
+      ? base
+      : -Math.min((Math.tan(turnRad / 2) * WALL_THICKNESS) / 2, CONCAVE_TRIM_MAX),
+    b: 0,
+  };
 }
