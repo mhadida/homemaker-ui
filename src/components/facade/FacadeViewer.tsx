@@ -788,18 +788,26 @@ export default function FacadeViewer({
             <div className="absolute top-1.5 left-2 text-[10px] font-mono text-white/70 bg-black/40 rounded px-1.5 py-0.5 pointer-events-none">
               {p.label}
             </div>
+            {p.id === "plan" && drawMode && (
+              /* Uniform mode frame: the plan pane is the live drawing
+               * surface while the pen is armed. */
+              <div
+                aria-hidden
+                className="absolute inset-0 pointer-events-none border-[3px] border-[var(--accent)] z-10"
+              />
+            )}
             {p.id === "plan" && (
               <button
                 type="button"
                 onClick={() => setDrawMode((d) => !d)}
-                aria-label={drawMode ? "Exit draw mode" : "Draw a block"}
-                className={`absolute top-1 left-16 grid h-6 px-2 place-items-center rounded text-[10px] transition-colors ${
+                aria-label={drawMode ? "Exit draw mode" : "Draw a street"}
+                className={`absolute top-1.5 left-16 z-20 flex h-7 items-center gap-1.5 rounded-full px-3 text-[11px] font-medium shadow-lg transition-colors ${
                   drawMode
-                    ? "bg-[var(--accent)] text-white"
-                    : "bg-black/40 text-white/70 hover:bg-black/60"
+                    ? "bg-[var(--accent)] text-white hover:brightness-110"
+                    : "bg-white/90 text-zinc-900 hover:bg-white"
                 }`}
               >
-                {drawMode ? "drawing…" : "✏ draw"}
+                {drawMode ? "✏ Drawing — Esc to end" : "✏ Draw street"}
               </button>
             )}
             {isDesktop && (
