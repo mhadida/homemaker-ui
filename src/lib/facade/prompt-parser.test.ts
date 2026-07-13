@@ -89,3 +89,28 @@ describe("mergeFacadeParams", () => {
     expect(merged.storeyHeights).toHaveLength(5);
   });
 });
+
+describe("sections keywords", () => {
+  it("parses a section count as equal-weight sections", () => {
+    const u = parseFacadePromptLocal("3 sections");
+    expect(u.sections).toHaveLength(3);
+    expect(u.sections!.every((s) => s.offset === 0)).toBe(true);
+  });
+
+  it("recessed center emits a symmetric center pattern (default 3)", () => {
+    const u = parseFacadePromptLocal("recessed centre");
+    expect(u.sections!.map((s) => s.offset < 0)).toEqual([false, true, false]);
+    expect(u.sectionsSymmetrical).toBe(true);
+  });
+
+  it("projecting center with an explicit count", () => {
+    const u = parseFacadePromptLocal("5 sections with a projecting center");
+    expect(u.sections).toHaveLength(5);
+    expect(u.sections![2].offset).toBeGreaterThan(0);
+  });
+
+  it("symmetrical / asymmetrical set the flag", () => {
+    expect(parseFacadePromptLocal("symmetrical facade").sectionsSymmetrical).toBe(true);
+    expect(parseFacadePromptLocal("asymmetrical facade").sectionsSymmetrical).toBe(false);
+  });
+});

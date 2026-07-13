@@ -10,7 +10,13 @@ import {
   DOOR_SWATCHES,
   FACADE_PRESETS,
 } from "@/lib/facade/types";
-import { computeLayout } from "@/lib/facade/layout";
+import { computeLayout, resolveSections } from "@/lib/facade/layout";
+import {
+  withSectionCount,
+  applySectionPattern,
+  classifySectionPattern,
+  type SectionPattern,
+} from "@/lib/facade/sections";
 import {
   parseFacadePromptLocal,
   mergeFacadeParams,
@@ -55,6 +61,8 @@ interface FacadeSpec {
   surrounds?: boolean;
   windowSize?: "small" | "medium" | "large";
   windowStyle?: "georgian" | "sash" | "victorian" | "none";
+  sections?: number;
+  sectionPattern?: SectionPattern;
   wallColor?: string;
   trimColor?: string;
   doorColor?: string;
@@ -101,6 +109,22 @@ function specToFacadeParams(spec: FacadeSpec, prev: FacadeParams): FacadeParams 
     sills: spec.sills ?? next.ornament.sills,
     surrounds: spec.surrounds ?? next.ornament.surrounds,
   };
+  // Sections: the count applies only when it differs; a NAMED pattern
+  // applies when it differs or the count changed. "custom" is the echo
+  // value and never touches the user's sculpted offsets. Runs after
+  // spec.bays so partitions fit the new bay count.
+  const curCount = resolveSections(next).length;
+  const curPattern = classifySectionPattern(next);
+  const wantCount = spec.sections ?? curCount;
+  const wantPattern = spec.sectionPattern ?? "custom";
+  if (
+    wantPattern !== "custom" &&
+    (wantPattern !== curPattern || wantCount !== curCount)
+  ) {
+    next = applySectionPattern(next, wantCount, wantPattern);
+  } else if (wantCount !== curCount) {
+    next = withSectionCount(next, wantCount);
+  }
   // Only apply when the AI actually changed the bucket — an echo of the
   // current bucket must not snap fine-tuned slider ratios to bucket values.
   if (spec.windowSize && spec.windowSize !== nearestWindowSize(prev))
@@ -157,6 +181,8 @@ function paramsToFacadeSpec(p: FacadeParams): FacadeSpec {
     surrounds: p.ornament.surrounds,
     windowSize: nearestWindowSize(p),
     windowStyle: p.windowStyle,
+    sections: resolveSections(p).length,
+    sectionPattern: classifySectionPattern(p),
     wallColor: wallId,
     trimColor: trimId,
     doorColor: doorId,
@@ -169,6 +195,7 @@ const FACADE_SUGGESTIONS = [
   "victorian shopfront, 4 bays",
   "modern, 2 bays, parapet",
   "garage door, 2 storeys",
+  "3 sections, projecting centre",
 ];
 
 export default function FacadePage() {

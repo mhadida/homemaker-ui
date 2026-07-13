@@ -5,6 +5,7 @@ import type {
   PresetId,
 } from "./types";
 import { FACADE_PRESETS, DOOR_SWATCHES, FACADE_LIMITS } from "./types";
+import { SECTION_PATTERN_OFFSET } from "./sections";
 import { WALL_SWATCHES, classicalStoreyHeights } from "@/lib/building/types";
 
 /** Partial params with PARTIAL nested objects — a prompt like "add a stoop"
@@ -99,6 +100,35 @@ export function parseFacadePromptLocal(prompt: string): FacadePromptUpdates {
   } else if (/\bsingle pane\b|\bplain glass\b|\bplain windows?\b/.test(lower)) {
     updates.windowStyle = "none";
   }
+
+  // Sections: a count and/or a named center pattern. Entries are
+  // equal-weight (bays: 1) — resolveSections refits them proportionally to
+  // the lot's actual bay count, so the local parse needs no lot context.
+  const sectionMatch = lower.match(/(\d+)\s*sections?/);
+  const recessedCenter =
+    /recess(?:ed)?\s+cent(?:er|re)|cent(?:er|re)\s+recess/.test(lower);
+  const projectedCenter =
+    /project(?:ed|ing)?\s+cent(?:er|re)|cent(?:er|re)\s+project/.test(lower);
+  if (sectionMatch || recessedCenter || projectedCenter) {
+    const n = Math.max(
+      sectionMatch ? clampInt(parseInt(sectionMatch[1]), 1, 9) : 1,
+      recessedCenter || projectedCenter ? 3 : 1,
+    );
+    const mid1 = Math.floor((n - 1) / 2);
+    const mid2 = Math.ceil((n - 1) / 2);
+    updates.sections = Array.from({ length: n }, (_, i) => ({
+      bays: 1,
+      offset:
+        i >= mid1 && i <= mid2 && (recessedCenter || projectedCenter)
+          ? recessedCenter
+            ? -SECTION_PATTERN_OFFSET
+            : SECTION_PATTERN_OFFSET
+          : 0,
+    }));
+    if (recessedCenter || projectedCenter) updates.sectionsSymmetrical = true;
+  }
+  if (/\basymmetric(?:al)?\b/.test(lower)) updates.sectionsSymmetrical = false;
+  else if (/\bsymmetric(?:al)?\b/.test(lower)) updates.sectionsSymmetrical = true;
 
   // Colors: "<swatch> wall(s)" / "<swatch> door"
   for (const s of WALL_SWATCHES) {

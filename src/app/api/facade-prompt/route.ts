@@ -40,6 +40,15 @@ const FacadeSpec = z.object({
   surrounds: z.boolean(),
   windowSize: z.enum(["small", "medium", "large"]),
   windowStyle: z.enum(["georgian", "sash", "victorian", "none"]),
+  // Sections: vertical strips of whole bays with small forward/back relief.
+  sections: z.number().int().min(1).max(9),
+  sectionPattern: z.enum([
+    "custom",
+    "flush",
+    "recessed-center",
+    "projected-center",
+    "alternating",
+  ]),
   wallColor: z.enum(WALL_COLOR_IDS),
   trimColor: z.enum(WALL_COLOR_IDS),
   doorColor: z.enum(DOOR_COLOR_IDS),
@@ -97,6 +106,7 @@ function SYSTEM_PROMPT(current: Partial<FacadeSpec> | undefined): string {
     `- ornament: cornice ${have.cornice ?? true}, parapet ${have.parapet ?? false}, sills ${have.sills ?? true}, surrounds ${have.surrounds ?? false}`,
     `- windowSize: ${have.windowSize ?? "medium"}`,
     `- windowStyle: ${have.windowStyle ?? "sash"}`,
+    `- sections: ${have.sections ?? 1}, sectionPattern: ${have.sectionPattern ?? "flush"}`,
     `- colors: wall ${have.wallColor ?? "earthy"}, trim ${have.trimColor ?? "white"}, door ${have.doorColor ?? "racing-green"}`,
     `- preset: ${have.preset ?? "none"}`,
     "",
@@ -106,6 +116,7 @@ function SYSTEM_PROMPT(current: Partial<FacadeSpec> | undefined): string {
     "- windowSize small/medium/large controls window proportions within each bay.",
     "- doorBay is 1-based from the left and must not exceed bays.",
     '- windowStyle: internal glazing bars — georgian (small-pane grid), sash (2-over-2), victorian (1-over-1), none (plain glass). Echo current unless the user mentions panes/glazing.',
+    '- sections: the facade divides into that many vertical strips of whole bays; sectionPattern names their relief — recessed-center / projected-center (center strip steps back/forward), alternating, flush (no relief), custom (user-sculpted). Echo the current values unless the user asks about sections, relief, or a projecting/recessed part.',
     "- preset: georgian (classical terrace), victorian-shopfront (retail ground floor), modern (minimal). Set it when the user names a style; otherwise echo the current value.",
   ].join("\n");
 }
