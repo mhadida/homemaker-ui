@@ -14,7 +14,7 @@ import type { FacadeParams, WindowStyleId } from "@/lib/facade/types";
 import type { LotMiter } from "@/lib/facade/corners";
 import { roofTriangles, type RoofPlan } from "@/lib/facade/roof";
 
-const ROOF_COLOR = "#4a4e57"; // slate
+const ROOF_COLORS = { slate: "#4a4e57", red: "#8a3b2e" } as const;
 
 /** Roof BufferGeometry from a plan. Non-indexed (crisp faceted faces) with
  * each triangle auto-oriented so its normal points away from the mass
@@ -647,7 +647,10 @@ export default function FacadeMesh({
        * Lot-local coords, so it sits in the outer group (not a strip group). */}
       {roofGeo && (
         <mesh geometry={roofGeo} castShadow receiveShadow>
-          <meshStandardMaterial color={ROOF_COLOR} roughness={0.8} />
+          <meshStandardMaterial
+            color={ROOF_COLORS[params.roofColor ?? "slate"]}
+            roughness={0.8}
+          />
         </mesh>
       )}
     </group>

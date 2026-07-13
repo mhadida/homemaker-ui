@@ -496,6 +496,16 @@ export default function FacadeControls({
               step={0.25}
               onChange={(roofHeight) => update({ roofHeight })}
             />
+            <div className="grid grid-cols-2 gap-1">
+              {(["slate", "red"] as const).map((c) => (
+                <Toggle
+                  key={c}
+                  label={c === "slate" ? "Slate" : "Red tile"}
+                  on={(params.roofColor ?? "slate") === c}
+                  onClick={() => update({ roofColor: c })}
+                />
+              ))}
+            </div>
           </>
         )}
       </Section>

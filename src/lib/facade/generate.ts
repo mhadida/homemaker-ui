@@ -124,6 +124,7 @@ export function generateLot(
     roofType: pick(rand, ["flat", "gable", "gable", "hip"] as const),
     roofOrientation: pick(rand, ["parallel", "parallel", "perpendicular"] as const),
     roofHeight: +randIn(rand, 2, 4.5).toFixed(1),
+    roofColor: pick(rand, ["slate", "slate", "red"] as const),
   };
 }
 

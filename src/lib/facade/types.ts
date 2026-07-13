@@ -90,6 +90,8 @@ export interface FacadeParams {
   /** Ridge rise above the eaves, metres. Clamped [ROOF_HEIGHT_MIN,
    * ROOF_HEIGHT_MAX]. Absent = ROOF_HEIGHT_DEFAULT. Ignored when flat. */
   roofHeight?: number;
+  /** Roof covering. Absent = "slate". Ignored when flat. */
+  roofColor?: "slate" | "red";
   groundFloor: GroundFloorConfig;
   ornament: OrnamentConfig;
   /** #RRGGBB — wall render color */

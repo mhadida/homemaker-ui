@@ -138,7 +138,7 @@ NOT involved; every edit is live (no Update button). Spec:
   per-lot height (`src/lib/facade/roof.ts`, pure — `resolveRoof` → clamped
   `RoofPlan`, `roofTriangles` → soup the mesh auto-orients by normal).
   Default flat (no mesh); generator seeds variety; `roofType`+`roofHeight`
-  are corner shell fields (orientation stays per-wing). Corner hip-valley
+  and `roofColor` (slate/red) are corner shell fields (orientation stays per-wing). Corner hip-valley
   merge deferred. Spec: `docs/superpowers/specs/2026-07-14-roofs-design.md`.
 - **Topography + basements**: a global tilted ground (`ground: {slope,
   azimuth}` page state; `src/lib/facade/terrain.ts` pure — `groundHeightAt`,
