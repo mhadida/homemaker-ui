@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import type { FacadeParams } from "@/lib/facade/types";
@@ -38,6 +38,7 @@ import {
   cornerChoice,
   DEFAULT_MAX_CORNER_ANGLE,
   type CornerChoice,
+  type Corner,
 } from "@/lib/facade/corners";
 import type { ViewSettings } from "@/lib/building/types";
 import { WALL_SWATCHES } from "@/lib/building/types";
@@ -277,13 +278,40 @@ export default function FacadePage() {
     [selected, cornerChoices, maxCornerAngle],
   );
 
-  const handleSelectLot = useCallback((blockId: string, lot: number) => {
-    setSelected((s) =>
-      s?.blockId === blockId && s.lot === lot && s.level === "lot"
-        ? { blockId, lot, level: "block" } // second click promotes to block
-        : { blockId, lot, level: "lot" },
-    );
-  }, []);
+  // Latest detected corners, read by handleSelectLot without re-creating it.
+  const cornersRef = useRef<Corner[]>([]);
+  const handleSelectLot = useCallback(
+    (blockId: string, lot: number) => {
+      // A single-lot chamfer block can bridge two corners (both ends of its
+      // one lot). One facade mesh can't disambiguate which the user meant, so
+      // we take the first — the plan-pane node handles reach either corner
+      // precisely (onSelectCorner).
+      const corner = cornersRef.current.find(
+        (c) =>
+          (c.a.blockId === blockId && c.a.lotIndex === lot) ||
+          (c.b.blockId === blockId && c.b.lotIndex === lot),
+      );
+      setSelected((s) => {
+        if (corner) {
+          // Clicking a corner building selects the whole corner (both
+          // facades); a repeat click drills into just this wing.
+          if (s?.level === "corner" && s.cornerKey === corner.key) {
+            return { blockId, lot, level: "lot" };
+          }
+          return {
+            blockId: corner.a.blockId,
+            lot: corner.a.lotIndex,
+            level: "corner",
+            cornerKey: corner.key,
+          };
+        }
+        return s?.blockId === blockId && s.lot === lot && s.level === "lot"
+          ? { blockId, lot, level: "block" } // second click promotes to block
+          : { blockId, lot, level: "lot" };
+      });
+    },
+    [],
+  );
 
   const updateSelectedBlock = useCallback(
     (fn: (b: FacadeBlock) => FacadeBlock) => {
@@ -433,6 +461,7 @@ export default function FacadePage() {
     () => detectCorners(blocks, maxCornerAngle),
     [blocks, maxCornerAngle],
   );
+  cornersRef.current = corners;
 
   const handleSelectCorner = useCallback(
     (cornerKey: string) => {

@@ -118,12 +118,14 @@ function BlockGroup({
   onSelectLot,
   miters,
   ground,
+  cornerSides,
 }: {
   block: FacadeBlock;
   selected: Selection | null;
   onSelectLot: (blockId: string, lot: number) => void;
   miters: Map<string, LotMiter>;
   ground: Ground;
+  cornerSides: Set<string> | null;
 }) {
   const placements = useMemo(() => lotPlacements(block), [block]);
   const frame = useMemo(() => blockFrame(block), [block]);
@@ -164,7 +166,12 @@ function BlockGroup({
               miter={miters.get(`${block.id}:${i}`)}
             />
             <Basement width={lot.params.width} depth={depth} drop={drop} />
-            {isSelectedBlock && selected?.lot === i && (
+            {/* At a live corner, cornerSides lights both wings and suppresses
+             * the single-lot marker. When no corner resolves (lot/block level,
+             * or a dissolved corner), fall back to the plain selected-lot
+             * marker so the edited lot is always visibly highlighted. */}
+            {((isSelectedBlock && selected?.lot === i && !cornerSides) ||
+              cornerSides?.has(`${block.id}:${i}`)) && (
               <SelectionMarker params={lot.params} />
             )}
           </group>
@@ -231,9 +238,15 @@ export default function SceneContents({
     () => sunPositionFromAngles(view.sunAzimuth, view.sunAltitude),
     [view.sunAzimuth, view.sunAltitude],
   );
+  // Detected once, shared by every corner-derived memo below (this scene
+  // mounts once per workspace pane, so a single detectCorners call matters).
+  const corners = useMemo(
+    () => detectCorners(blocks, maxCornerAngle),
+    [blocks, maxCornerAngle],
+  );
   const miters = useMemo(() => {
     const m = new Map<string, LotMiter>();
-    for (const c of detectCorners(blocks, maxCornerAngle)) {
+    for (const c of corners) {
       const ext = miterFor(c);
       for (const [side, e] of [
         [c.a, ext.a],
@@ -246,7 +259,19 @@ export default function SceneContents({
       }
     }
     return m;
-  }, [blocks, maxCornerAngle]);
+  }, [corners]);
+  // Both corner-side lots to highlight when a corner is selected. Null when
+  // no corner is selected OR the selected corner has dissolved (angle change
+  // / node drag) — the marker condition falls back to the plain lot marker.
+  const cornerSides = useMemo(() => {
+    if (selected?.level !== "corner" || !selected.cornerKey) return null;
+    const c = corners.find((x) => x.key === selected.cornerKey);
+    if (!c) return null;
+    return new Set([
+      `${c.a.blockId}:${c.a.lotIndex}`,
+      `${c.b.blockId}:${c.b.lotIndex}`,
+    ]);
+  }, [selected, corners]);
   return (
     <>
       <ambientLight intensity={0.35} />
@@ -280,6 +305,7 @@ export default function SceneContents({
           onSelectLot={onSelectLot}
           miters={miters}
           ground={ground}
+          cornerSides={cornerSides}
         />
       ))}
       {/* Ground plane + grid tilt to the slope so buildings sit on it at
