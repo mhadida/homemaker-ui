@@ -476,8 +476,6 @@ function PerspectivePane({
         target={[0, 4, 0]}
         minDistance={3}
         maxDistance={60}
-        minAzimuthAngle={-Math.PI * 0.44}
-        maxAzimuthAngle={Math.PI * 0.44}
         maxPolarAngle={Math.PI / 2.05}
         enablePan
         panSpeed={0.8}
