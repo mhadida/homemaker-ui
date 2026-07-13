@@ -16,6 +16,7 @@ import {
 import type { ViewSettings } from "@/lib/building/types";
 import { WALL_SWATCHES, classicalStoreyHeights } from "@/lib/building/types";
 import type { Selection, FacadeBlock, BlockGenSettings } from "@/lib/facade/blocks";
+import type { Corner, CornerChoice } from "@/lib/facade/corners";
 import BayGrid from "./BayGrid";
 
 interface FacadeControlsProps {
@@ -31,6 +32,11 @@ interface FacadeControlsProps {
   onReroll: () => void;
   onFlip: () => void;
   onDeleteBlock: () => void;
+  // corner inspector (Task 5)
+  corner: { data: Corner; choice: CornerChoice; widthA: number; widthB: number } | null;
+  onCornerChoice: (key: string, choice: CornerChoice) => void;
+  maxCornerAngle: number;
+  onMaxCornerAngle: (deg: number) => void;
 }
 
 function SliderRow({
@@ -169,6 +175,10 @@ export default function FacadeControls({
   onReroll,
   onFlip,
   onDeleteBlock,
+  corner,
+  onCornerChoice,
+  maxCornerAngle,
+  onMaxCornerAngle,
 }: FacadeControlsProps) {
   const update = (u: Partial<FacadeParams>) => onChange({ ...params, ...u });
   const L = FACADE_LIMITS;
@@ -182,22 +192,38 @@ export default function FacadeControls({
     });
   };
 
+  // A stale "corner" selection level (the corner dissolved under a flip or
+  // drag, but the selection object hasn't been re-leveled yet) falls back
+  // to the plain lot view — never "block" — matching the null `corner` prop.
+  const effectiveLevel: "lot" | "block" =
+    selection.level === "block" ? "block" : "lot";
+
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 gap-1">
+      <div className={corner ? "grid grid-cols-3 gap-1" : "grid grid-cols-2 gap-1"}>
         <Toggle
           label={`Lot ${selection.lot + 1}/${block.lots.length}`}
-          on={selection.level === "lot"}
+          on={!corner && effectiveLevel === "lot"}
           onClick={() => onSelectionLevel("lot")}
         />
         <Toggle
           label="Block"
-          on={selection.level === "block"}
+          on={!corner && effectiveLevel === "block"}
           onClick={() => onSelectionLevel("block")}
         />
+        {corner && <Toggle label="Corner" on={true} onClick={() => {}} />}
       </div>
 
-      {selection.level === "block" && (
+      {corner && (
+        <CornerInspector
+          corner={corner}
+          onCornerChoice={onCornerChoice}
+          maxCornerAngle={maxCornerAngle}
+          onMaxCornerAngle={onMaxCornerAngle}
+        />
+      )}
+
+      {!corner && effectiveLevel === "block" && (
         <BlockInspector
           block={block}
           onGenChange={onGenChange}
@@ -207,7 +233,7 @@ export default function FacadeControls({
         />
       )}
 
-      {selection.level === "lot" && (
+      {!corner && effectiveLevel === "lot" && (
         <>
       {/* Presets */}
       <div className="grid grid-cols-3 gap-1">
@@ -414,6 +440,74 @@ export default function FacadeControls({
       </Section>
         </>
       )}
+    </div>
+  );
+}
+
+function CornerInspector({
+  corner,
+  onCornerChoice,
+  maxCornerAngle,
+  onMaxCornerAngle,
+}: {
+  corner: { data: Corner; choice: CornerChoice; widthA: number; widthB: number };
+  onCornerChoice: (key: string, choice: CornerChoice) => void;
+  maxCornerAngle: number;
+  onMaxCornerAngle: (deg: number) => void;
+}) {
+  const { data, choice, widthA, widthB } = corner;
+  return (
+    <div className="space-y-5">
+      <Section title="Corner building">
+        <div className="grid grid-cols-2 gap-1">
+          <Toggle
+            label="Unified"
+            on={choice.mode === "unified"}
+            onClick={() => onCornerChoice(data.key, { ...choice, mode: "unified" })}
+          />
+          <Toggle
+            label="2 facades"
+            on={choice.mode === "two-facades"}
+            onClick={() =>
+              onCornerChoice(data.key, { ...choice, mode: "two-facades" })
+            }
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-1">
+          <Toggle
+            label={`Street A · ${widthA.toFixed(1)}m`}
+            on={choice.primary === "a"}
+            onClick={() => onCornerChoice(data.key, { ...choice, primary: "a" })}
+          />
+          <Toggle
+            label={`Street B · ${widthB.toFixed(1)}m`}
+            on={choice.primary === "b"}
+            onClick={() => onCornerChoice(data.key, { ...choice, primary: "b" })}
+          />
+        </div>
+        <p className="text-[10px] text-[var(--muted)] leading-relaxed">
+          Shell (storeys, colors, cornice, parapet, glazing style) is always
+          shared.{" "}
+          {choice.mode === "unified"
+            ? `Faces mirror Street ${choice.primary.toUpperCase()} — windows, bays, ground floor.`
+            : "Each frontage keeps its own windows, bays, and ground floor."}
+        </p>
+      </Section>
+      <Section title="Detection">
+        <SliderRow
+          label="Max corner angle (global)"
+          value={maxCornerAngle}
+          display={`${Math.round(maxCornerAngle)}°`}
+          min={0}
+          max={180}
+          step={5}
+          onChange={onMaxCornerAngle}
+        />
+        <p className="text-[10px] text-[var(--muted)]">
+          This corner turns {Math.round(data.turn)}°. Junctions turning more
+          than the max stay separate buildings.
+        </p>
+      </Section>
     </div>
   );
 }

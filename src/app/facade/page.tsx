@@ -28,6 +28,7 @@ import { moveNode } from "@/lib/facade/nodes";
 import {
   syncCorners,
   detectCorners,
+  cornerChoice,
   DEFAULT_MAX_CORNER_ANGLE,
   type CornerChoice,
 } from "@/lib/facade/corners";
@@ -184,9 +185,6 @@ export default function FacadePage() {
   const [cornerChoices, setCornerChoices] = useState<Map<string, CornerChoice>>(
     () => new Map(),
   );
-  // setMaxCornerAngle is produced here for T5's corner-inspector angle dial
-  // (onMaxCornerAngle) — no UI in this task calls it yet.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [maxCornerAngle, setMaxCornerAngle] = useState(DEFAULT_MAX_CORNER_ANGLE);
 
   const selectedBlock = selected
@@ -421,25 +419,42 @@ export default function FacadePage() {
     [corners],
   );
 
-  // Produced here for T5's corner-inspector onCornerChoice — no UI in this
-  // task calls it yet (FacadeControls doesn't render a corner branch until
-  // T5).
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleCornerChoice = useCallback(
     (key: string, choice: CornerChoice) => {
-      setCornerChoices((m) => {
-        const next = new Map(m);
-        next.set(key, choice);
-        return next;
-      });
+      // Build the merged map once and reuse it for both the state update
+      // and the immediate sync below — reading `cornerChoices` twice (once
+      // per `new Map(cornerChoices)`) would let two synchronous calls in
+      // the same tick each start from the same stale closure and clobber
+      // each other's choice.
+      const merged = new Map(cornerChoices);
+      merged.set(key, choice);
+      setCornerChoices(merged);
       // Apply the new choice immediately (e.g. switching primary re-sources
       // the shell; switching to unified mirrors the face now).
-      setBlocks((bs) =>
-        syncCorners(bs, new Map(cornerChoices).set(key, choice), maxCornerAngle),
-      );
+      setBlocks((bs) => syncCorners(bs, merged, maxCornerAngle));
     },
     [cornerChoices, maxCornerAngle],
   );
+
+  // The corner inspector's data: null whenever the selection isn't a
+  // corner, OR the corner it names has since dissolved (a flip/drag can
+  // drop the junction below maxCornerAngle or unweld it) — FacadeControls
+  // falls back to the plain lot view in that case.
+  const selectedCorner = useMemo(() => {
+    if (selected?.level !== "corner" || !selected.cornerKey) return null;
+    const data = corners.find((c) => c.key === selected.cornerKey);
+    if (!data) return null;
+    const blockA = blocks.find((b) => b.id === data.a.blockId);
+    const blockB = blocks.find((b) => b.id === data.b.blockId);
+    const widthA = blockA?.lots[data.a.lotIndex]?.params.width ?? 0;
+    const widthB = blockB?.lots[data.b.lotIndex]?.params.width ?? 0;
+    return {
+      data,
+      choice: cornerChoice(cornerChoices, data, blocks),
+      widthA,
+      widthB,
+    };
+  }, [selected, corners, cornerChoices, blocks]);
 
   const layout = useMemo(
     () => (params ? computeLayout(params) : null),
@@ -572,6 +587,10 @@ export default function FacadePage() {
                   onReroll={handleReroll}
                   onFlip={handleFlip}
                   onDeleteBlock={handleDeleteBlock}
+                  corner={selectedCorner}
+                  onCornerChoice={handleCornerChoice}
+                  maxCornerAngle={maxCornerAngle}
+                  onMaxCornerAngle={setMaxCornerAngle}
                 />
               </>
             ) : (

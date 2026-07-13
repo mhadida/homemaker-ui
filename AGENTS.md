@@ -81,6 +81,7 @@ src/
       blocks.ts        — street blocks: frames, lot placement, selection types
       generate.ts      — seeded generator: subdivision, lot params, reroll
       nodes.ts         — derived nodes (coincidence welds), moveNode + refit ripple
+      corners.ts       — corner detection (turn/convexity), shell sync, miters
   types/
     mapbox-gl-draw.d.ts — Type declarations (legacy; no map UI currently exists)
 python/
@@ -113,6 +114,12 @@ NOT involved; every edit is live (no Update button). Spec:
   `generate.ts` — absorb at the moved end, split at lotWidth.max+min,
   remove below min). Width edits ripple through welds the same way. Hand
   edits pin lots against reroll.
+- **Corner buildings**: welded two-block junctions turning ≤ the global max
+  angle merge into one building (`src/lib/facade/corners.ts`): shells
+  (storeys/colors/ornament/glazing) sync through the `syncCorners` choke
+  point on every mutation; walls miter so cornice/parapet run continuously;
+  corner nodes tint gold and a stationary click opens the corner inspector
+  (unified ↔ 2-facades, primary side, global angle).
 - **AI prompt**: `/api/facade-prompt` (flat fully-required zod spec — OpenAI
   structured output rejects optionals) targets the selected lot, plus an
   instant local keyword parser.
