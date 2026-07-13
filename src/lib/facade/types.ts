@@ -29,6 +29,16 @@ export interface CellOverride {
   kind: OpeningKind;
 }
 
+export interface FacadeSection {
+  /** Consecutive bays this section spans (>= 1). Stale partitions (after a
+   * bay-count change) are refit proportionally by the layout engine, so any
+   * stored value is harmless (doorBay precedent). */
+  bays: number;
+  /** Perpendicular relief along the facade normal, metres; + is
+   * street-proud. Clamped to ±SECTION_OFFSET_MAX by the layout engine. */
+  offset: number;
+}
+
 export type PresetId = "georgian" | "victorian-shopfront" | "modern";
 
 export type WindowStyleId = "georgian" | "sash" | "victorian" | "none";
@@ -61,6 +71,12 @@ export interface FacadeParams {
   windowStyle: WindowStyleId;
   /** Sparse per-cell overrides of the default grid kinds */
   cellOverrides?: CellOverride[];
+  /** Optional horizontal partition into offset strips. Absent/empty = one
+   * full-width flush section (pre-sections behavior byte-identical). */
+  sections?: FacadeSection[];
+  /** Mirror section bays/offsets around the facade center. Enforced at
+   * resolve time, so toggling is live. */
+  sectionsSymmetrical?: boolean;
   groundFloor: GroundFloorConfig;
   ornament: OrnamentConfig;
   /** #RRGGBB — wall render color */

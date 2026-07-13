@@ -54,6 +54,10 @@ export const STOOP_STEPS = 2;
 export const CORNICE_HEIGHT = 0.35;
 export const CORNICE_PROJECTION = 0.25;
 export const PARAPET_HEIGHT = 0.75;
+export const SECTION_OFFSET_MAX = 0.15; // max perpendicular relief (m); keeps
+// the max relative step (0.30) below WALL_THICKNESS so strips always overlap
+export const SECTION_LAP = 0.05; // anti-coplanar underlap at offset steps (m);
+// below SHOPFRONT_MULLION (0.06), the smallest opening-to-bay-edge margin
 const MIN_OPENING_WIDTH = 0.2;
 const MIN_WINDOW_HEIGHT = 0.4;
 
@@ -72,6 +76,120 @@ export interface OpeningRect {
   transomH?: number;
 }
 
+export interface ResolvedSection {
+  /** First bay index (inclusive). */
+  startBay: number;
+  bays: number;
+  offset: number;
+}
+
+/** THE section sanitizer (all clamps live in this file): sanitize entries,
+ * cap the count at the bay count, refit stale partitions proportionally so
+ * the sum is exactly `bays` (min 1 each), then enforce symmetry. Total and
+ * deterministic — the mesh renders whatever this returns. */
+export function resolveSections(params: FacadeParams): ResolvedSection[] {
+  const total = params.bays;
+  const raw = params.sections ?? [];
+  if (raw.length === 0) return [{ startBay: 0, bays: total, offset: 0 }];
+
+  const count = Math.min(raw.length, total);
+  const bays = raw
+    .slice(0, count)
+    .map((s) => (Number.isFinite(s.bays) ? Math.max(1, Math.round(s.bays)) : 1));
+  const offsets = raw
+    .slice(0, count)
+    .map((s) =>
+      Number.isFinite(s.offset)
+        ? clamp(s.offset, -SECTION_OFFSET_MAX, SECTION_OFFSET_MAX)
+        : 0,
+    );
+
+  // Proportional refit (largest remainder, min 1). count <= total, so a
+  // minimum of 1 bay per section is always feasible.
+  const sum = bays.reduce((a, b) => a + b, 0);
+  if (sum !== total) {
+    const quotas = bays.map((b) => (b * total) / sum);
+    const fitted = quotas.map((q) => Math.max(1, Math.floor(q)));
+    let acc = fitted.reduce((a, b) => a + b, 0);
+    if (acc < total) {
+      const order = quotas
+        .map((q, i) => ({ i, frac: q - Math.floor(q) }))
+        .sort((a, b) => b.frac - a.frac || a.i - b.i);
+      for (let k = 0; acc < total; k = (k + 1) % order.length) {
+        fitted[order[k].i] += 1;
+        acc += 1;
+      }
+    } else {
+      while (acc > total) {
+        let d = -1;
+        for (let i = 0; i < fitted.length; i++) {
+          if (fitted[i] > 1 && (d < 0 || fitted[i] >= fitted[d])) d = i;
+        }
+        fitted[d] -= 1;
+        acc -= 1;
+      }
+    }
+    for (let i = 0; i < count; i++) bays[i] = fitted[i];
+  }
+
+  // Symmetry: right half mirrors the left (left wins). The middle (odd
+  // count) absorbs the remainder, borrowing innermost-left when short; even
+  // counts adjust the innermost pair, any odd leftover bay landing on the
+  // innermost RIGHT section (no exact palindrome exists then).
+  if (params.sectionsSymmetrical && count >= 2) {
+    const half = Math.floor(count / 2);
+    for (let i = 0; i < half; i++) offsets[count - 1 - i] = offsets[i];
+    const left = bays.slice(0, half);
+    if (count % 2 === 1) {
+      let mid = total - 2 * left.reduce((a, b) => a + b, 0);
+      while (mid < 1) {
+        let d = half - 1;
+        while (left[d] <= 1) d--;
+        left[d] -= 1;
+        mid += 2;
+      }
+      bays.splice(0, count, ...left, mid, ...[...left].reverse());
+    } else {
+      const rem = total - 2 * left.reduce((a, b) => a + b, 0);
+      let add = Math.trunc(rem / 2);
+      const leftover = rem - 2 * add;
+      for (let i = half - 1; add !== 0 && i >= 0; i--) {
+        if (add > 0) {
+          left[i] += add;
+          add = 0;
+        } else {
+          const take = Math.min(left[i] - 1, -add);
+          left[i] -= take;
+          add += take;
+        }
+      }
+      const right = [...left].reverse();
+      if (leftover > 0) right[0] += leftover;
+      else if (leftover < 0) {
+        let d = 0;
+        while (right[d] <= 1) d++;
+        right[d] -= 1;
+      }
+      bays.splice(0, count, ...left, ...right);
+    }
+  }
+
+  const out: ResolvedSection[] = [];
+  let start = 0;
+  for (let i = 0; i < count; i++) {
+    out.push({ startBay: start, bays: bays[i], offset: offsets[i] });
+    start += bays[i];
+  }
+  return out;
+}
+
+export interface SectionStrip extends ResolvedSection {
+  /** Wall-strip x-extents, lap included. First strip x0 = -width/2, last
+   * strip x1 = +width/2 (corner miters are a mesh concern). */
+  x0: number;
+  x1: number;
+}
+
 export interface FacadeLayout {
   width: number;
   /** top of the wall body (bottom of cornice, if any) */
@@ -83,10 +201,14 @@ export interface FacadeLayout {
   /** resolved [storey][bay] kinds (same as resolveGrid) */
   grid: OpeningKind[][];
   openings: OpeningRect[];
+  /** vertical strips (>= 1, covering the full width) the mesh renders as
+   * z-offset groups; at an offset step the recessed strip laps under the
+   * prouder neighbor so their boundary faces are never coplanar */
+  sections: SectionStrip[];
   cornice: { y: number; height: number; projection: number } | null;
   parapet: { y: number; height: number } | null;
-  /** one per window when ornament.sills */
-  sills: { x: number; y: number; w: number }[];
+  /** one per window when ornament.sills; bay assigns it to a section */
+  sills: { x: number; y: number; w: number; bay: number }[];
   /** window rects to frame when ornament.surrounds */
   surrounds: OpeningRect[];
   stoop: {
@@ -95,6 +217,8 @@ export interface FacadeLayout {
     steps: number;
     rise: number;
     run: number;
+    /** the door's bay — assigns the stoop to a section */
+    bay: number;
   } | null;
 }
 
@@ -204,6 +328,21 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
     }
   }
 
+  // ── Sections: vertical strips with perpendicular relief ──
+  const sections: SectionStrip[] = resolveSections(params).map((s) => ({
+    ...s,
+    x0: -width / 2 + s.startBay * bayWidth,
+    x1: -width / 2 + (s.startBay + s.bays) * bayWidth,
+  }));
+  sections[0].x0 = -width / 2;
+  sections[sections.length - 1].x1 = width / 2;
+  for (let i = 0; i + 1 < sections.length; i++) {
+    const a = sections[i];
+    const b = sections[i + 1];
+    if (a.offset < b.offset - 1e-9) a.x1 += SECTION_LAP;
+    else if (a.offset > b.offset + 1e-9) b.x0 -= SECTION_LAP;
+  }
+
   // ── Ornament ──
   const cornice = params.ornament.cornice
     ? { y: wallTop, height: CORNICE_HEIGHT, projection: CORNICE_PROJECTION }
@@ -216,7 +355,7 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
 
   const windows = openings.filter((o) => o.kind === "window");
   const sills = params.ornament.sills
-    ? windows.map((o) => ({ x: o.x - 0.06, y: o.y - 0.07, w: o.w + 0.12 }))
+    ? windows.map((o) => ({ x: o.x - 0.06, y: o.y - 0.07, w: o.w + 0.12, bay: o.bay }))
     : [];
   const surrounds = params.ornament.surrounds ? [...windows] : [];
 
@@ -234,6 +373,7 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
             steps: STOOP_STEPS,
             rise: STOOP_RISE,
             run: STOOP_RUN,
+            bay: door.bay,
           };
         })()
       : null;
@@ -245,6 +385,7 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
     storeyLevels,
     grid,
     openings,
+    sections,
     cornice,
     parapet,
     sills,

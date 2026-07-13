@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { computeLayout, resolveGrid, type OpeningRect } from "./layout";
+import {
+  computeLayout,
+  resolveGrid,
+  resolveSections,
+  SECTION_LAP,
+  SECTION_OFFSET_MAX,
+  type OpeningRect,
+} from "./layout";
 import { DEFAULT_FACADE, type FacadeParams } from "./types";
 
 function p(overrides: Partial<FacadeParams>): FacadeParams {
@@ -356,5 +363,250 @@ describe("computeLayout", () => {
     expect(door.transomH).toBeDefined();
     // leaf top (door.y + 2.1) sits below the head by exactly transomH
     expect(door.y + 2.1 + door.transomH!).toBeCloseTo(door.y + door.h, 9);
+  });
+});
+
+describe("resolveSections", () => {
+  it("absent sections resolve to one full-width flush section", () => {
+    expect(resolveSections(p({ bays: 4 }))).toEqual([
+      { startBay: 0, bays: 4, offset: 0 },
+    ]);
+    expect(resolveSections(p({ bays: 4, sections: [] }))).toEqual([
+      { startBay: 0, bays: 4, offset: 0 },
+    ]);
+  });
+
+  it("keeps an exact partition and clamps offsets", () => {
+    const r = resolveSections(
+      p({
+        bays: 3,
+        sections: [
+          { bays: 1, offset: 0.4 },
+          { bays: 2, offset: -0.4 },
+        ],
+      }),
+    );
+    expect(r).toEqual([
+      { startBay: 0, bays: 1, offset: SECTION_OFFSET_MAX },
+      { startBay: 1, bays: 2, offset: -SECTION_OFFSET_MAX },
+    ]);
+  });
+
+  it("refits a stale partition proportionally (sum exact, min 1)", () => {
+    // stored for 6 bays, lot now has 3
+    const r = resolveSections(
+      p({
+        bays: 3,
+        sections: [
+          { bays: 2, offset: 0.1 },
+          { bays: 2, offset: -0.1 },
+          { bays: 2, offset: 0.05 },
+        ],
+      }),
+    );
+    expect(r.map((s) => s.bays)).toEqual([1, 1, 1]);
+    expect(r.map((s) => s.offset)).toEqual([0.1, -0.1, 0.05]);
+    // stored for 2 bays, lot now has 5
+    const grown = resolveSections(
+      p({
+        bays: 5,
+        sections: [
+          { bays: 1, offset: 0 },
+          { bays: 1, offset: -0.1 },
+        ],
+      }),
+    );
+    expect(grown.map((s) => s.bays)).toEqual([3, 2]); // ties -> lower index
+    expect(grown.reduce((a, s) => a + s.bays, 0)).toBe(5);
+  });
+
+  it("caps the section count at the bay count", () => {
+    const r = resolveSections(
+      p({
+        bays: 2,
+        sections: [
+          { bays: 1, offset: 0.1 },
+          { bays: 1, offset: -0.1 },
+          { bays: 1, offset: 0.15 },
+        ],
+      }),
+    );
+    expect(r).toHaveLength(2);
+    expect(r.map((s) => s.offset)).toEqual([0.1, -0.1]);
+  });
+
+  it("sanitizes non-finite garbage", () => {
+    const r = resolveSections(
+      p({
+        bays: 4,
+        sections: [
+          { bays: NaN, offset: NaN },
+          { bays: Infinity, offset: 0.1 },
+        ],
+      }),
+    );
+    expect(r.reduce((a, s) => a + s.bays, 0)).toBe(4);
+    for (const s of r) {
+      expect(Number.isFinite(s.bays)).toBe(true);
+      expect(s.bays).toBeGreaterThanOrEqual(1);
+      expect(Number.isFinite(s.offset)).toBe(true);
+    }
+  });
+
+  it("symmetry mirrors offsets and bay counts (odd count: middle absorbs)", () => {
+    const r = resolveSections(
+      p({
+        bays: 7,
+        sectionsSymmetrical: true,
+        sections: [
+          { bays: 2, offset: 0.1 },
+          { bays: 4, offset: -0.05 },
+          { bays: 1, offset: 0.15 },
+        ],
+      }),
+    );
+    expect(r.map((s) => s.bays)).toEqual([2, 3, 2]);
+    expect(r.map((s) => s.offset)).toEqual([0.1, -0.05, 0.1]);
+  });
+
+  it("symmetry: middle borrows from inner-left when it would vanish", () => {
+    const r = resolveSections(
+      p({
+        bays: 5,
+        sectionsSymmetrical: true,
+        sections: [
+          { bays: 3, offset: 0 },
+          { bays: 1, offset: -0.1 },
+          { bays: 1, offset: 0 },
+        ],
+      }),
+    );
+    // left [3] -> mid = 5-6 = -1 -> borrow: left [2], mid 1
+    expect(r.map((s) => s.bays)).toEqual([2, 1, 2]);
+  });
+
+  it("symmetry: even count adjusts the innermost pair; odd leftover bay goes innermost-right", () => {
+    const even = resolveSections(
+      p({
+        bays: 6,
+        sectionsSymmetrical: true,
+        sections: [
+          { bays: 1, offset: 0.1 },
+          { bays: 3, offset: 0 },
+          { bays: 1, offset: 0 },
+          { bays: 1, offset: 0 },
+        ],
+      }),
+    );
+    expect(even.map((s) => s.bays)).toEqual([1, 2, 2, 1]);
+    expect(even.map((s) => s.offset)).toEqual([0.1, 0, 0, 0.1]);
+    const odd = resolveSections(
+      p({
+        bays: 5,
+        sectionsSymmetrical: true,
+        sections: [
+          { bays: 2, offset: 0 },
+          { bays: 3, offset: -0.1 },
+        ],
+      }),
+    );
+    expect(odd.map((s) => s.bays)).toEqual([2, 3]); // innermost right absorbs
+    expect(odd.map((s) => s.offset)).toEqual([0, 0]);
+  });
+});
+
+describe("computeLayout sections", () => {
+  it("no sections: single flush strip spanning the wall", () => {
+    const layout = computeLayout(DEFAULT_FACADE);
+    expect(layout.sections).toEqual([
+      {
+        startBay: 0,
+        bays: DEFAULT_FACADE.bays,
+        offset: 0,
+        x0: -DEFAULT_FACADE.width / 2,
+        x1: DEFAULT_FACADE.width / 2,
+      },
+    ]);
+  });
+
+  it("strip boundaries land on bay lines; recessed side laps under the prouder", () => {
+    const layout = computeLayout(
+      p({
+        width: 9,
+        bays: 3,
+        sections: [
+          { bays: 1, offset: 0 },
+          { bays: 1, offset: -0.1 },
+          { bays: 1, offset: 0 },
+        ],
+      }),
+    );
+    const [a, b, c] = layout.sections;
+    expect(a.x0).toBeCloseTo(-4.5, 9);
+    expect(a.x1).toBeCloseTo(-1.5, 9); // proud: no lap
+    expect(b.x0).toBeCloseTo(-1.5 - SECTION_LAP, 9); // recessed laps left
+    expect(b.x1).toBeCloseTo(1.5 + SECTION_LAP, 9); // and right
+    expect(c.x0).toBeCloseTo(1.5, 9);
+    expect(c.x1).toBeCloseTo(4.5, 9); // outer edge never lapped
+  });
+
+  it("flush neighbors butt exactly (no lap)", () => {
+    const layout = computeLayout(
+      p({
+        width: 6,
+        bays: 2,
+        sections: [
+          { bays: 1, offset: 0.1 },
+          { bays: 1, offset: 0.1 },
+        ],
+      }),
+    );
+    expect(layout.sections[0].x1).toBeCloseTo(0, 9);
+    expect(layout.sections[1].x0).toBeCloseTo(0, 9);
+  });
+
+  it("every opening lies inside its own strip", () => {
+    const params = p({
+      width: 12,
+      bays: 4,
+      groundFloor: { treatment: "shopfront", doorBay: 1, stoop: false },
+      sections: [
+        { bays: 1, offset: 0.12 },
+        { bays: 2, offset: -0.12 },
+        { bays: 1, offset: 0 },
+      ],
+    });
+    const layout = invariants(params);
+    for (const o of layout.openings) {
+      const s = layout.sections.find(
+        (x) => o.bay >= x.startBay && o.bay < x.startBay + x.bays,
+      )!;
+      expect(o.x).toBeGreaterThanOrEqual(s.x0 - 1e-9);
+      expect(o.x + o.w).toBeLessThanOrEqual(s.x1 + 1e-9);
+    }
+  });
+
+  it("sills and stoop carry their bay", () => {
+    const layout = computeLayout(
+      p({ groundFloor: { treatment: "residential", doorBay: 1, stoop: true } }),
+    );
+    const windows = layout.openings.filter((o) => o.kind === "window");
+    expect(layout.sills.map((s) => s.bay)).toEqual(windows.map((o) => o.bay));
+    expect(layout.stoop!.bay).toBe(1);
+  });
+
+  it("sectioned layouts keep all existing invariants", () => {
+    invariants(
+      p({
+        width: 5,
+        bays: 9,
+        sectionsSymmetrical: true,
+        sections: [
+          { bays: 3, offset: 0.15 },
+          { bays: 3, offset: -0.15 },
+          { bays: 3, offset: 0.15 },
+        ],
+      }),
+    );
   });
 });
