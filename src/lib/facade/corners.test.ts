@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { detectCorners } from "./corners";
+import { detectCorners, syncCorners, cornerChoice, type CornerChoice } from "./corners";
 import { DEFAULT_GEN, type FacadeBlock } from "./blocks";
 import { DEFAULT_FACADE } from "./types";
 
@@ -120,5 +120,102 @@ describe("detectCorners", () => {
     const B = mkBlock("B", [10, 0], [10, 10], [10], true);
     const corners = detectCorners([A, B], 150);
     expect(corners).toHaveLength(1);
+  });
+});
+
+const rightAngle = () => {
+  const A = mkBlock("A", [0, 0], [10, 0], [5, 5]);
+  const B = mkBlock("B", [10, 0], [10, 10], [4, 6]);
+  A.lots[1].params = {
+    ...A.lots[1].params,
+    storeys: 4,
+    wallColor: "#111111",
+    ornament: { cornice: true, parapet: true, sills: false, surrounds: true },
+  };
+  return { A, B };
+};
+
+describe("cornerChoice", () => {
+  it("defaults to two-facades with the wider frontage as primary", () => {
+    const { A, B } = rightAngle(); // A end lot 5m, B end lot 4m
+    const [c] = detectCorners([A, B], 150);
+    expect(cornerChoice(new Map(), c, [A, B])).toEqual({
+      mode: "two-facades",
+      primary: "a",
+    });
+  });
+});
+
+describe("syncCorners", () => {
+  it("copies the shell from the edited side; face fields stay per-side", () => {
+    const { A, B } = rightAngle();
+    const out = syncCorners([A, B], new Map(), 150, "A");
+    const bLot = out[1].lots[0].params;
+    expect(bLot.storeys).toBe(4);
+    expect(bLot.wallColor).toBe("#111111");
+    expect(bLot.ornament).toEqual(A.lots[1].params.ornament);
+    // face untouched (two-facades default)
+    expect(bLot.bays).toBe(B.lots[0].params.bays);
+    expect(bLot.groundFloor).toEqual(B.lots[0].params.groundFloor);
+    expect(bLot.width).toBe(4); // width never copied
+    // non-corner lots byte-identical
+    expect(out[0].lots[0]).toBe(A.lots[0]);
+    expect(out[1].lots[1]).toBe(B.lots[1]);
+  });
+
+  it("flows from the primary when no edited side is given", () => {
+    const { A, B } = rightAngle();
+    const out = syncCorners([A, B], new Map(), 150);
+    expect(out[1].lots[0].params.storeys).toBe(4); // primary = a (wider)
+  });
+
+  it("unified mode mirrors ratios, groundFloor, and bay rhythm (never cellOverrides)", () => {
+    const { A, B } = rightAngle();
+    const src = A.lots[1].params;
+    A.lots[1].params = {
+      ...src,
+      bays: 2, // 5m / 2 bays = 2.5m rhythm
+      windowWidthRatio: 0.61,
+      windowHeightRatio: 0.44,
+      groundFloor: { treatment: "shopfront", doorBay: 1, stoop: false },
+      cellOverrides: [{ storey: 1, bay: 0, kind: "blank" }],
+    };
+    const [c] = detectCorners([A, B], 150);
+    const choices = new Map<string, CornerChoice>([
+      [c.key, { mode: "unified", primary: "a" }],
+    ]);
+    const out = syncCorners([A, B], choices, 150, "A");
+    const bLot = out[1].lots[0].params;
+    expect(bLot.bays).toBe(2); // round(4 / 2.5) = 2
+    expect(bLot.windowWidthRatio).toBe(0.61);
+    expect(bLot.groundFloor.treatment).toBe("shopfront");
+    expect(bLot.groundFloor.doorBay).toBe(1); // clamped to bays-1 = 1
+    expect(bLot.cellOverrides).toEqual(B.lots[0].params.cellOverrides);
+  });
+
+  it("zeroes depthOffset on corner lots only; preserves customized flags", () => {
+    const { A, B } = rightAngle();
+    A.lots[0].depthOffset = 0.05;
+    A.lots[1].depthOffset = 0.08;
+    B.lots[0].depthOffset = -0.06;
+    B.lots[0].customized = true;
+    const out = syncCorners([A, B], new Map(), 150, "A");
+    expect(out[0].lots[0].depthOffset).toBe(0.05); // non-corner untouched
+    expect(out[0].lots[1].depthOffset).toBe(0);
+    expect(out[1].lots[0].depthOffset).toBe(0);
+    expect(out[1].lots[0].customized).toBe(true); // sync never flips pins
+  });
+
+  it("is idempotent and returns the input array identity when nothing changes", () => {
+    const { A, B } = rightAngle();
+    const once = syncCorners([A, B], new Map(), 150, "A");
+    const twice = syncCorners(once, new Map(), 150, "A");
+    expect(twice).toBe(once);
+  });
+
+  it("no corners -> input identity", () => {
+    const A = mkBlock("A", [0, 0], [10, 0], [10]);
+    const blocks = [A];
+    expect(syncCorners(blocks, new Map(), 150)).toBe(blocks);
   });
 });
