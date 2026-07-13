@@ -14,7 +14,12 @@ import {
 } from "@/lib/facade/blocks";
 import { computeLayout, MASSING_DEPTH_DEFAULT } from "@/lib/facade/layout";
 import { detectCorners, miterFor, type LotMiter } from "@/lib/facade/corners";
-import { levelingFor, groundNormal, type Ground } from "@/lib/facade/terrain";
+import {
+  levelingFor,
+  groundNormal,
+  groundHeightAt,
+  type Ground,
+} from "@/lib/facade/terrain";
 
 const BASEMENT_MIN = 0.3; // no sliver plinths below this drop
 const BASEMENT_COLOR = "#6f6a62"; // stone
@@ -123,10 +128,12 @@ function BlockGroup({
   const placements = useMemo(() => lotPlacements(block), [block]);
   const frame = useMemo(() => blockFrame(block), [block]);
   const isSelectedBlock = selected?.blockId === block.id;
+  const midX = frame.origin[0] + (frame.dir[0] * frame.length) / 2;
+  const midZ = frame.origin[1] + (frame.dir[1] * frame.length) / 2;
   const mid: [number, number, number] = [
-    frame.origin[0] + (frame.dir[0] * frame.length) / 2,
-    0,
-    frame.origin[1] + (frame.dir[1] * frame.length) / 2,
+    midX,
+    groundHeightAt(midX, midZ, ground), // sit the sidewalk on the tilted ground
+    midZ,
   ];
   const yaw = Math.atan2(-frame.dir[1], frame.dir[0]);
   return (
@@ -170,11 +177,20 @@ function BlockGroup({
           <meshStandardMaterial color="#8f8a80" roughness={0.9} />
         </mesh>
       </group>
-      {/* The block's line — always visible in plan, accented when selected */}
+      {/* The block's line — always visible in plan, accented when selected;
+       * each endpoint rides the tilted ground so it doesn't float on slopes */}
       <Line
         points={[
-          [block.line.a[0], 0.06, block.line.a[1]],
-          [block.line.b[0], 0.06, block.line.b[1]],
+          [
+            block.line.a[0],
+            groundHeightAt(block.line.a[0], block.line.a[1], ground) + 0.06,
+            block.line.a[1],
+          ],
+          [
+            block.line.b[0],
+            groundHeightAt(block.line.b[0], block.line.b[1], ground) + 0.06,
+            block.line.b[1],
+          ],
         ]}
         color={
           isSelectedBlock && selected?.level === "block"

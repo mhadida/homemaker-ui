@@ -596,27 +596,6 @@ export default function FacadeControls({
         />
       </Section>
 
-      <Section title="Topography">
-        <SliderRow
-          label="Ground slope"
-          value={ground.slope}
-          display={`${Math.round(ground.slope * 100)}%`}
-          min={0}
-          max={GROUND_SLOPE_MAX}
-          step={0.01}
-          onChange={(slope) => onGroundChange({ ...ground, slope })}
-        />
-        <SliderRow
-          label="Slope direction"
-          value={ground.azimuth}
-          display={`${Math.round(ground.azimuth)}°`}
-          min={0}
-          max={360}
-          step={5}
-          onChange={(azimuth) => onGroundChange({ ...ground, azimuth })}
-        />
-      </Section>
-
       <Section title="Sun">
         <SliderRow
           label="Sun azimuth"
@@ -639,6 +618,28 @@ export default function FacadeControls({
       </Section>
         </>
       )}
+
+      {/* Topography is world state — always reachable (lot / block / corner). */}
+      <Section title="Topography">
+        <SliderRow
+          label="Ground slope"
+          value={ground.slope}
+          display={`${Math.round(ground.slope * 100)}%`}
+          min={0}
+          max={GROUND_SLOPE_MAX}
+          step={0.01}
+          onChange={(slope) => onGroundChange({ ...ground, slope })}
+        />
+        <SliderRow
+          label="Slope direction"
+          value={ground.azimuth}
+          display={`${Math.round(ground.azimuth)}°`}
+          min={0}
+          max={360}
+          step={5}
+          onChange={(azimuth) => onGroundChange({ ...ground, azimuth })}
+        />
+      </Section>
     </div>
   );
 }
