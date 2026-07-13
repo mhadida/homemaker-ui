@@ -119,6 +119,8 @@ export function generateLot(
       rand() < v * 0.3
         ? pick(rand, ["georgian", "sash", "victorian", "none"] as WindowStyleId[])
         : base.windowStyle,
+    // Drawn LAST so it never perturbs any earlier draw's determinism.
+    massingDepth: +randIn(rand, 6, 12).toFixed(1),
   };
 }
 

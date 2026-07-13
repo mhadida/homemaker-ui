@@ -129,6 +129,11 @@ NOT involved; every edit is live (no Update button). Spec:
   parapet step with the offsets; `syncCorners` flattens corner-side end
   sections so miters stay closed. Spec:
   `docs/superpowers/specs/2026-07-14-facade-sections-design.md`.
+- **Massing**: each building gets a body — one wall-colored box per section
+  strip behind the facade, front flush with the wall back, extending back
+  by a per-lot `massingDepth` (clamped 3–20 m in `layout.ts`, default 8, a
+  panel Depth slider). Flat-topped for now; v7 roofs cap it. Spec:
+  `docs/superpowers/specs/2026-07-14-massing-design.md`.
 - **AI prompt**: `/api/facade-prompt` (flat fully-required zod spec — OpenAI
   structured output rejects optionals) targets the selected lot, plus an
   instant local keyword parser.

@@ -17,7 +17,13 @@ import type { ViewSettings } from "@/lib/building/types";
 import { WALL_SWATCHES, classicalStoreyHeights } from "@/lib/building/types";
 import type { Selection, FacadeBlock, BlockGenSettings } from "@/lib/facade/blocks";
 import type { Corner, CornerChoice } from "@/lib/facade/corners";
-import { resolveSections, SECTION_OFFSET_MAX } from "@/lib/facade/layout";
+import {
+  resolveSections,
+  SECTION_OFFSET_MAX,
+  MASSING_DEPTH_MIN,
+  MASSING_DEPTH_MAX,
+  MASSING_DEPTH_DEFAULT,
+} from "@/lib/facade/layout";
 import {
   withSectionCount,
   withSectionOffset,
@@ -434,6 +440,18 @@ export default function FacadeControls({
             ))}
           </>
         )}
+      </Section>
+
+      <Section title="Massing">
+        <SliderRow
+          label="Depth"
+          value={params.massingDepth ?? MASSING_DEPTH_DEFAULT}
+          display={`${(params.massingDepth ?? MASSING_DEPTH_DEFAULT).toFixed(1)}m`}
+          min={MASSING_DEPTH_MIN}
+          max={MASSING_DEPTH_MAX}
+          step={0.5}
+          onChange={(massingDepth) => update({ massingDepth })}
+        />
       </Section>
 
       <Section title="Ground Floor">

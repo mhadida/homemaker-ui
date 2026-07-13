@@ -5,6 +5,9 @@ import {
   resolveSections,
   SECTION_LAP,
   SECTION_OFFSET_MAX,
+  MASSING_DEPTH_MIN,
+  MASSING_DEPTH_MAX,
+  MASSING_DEPTH_DEFAULT,
   type OpeningRect,
 } from "./layout";
 import { DEFAULT_FACADE, type FacadeParams } from "./types";
@@ -607,6 +610,47 @@ describe("computeLayout sections", () => {
           { bays: 3, offset: 0.15 },
         ],
       }),
+    );
+  });
+});
+
+describe("computeLayout massing", () => {
+  it("defaults to MASSING_DEPTH_DEFAULT when the field is absent", () => {
+    expect(computeLayout(DEFAULT_FACADE).massingDepth).toBe(MASSING_DEPTH_DEFAULT);
+  });
+
+  it("passes a valid depth through unchanged", () => {
+    expect(computeLayout(p({ massingDepth: 12 })).massingDepth).toBe(12);
+  });
+
+  it("clamps depth to [MIN, MAX]", () => {
+    expect(computeLayout(p({ massingDepth: 1 })).massingDepth).toBe(MASSING_DEPTH_MIN);
+    expect(computeLayout(p({ massingDepth: 99 })).massingDepth).toBe(MASSING_DEPTH_MAX);
+    expect(computeLayout(p({ massingDepth: MASSING_DEPTH_MIN })).massingDepth).toBe(
+      MASSING_DEPTH_MIN,
+    );
+    expect(computeLayout(p({ massingDepth: MASSING_DEPTH_MAX })).massingDepth).toBe(
+      MASSING_DEPTH_MAX,
+    );
+  });
+
+  it("sanitizes non-finite depth to the default", () => {
+    expect(computeLayout(p({ massingDepth: NaN })).massingDepth).toBe(
+      MASSING_DEPTH_DEFAULT,
+    );
+    expect(computeLayout(p({ massingDepth: Infinity })).massingDepth).toBe(
+      MASSING_DEPTH_DEFAULT,
+    );
+  });
+
+  it("adding a massingDepth does not alter any other layout output", () => {
+    const strip = (l: ReturnType<typeof computeLayout>) => ({
+      ...l,
+      massingDepth: 0,
+    });
+    // Everything except massingDepth is identical.
+    expect(strip(computeLayout(p({ massingDepth: 15 })))).toEqual(
+      strip(computeLayout(DEFAULT_FACADE)),
     );
   });
 });

@@ -85,6 +85,16 @@ describe("generateLot", () => {
     expect(p.wallColor).toBe(FACADE_PRESETS.modern.params.wallColor);
     expect(p.windowStyle).toBe("none");
   });
+
+  it("emits a seeded massingDepth in [6, 12], deterministic per seed", () => {
+    for (let seed = 1; seed <= 50; seed++) {
+      const a = generateLot(7, DEFAULT_GEN, mulberry32(seed));
+      const b = generateLot(7, DEFAULT_GEN, mulberry32(seed));
+      expect(a.massingDepth).toBeGreaterThanOrEqual(6);
+      expect(a.massingDepth).toBeLessThanOrEqual(12);
+      expect(a.massingDepth).toBe(b.massingDepth); // deterministic
+    }
+  });
 });
 
 describe("generateBlock / rerollBlock", () => {

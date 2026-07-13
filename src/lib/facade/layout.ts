@@ -54,6 +54,9 @@ export const STOOP_STEPS = 2;
 export const CORNICE_HEIGHT = 0.35;
 export const CORNICE_PROJECTION = 0.25;
 export const PARAPET_HEIGHT = 0.75;
+export const MASSING_DEPTH_MIN = 3;
+export const MASSING_DEPTH_MAX = 20;
+export const MASSING_DEPTH_DEFAULT = 8;
 export const SECTION_OFFSET_MAX = 0.15; // max perpendicular relief (m); keeps
 // the max relative step (0.30) below WALL_THICKNESS so strips always overlap
 export const SECTION_LAP = 0.05; // anti-coplanar underlap at offset steps (m);
@@ -194,6 +197,9 @@ export interface FacadeLayout {
   width: number;
   /** top of the wall body (bottom of cornice, if any) */
   wallTop: number;
+  /** clamped building-body depth (m); the mesh renders one box per section
+   * strip using this + each strip's x0/x1 */
+  massingDepth: number;
   /** wallTop + cornice + parapet */
   totalHeight: number;
   /** y of each storey floor, length storeys+1 (last = wallTop) */
@@ -237,6 +243,11 @@ function resolveStoreyHeights(params: FacadeParams): number[] {
 export function computeLayout(params: FacadeParams): FacadeLayout {
   const width = params.width;
   const bays = params.bays;
+  const rawDepth = params.massingDepth;
+  const massingDepth =
+    rawDepth === undefined || !Number.isFinite(rawDepth)
+      ? MASSING_DEPTH_DEFAULT
+      : clamp(rawDepth, MASSING_DEPTH_MIN, MASSING_DEPTH_MAX);
   const heights = resolveStoreyHeights(params);
   const storeyLevels: number[] = [0];
   for (const h of heights) storeyLevels.push(storeyLevels[storeyLevels.length - 1] + h);
@@ -381,6 +392,7 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
   return {
     width,
     wallTop,
+    massingDepth,
     totalHeight,
     storeyLevels,
     grid,

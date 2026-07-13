@@ -77,6 +77,10 @@ export interface FacadeParams {
   /** Mirror section bays/offsets around the facade center. Enforced at
    * resolve time, so toggling is live. */
   sectionsSymmetrical?: boolean;
+  /** Building-body depth behind the facade, metres. Clamped
+   * [MASSING_DEPTH_MIN, MASSING_DEPTH_MAX] by the layout engine. Absent =
+   * MASSING_DEPTH_DEFAULT (every building has a body). */
+  massingDepth?: number;
   groundFloor: GroundFloorConfig;
   ornament: OrnamentConfig;
   /** #RRGGBB — wall render color */

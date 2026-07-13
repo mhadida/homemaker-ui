@@ -393,6 +393,28 @@ export default function FacadeMesh({
         const copingR = last ? 0.05 : 0;
         return (
           <group key={si} position={[0, 0, strip.offset]}>
+            {/* Massing: the building body behind this section's wall. Front
+             * flush with the wall back (−WALL_THICKNESS), extending back by
+             * the clamped depth; wall-colored so the building reads solid.
+             * The strip group's offset places it at world z = offset − … */}
+            <mesh
+              position={[
+                (bandX0 + bandX1) / 2,
+                layout.wallTop / 2,
+                -(WALL_THICKNESS + layout.massingDepth) / 2,
+              ]}
+              castShadow
+              receiveShadow
+            >
+              <boxGeometry
+                args={[
+                  bandX1 - bandX0,
+                  layout.wallTop,
+                  layout.massingDepth - WALL_THICKNESS,
+                ]}
+              />
+              <meshStandardMaterial color={params.wallColor} roughness={0.85} />
+            </mesh>
             <mesh geometry={stripGeos[si]} castShadow receiveShadow>
               <meshStandardMaterial color={params.wallColor} roughness={0.85} />
             </mesh>
