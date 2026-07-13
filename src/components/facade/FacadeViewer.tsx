@@ -32,6 +32,7 @@ import {
   type FacadeBlock,
   type Selection,
 } from "@/lib/facade/blocks";
+import type { Corner } from "@/lib/facade/corners";
 
 interface FacadeViewerProps {
   blocks: FacadeBlock[];
@@ -41,6 +42,8 @@ interface FacadeViewerProps {
   onMoveNode: (from: [number, number], to: [number, number]) => boolean;
   view?: ViewSettings;
   onDrawModeChange?: (drawMode: boolean) => void;
+  corners: Corner[];
+  onSelectCorner: (key: string) => void;
   maxCornerAngle: number;
 }
 
@@ -209,11 +212,13 @@ function NodeHandle({
   node,
   active,
   interactive,
+  isCorner,
   onStart,
 }: {
   node: WorldNode;
   active: boolean;
   interactive: boolean;
+  isCorner: boolean;
   onStart: () => void;
 }) {
   const [hover, setHover] = useState(false);
@@ -241,7 +246,17 @@ function NodeHandle({
     >
       <circleGeometry args={[hover || active ? 0.8 : 0.55, 24]} />
       <meshBasicMaterial
-        color={active ? "#3b82f6" : hover ? "#93c5fd" : "#e5e7eb"}
+        color={
+          active
+            ? "#3b82f6"
+            : hover
+              ? isCorner
+                ? "#e8c35a"
+                : "#93c5fd"
+              : isCorner
+                ? "#d4a017"
+                : "#e5e7eb"
+        }
         transparent
         opacity={0.95}
         depthWrite={false}
@@ -260,21 +275,36 @@ function NodeHandles({
   interactive,
   onMoveNode,
   onDraggingChange,
+  corners,
+  onSelectCorner,
 }: {
   blocks: FacadeBlock[];
   interactive: boolean;
   onMoveNode: (from: [number, number], to: [number, number]) => boolean;
   onDraggingChange: (dragging: boolean) => void;
+  corners: Corner[];
+  onSelectCorner: (key: string) => void;
 }) {
   const nodes = useMemo(() => deriveNodes(blocks), [blocks]);
+  const cornerAt = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of corners) m.set(`${c.node[0]}:${c.node[1]}`, c.key);
+    return m;
+  }, [corners]);
   const [drag, setDrag] = useState<null | {
     pos: [number, number];
     targets: [number, number][];
   }>(null);
+  // Tracks whether a pointermove during the current drag actually applied a
+  // move — a drag that never moved is a stationary click, which selects the
+  // corner under the handle (if any) instead.
+  const movedRef = useRef(false);
   const endDrag = useCallback(() => {
+    const key = drag ? cornerAt.get(`${drag.pos[0]}:${drag.pos[1]}`) : undefined;
+    if (!movedRef.current && key) onSelectCorner(key);
     setDrag(null);
     onDraggingChange(false);
-  }, [onDraggingChange]);
+  }, [onDraggingChange, drag, cornerAt, onSelectCorner]);
   const dragging = drag !== null;
   // A release outside the pane must not strand the drag.
   useEffect(() => {
@@ -290,7 +320,9 @@ function NodeHandles({
           node={n}
           active={drag !== null && drag.pos[0] === n.pos[0] && drag.pos[1] === n.pos[1]}
           interactive={interactive && drag === null}
+          isCorner={cornerAt.has(`${n.pos[0]}:${n.pos[1]}`)}
           onStart={() => {
+            movedRef.current = false;
             const attached = new Set(n.refs.map((r) => r.blockId));
             const targets = nodes
               .filter(
@@ -318,8 +350,11 @@ function NodeHandles({
               }
             }
             const to = best ?? raw;
-            if (onMoveNode(drag.pos, to))
+            if (onMoveNode(drag.pos, to)) {
+              if (to[0] !== drag.pos[0] || to[1] !== drag.pos[1])
+                movedRef.current = true;
               setDrag((d) => (d ? { ...d, pos: to } : d));
+            }
           }}
           onPointerUp={endDrag}
         >
@@ -340,6 +375,8 @@ function PlanPane({
   drawMode,
   onCommitLine,
   onMoveNode,
+  corners,
+  onSelectCorner,
   maxCornerAngle,
 }: {
   blocks: FacadeBlock[];
@@ -350,6 +387,8 @@ function PlanPane({
   drawMode: boolean;
   onCommitLine: (a: [number, number], b: [number, number]) => void;
   onMoveNode: (from: [number, number], to: [number, number]) => boolean;
+  corners: Corner[];
+  onSelectCorner: (key: string) => void;
   maxCornerAngle: number;
 }) {
   const [nodeDrag, setNodeDrag] = useState(false);
@@ -425,6 +464,8 @@ function PlanPane({
         interactive={!drawMode}
         onMoveNode={onMoveNode}
         onDraggingChange={handleDraggingChange}
+        corners={corners}
+        onSelectCorner={onSelectCorner}
       />
       {/* Top-down; up = -z puts the street (+z) at the bottom of the pane. */}
       <OrthographicCamera
@@ -639,6 +680,8 @@ export default function FacadeViewer({
   onMoveNode,
   view = FACADE_DEFAULT_VIEW,
   onDrawModeChange,
+  corners,
+  onSelectCorner,
   maxCornerAngle,
 }: FacadeViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null!);
@@ -731,6 +774,8 @@ export default function FacadeViewer({
             drawMode={drawMode}
             onCommitLine={onCommitLine}
             onMoveNode={onMoveNode}
+            corners={corners}
+            onSelectCorner={onSelectCorner}
             maxCornerAngle={maxCornerAngle}
           />
         );

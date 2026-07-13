@@ -25,7 +25,12 @@ import {
 } from "@/lib/facade/blocks";
 import { rerollBlock, generateBlock, deleteLot } from "@/lib/facade/generate";
 import { moveNode } from "@/lib/facade/nodes";
-import { DEFAULT_MAX_CORNER_ANGLE } from "@/lib/facade/corners";
+import {
+  syncCorners,
+  detectCorners,
+  DEFAULT_MAX_CORNER_ANGLE,
+  type CornerChoice,
+} from "@/lib/facade/corners";
 import type { ViewSettings } from "@/lib/building/types";
 import { WALL_SWATCHES } from "@/lib/building/types";
 import FacadeControls from "@/components/facade/FacadeControls";
@@ -176,6 +181,13 @@ export default function FacadePage() {
   const [isAILoading, setIsAILoading] = useState(false);
   const [aiStatus, setAiStatus] = useState<string | null>(null);
   const [drawActive, setDrawActive] = useState(false);
+  const [cornerChoices, setCornerChoices] = useState<Map<string, CornerChoice>>(
+    () => new Map(),
+  );
+  // setMaxCornerAngle is produced here for T5's corner-inspector angle dial
+  // (onMaxCornerAngle) — no UI in this task calls it yet.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [maxCornerAngle, setMaxCornerAngle] = useState(DEFAULT_MAX_CORNER_ANGLE);
 
   const selectedBlock = selected
     ? (blocks.find((b) => b.id === selected.blockId) ?? null)
@@ -205,22 +217,37 @@ export default function FacadePage() {
         const endKey = b.flipped ? ("a" as const) : ("b" as const);
         const oldEnd = b.line[endKey];
         const newEnd = updated.line[endKey];
-        if (oldEnd[0] === newEnd[0] && oldEnd[1] === newEnd[1]) return replaced;
+        if (oldEnd[0] === newEnd[0] && oldEnd[1] === newEnd[1])
+          return syncCorners(
+            replaced,
+            cornerChoices,
+            maxCornerAngle,
+            selected.blockId,
+          );
         const welded = bs.some(
           (x) =>
             x.id !== b.id &&
             ((x.line.a[0] === oldEnd[0] && x.line.a[1] === oldEnd[1]) ||
               (x.line.b[0] === oldEnd[0] && x.line.b[1] === oldEnd[1])),
         );
-        if (!welded) return replaced;
+        if (!welded)
+          return syncCorners(
+            replaced,
+            cornerChoices,
+            maxCornerAngle,
+            selected.blockId,
+          );
         // The computed end is a node move: welded neighbors re-fit exactly
         // as if the shared node were dragged. If any cannot absorb, the
         // whole edit is rejected (the slider clamps). moveNode is pure, so
         // it is Strict Mode-safe inside this updater.
-        return moveNode(replaced, oldEnd, newEnd) ?? bs;
+        const moved = moveNode(replaced, oldEnd, newEnd);
+        return moved
+          ? syncCorners(moved, cornerChoices, maxCornerAngle, selected.blockId)
+          : bs;
       });
     },
-    [selected],
+    [selected, cornerChoices, maxCornerAngle],
   );
 
   const handleSelectLot = useCallback((blockId: string, lot: number) => {
@@ -234,9 +261,16 @@ export default function FacadePage() {
   const updateSelectedBlock = useCallback(
     (fn: (b: FacadeBlock) => FacadeBlock) => {
       if (!selected) return;
-      setBlocks((bs) => bs.map((b) => (b.id === selected.blockId ? fn(b) : b)));
+      setBlocks((bs) =>
+        syncCorners(
+          bs.map((b) => (b.id === selected.blockId ? fn(b) : b)),
+          cornerChoices,
+          maxCornerAngle,
+          selected.blockId,
+        ),
+      );
     },
-    [selected],
+    [selected, cornerChoices, maxCornerAngle],
   );
 
   const handleGenChange = useCallback(
@@ -291,7 +325,14 @@ export default function FacadePage() {
         const lotIndex = Math.min(selected.lot, block.lots.length - 1);
         const next = deleteLot(block, lotIndex);
         if (!next) return; // nothing can absorb — deletion rejected
-        setBlocks((bs) => bs.map((b) => (b.id === block.id ? next : b)));
+        setBlocks((bs) =>
+          syncCorners(
+            bs.map((b) => (b.id === block.id ? next : b)),
+            cornerChoices,
+            maxCornerAngle,
+            block.id,
+          ),
+        );
         setSelected((s) =>
           s ? { ...s, lot: Math.min(lotIndex, next.lots.length - 1) } : s,
         );
@@ -303,7 +344,14 @@ export default function FacadePage() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [blocks, selected, drawActive, handleDeleteBlock]);
+  }, [
+    blocks,
+    selected,
+    drawActive,
+    handleDeleteBlock,
+    cornerChoices,
+    maxCornerAngle,
+  ]);
 
   const handleSelectionLevel = useCallback(
     (level: "lot" | "block") => setSelected((s) => (s ? { ...s, level } : s)),
@@ -323,10 +371,12 @@ export default function FacadePage() {
         seed,
         lots: generateBlock(line, false, gen, seed),
       };
-      setBlocks((bs) => [...bs, newBlock]);
+      setBlocks((bs) =>
+        syncCorners([...bs, newBlock], cornerChoices, maxCornerAngle),
+      );
       setSelected({ blockId: newBlock.id, lot: 0, level: "block" });
     },
-    [],
+    [cornerChoices, maxCornerAngle],
   );
 
   const handleMoveNode = useCallback(
@@ -336,10 +386,58 @@ export default function FacadePage() {
       // yet re-rendered) returns null and is simply skipped — the drag
       // recovers on the next frame.
       const next = moveNode(blocks, from, to);
-      if (next && next !== blocks) setBlocks(next);
+      if (next && next !== blocks)
+        setBlocks(syncCorners(next, cornerChoices, maxCornerAngle));
       return next !== null;
     },
-    [blocks],
+    [blocks, cornerChoices, maxCornerAngle],
+  );
+
+  // Re-sync whenever the choice map or the angle threshold changes (e.g. the
+  // corner-choice inspector flips a mode, or the angle dial re-qualifies a
+  // junction as a corner). syncCorners returns input identity when nothing
+  // changed, so this cannot loop.
+  useEffect(() => {
+    setBlocks((bs) => syncCorners(bs, cornerChoices, maxCornerAngle));
+  }, [maxCornerAngle, cornerChoices]);
+
+  const corners = useMemo(
+    () => detectCorners(blocks, maxCornerAngle),
+    [blocks, maxCornerAngle],
+  );
+
+  const handleSelectCorner = useCallback(
+    (cornerKey: string) => {
+      const c = corners.find((x) => x.key === cornerKey);
+      if (!c) return;
+      setSelected({
+        blockId: c.a.blockId,
+        lot: c.a.lotIndex,
+        level: "corner",
+        cornerKey,
+      });
+    },
+    [corners],
+  );
+
+  // Produced here for T5's corner-inspector onCornerChoice — no UI in this
+  // task calls it yet (FacadeControls doesn't render a corner branch until
+  // T5).
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const handleCornerChoice = useCallback(
+    (key: string, choice: CornerChoice) => {
+      setCornerChoices((m) => {
+        const next = new Map(m);
+        next.set(key, choice);
+        return next;
+      });
+      // Apply the new choice immediately (e.g. switching primary re-sources
+      // the shell; switching to unified mirrors the face now).
+      setBlocks((bs) =>
+        syncCorners(bs, new Map(cornerChoices).set(key, choice), maxCornerAngle),
+      );
+    },
+    [cornerChoices, maxCornerAngle],
   );
 
   const layout = useMemo(
@@ -437,8 +535,9 @@ export default function FacadePage() {
             onMoveNode={handleMoveNode}
             view={view}
             onDrawModeChange={setDrawActive}
-            // T4 wires the live state
-            maxCornerAngle={DEFAULT_MAX_CORNER_ANGLE}
+            corners={corners}
+            onSelectCorner={handleSelectCorner}
+            maxCornerAngle={maxCornerAngle}
           />
         </div>
 

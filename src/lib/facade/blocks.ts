@@ -48,7 +48,9 @@ export interface FacadeBlock {
 export interface Selection {
   blockId: string;
   lot: number;
-  level: "lot" | "block";
+  level: "lot" | "block" | "corner";
+  /** Set when level === "corner". */
+  cornerKey?: string;
 }
 
 export interface BlockFrame {
