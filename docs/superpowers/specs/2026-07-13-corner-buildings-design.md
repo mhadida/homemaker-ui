@@ -105,8 +105,17 @@ prompt) funnels its result through
   (sourceWidth / sourceBays)), 1, 9)` — same beat, different width.
   `cellOverrides` are NOT mirrored (bay-indexed, lossy across widths);
   they remain per-frontage.
-- Sync is idempotent (running it twice changes nothing) and cheap
-  (corners are few; fields are scalars).
+- Sync is idempotent (running it twice changes nothing; unchanged input
+  returns the same array identity) and cheap (corners are few; fields are
+  scalars).
+- **Chain propagation (review finding, 2026-07-13):** corners form a graph
+  over blocks (a lot can bridge two corners — e.g. a chamfer block in a
+  D–C–E chain). Pairwise-independent syncing clobbers shared lots and
+  breaks idempotence. Instead the shell PROPAGATES: breadth-first from the
+  edited block through the corner graph (each corner synced exactly once,
+  direction = away from the edit); without an edited block, each connected
+  component roots at the primary side of its first corner in sorted-key
+  order. One user edit therefore restyles an entire connected chain.
 
 ### Geometry: the corner meets
 
