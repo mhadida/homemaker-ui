@@ -276,10 +276,53 @@ function DoorFill({
   );
 }
 
-function ShopfrontFill({ o, trimColor }: { o: OpeningRect; trimColor: string }) {
+const AWNING_PROJECT = 1.0; // how far the awning reaches out from the wall
+const AWNING_DROP = 0.35; // vertical fall over that projection
+const AWNING_VALANCE = 0.3; // hanging front flap
+const AWNING_COLOR = "#6b3b3b"; // canvas
+
+/** Projecting shopfront awning: a sloped canvas + a hanging front valance,
+ * attached just above the glazing. Rendered only when toggled on. */
+function Awning({ w, topY }: { w: number; topY: number }) {
+  const slope = Math.hypot(AWNING_PROJECT, AWNING_DROP);
+  const angle = Math.atan2(AWNING_DROP, AWNING_PROJECT);
+  return (
+    <group>
+      {/* sloped canvas: attaches at the wall front (local z ≈ 0.1) above the
+       * glazing, tilts down-and-out */}
+      <mesh
+        position={[0, topY - AWNING_DROP / 2, 0.1 + AWNING_PROJECT / 2]}
+        rotation={[angle, 0, 0]}
+        castShadow
+      >
+        <boxGeometry args={[w + 0.2, 0.04, slope]} />
+        <meshStandardMaterial color={AWNING_COLOR} roughness={0.85} />
+      </mesh>
+      {/* front valance flap */}
+      <mesh
+        position={[0, topY - AWNING_DROP - AWNING_VALANCE / 2, 0.1 + AWNING_PROJECT]}
+        castShadow
+      >
+        <boxGeometry args={[w + 0.2, AWNING_VALANCE, 0.04]} />
+        <meshStandardMaterial color={AWNING_COLOR} roughness={0.85} />
+      </mesh>
+    </group>
+  );
+}
+
+function ShopfrontFill({
+  o,
+  trimColor,
+  awning,
+}: {
+  o: OpeningRect;
+  trimColor: string;
+  awning?: boolean;
+}) {
   return (
     <group position={[o.x + o.w / 2, o.y + o.h / 2, -0.1]}>
       <Glass w={o.w} h={o.h} />
+      {awning && <Awning w={o.w} topY={o.h / 2} />}
       {/* stallriser: solid base band */}
       <mesh position={[0, -o.h / 2 + 0.25, 0]}>
         <boxGeometry args={[o.w, 0.5, 0.08]} />
@@ -488,7 +531,12 @@ export default function FacadeMesh({
                     );
                   case "shopfront":
                     return (
-                      <ShopfrontFill key={key} o={o} trimColor={params.trimColor} />
+                      <ShopfrontFill
+                        key={key}
+                        o={o}
+                        trimColor={params.trimColor}
+                        awning={params.groundFloor.awning}
+                      />
                     );
                   case "garage":
                     return <GarageFill key={key} o={o} doorColor={params.doorColor} />;

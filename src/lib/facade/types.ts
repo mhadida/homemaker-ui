@@ -12,6 +12,8 @@ export interface GroundFloorConfig {
   doorBay: number;
   /** Entry steps in front of the door (residential treatment only). */
   stoop: boolean;
+  /** Projecting awning over the glazing (shopfront treatment only). */
+  awning?: boolean;
 }
 
 export interface OrnamentConfig {

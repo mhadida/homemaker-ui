@@ -538,6 +538,21 @@ export default function FacadeControls({
             })
           }
         />
+        {params.groundFloor.treatment === "shopfront" && (
+          <Toggle
+            label={params.groundFloor.awning ? "Awning: on" : "Awning: off"}
+            on={!!params.groundFloor.awning}
+            onClick={() =>
+              update({
+                groundFloor: {
+                  ...params.groundFloor,
+                  awning: !params.groundFloor.awning,
+                },
+                preset: undefined,
+              })
+            }
+          />
+        )}
       </Section>
 
       <Section title="Ornament & Materials">
