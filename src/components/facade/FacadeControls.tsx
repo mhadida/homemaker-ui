@@ -211,7 +211,11 @@ export default function FacadeControls({
           on={!corner && effectiveLevel === "block"}
           onClick={() => onSelectionLevel("block")}
         />
-        {corner && <Toggle label="Corner" on={true} onClick={() => {}} />}
+        {corner && (
+          <span className="px-2 py-1.5 rounded text-[11px] text-center bg-[var(--accent)] text-white select-none">
+            Corner
+          </span>
+        )}
       </div>
 
       {corner && (
@@ -230,6 +234,8 @@ export default function FacadeControls({
           onReroll={onReroll}
           onFlip={onFlip}
           onDeleteBlock={onDeleteBlock}
+          maxCornerAngle={maxCornerAngle}
+          onMaxCornerAngle={onMaxCornerAngle}
         />
       )}
 
@@ -493,22 +499,42 @@ function CornerInspector({
             : "Each frontage keeps its own windows, bays, and ground floor."}
         </p>
       </Section>
-      <Section title="Detection">
-        <SliderRow
-          label="Max corner angle (global)"
-          value={maxCornerAngle}
-          display={`${Math.round(maxCornerAngle)}°`}
-          min={0}
-          max={180}
-          step={5}
-          onChange={onMaxCornerAngle}
-        />
-        <p className="text-[10px] text-[var(--muted)]">
-          This corner turns {Math.round(data.turn)}°. Junctions turning more
-          than the max stay separate buildings.
-        </p>
-      </Section>
+      <DetectionSection
+        maxCornerAngle={maxCornerAngle}
+        onMaxCornerAngle={onMaxCornerAngle}
+        turn={data.turn}
+      />
     </div>
+  );
+}
+
+function DetectionSection({
+  maxCornerAngle,
+  onMaxCornerAngle,
+  turn,
+}: {
+  maxCornerAngle: number;
+  onMaxCornerAngle: (deg: number) => void;
+  turn?: number;
+}) {
+  return (
+    <Section title="Detection">
+      <SliderRow
+        label="Max corner angle (global)"
+        value={maxCornerAngle}
+        display={`${Math.round(maxCornerAngle)}°`}
+        min={0}
+        max={180}
+        step={5}
+        onChange={onMaxCornerAngle}
+      />
+      <p className="text-[10px] text-[var(--muted)]">
+        {turn !== undefined
+          ? `This corner turns ${Math.round(turn)}°. `
+          : ""}
+        Junctions turning more than the max stay separate buildings.
+      </p>
+    </Section>
   );
 }
 
@@ -518,12 +544,16 @@ function BlockInspector({
   onReroll,
   onFlip,
   onDeleteBlock,
+  maxCornerAngle,
+  onMaxCornerAngle,
 }: {
   block: FacadeBlock;
   onGenChange: (gen: BlockGenSettings) => void;
   onReroll: () => void;
   onFlip: () => void;
   onDeleteBlock: () => void;
+  maxCornerAngle: number;
+  onMaxCornerAngle: (deg: number) => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const confirmTimer = useRef<number | null>(null);
@@ -659,6 +689,11 @@ function BlockInspector({
           {confirmDelete ? "Confirm delete?" : "Delete block"}
         </button>
       </Section>
+
+      <DetectionSection
+        maxCornerAngle={maxCornerAngle}
+        onMaxCornerAngle={onMaxCornerAngle}
+      />
     </div>
   );
 }
