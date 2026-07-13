@@ -296,6 +296,15 @@ function NodeHandles({
     pos: [number, number];
     targets: [number, number][];
   }>(null);
+  // The drag lifecycle is REF-driven with state mirroring it for rendering:
+  // a pointerup can arrive in the same tick as the pointerdown (before React
+  // commits the drag state), so endDrag must read the live drag through a
+  // ref — a state closure would still be null and silently no-op, eating
+  // the {once:true} listener and stranding the drag.
+  const dragRef = useRef<null | {
+    pos: [number, number];
+    targets: [number, number][];
+  }>(null);
   // Tracks whether a pointermove during the current drag actually applied a
   // move — a drag that never moved is a stationary click, which selects the
   // corner under the handle (if any) instead.
@@ -304,18 +313,16 @@ function NodeHandles({
   // DRAG_THRESHOLD from this point are jitter, not intent, and are ignored.
   const startRef = useRef<[number, number] | null>(null);
   const endDrag = useCallback(() => {
-    if (drag === null) return;
-    const key = cornerAt.get(`${drag.pos[0]}:${drag.pos[1]}`);
+    const d = dragRef.current;
+    if (d === null) return;
+    const key = cornerAt.get(`${d.pos[0]}:${d.pos[1]}`);
     if (!movedRef.current && key) onSelectCorner(key);
+    dragRef.current = null;
     setDrag(null);
     onDraggingChange(false);
-  }, [onDraggingChange, drag, cornerAt, onSelectCorner]);
-  // Always holds the current endDrag — read from the imperative pointerup
-  // listener registered in onStart (below), which must exist synchronously
-  // before any same-tick pointerup, so it can't close over a stale endDrag
-  // from a useEffect that hasn't committed yet. Kept fresh via a deps-less
-  // effect (runs after every render) rather than a during-render ref write,
-  // which the react-hooks lint rule forbids.
+  }, [onDraggingChange, cornerAt, onSelectCorner]);
+  // Read by the imperative pointerup listener registered in onStart (below);
+  // kept fresh via a deps-less effect.
   const endDragRef = useRef(endDrag);
   useEffect(() => {
     endDragRef.current = endDrag;
@@ -338,7 +345,9 @@ function NodeHandles({
                 (m) => m !== n && !m.refs.some((r) => attached.has(r.blockId)),
               )
               .map((m) => m.pos);
-            setDrag({ pos: n.pos, targets });
+            // Ref first (synchronous), state second (render mirror).
+            dragRef.current = { pos: n.pos, targets };
+            setDrag(dragRef.current);
             onDraggingChange(true);
             // Registered here (not in a useEffect) so it exists before any
             // pointerup arriving in the same tick as this pointerdown —
@@ -382,6 +391,9 @@ function NodeHandles({
             if (onMoveNode(drag.pos, to)) {
               if (to[0] !== drag.pos[0] || to[1] !== drag.pos[1])
                 movedRef.current = true;
+              dragRef.current = dragRef.current
+                ? { ...dragRef.current, pos: to }
+                : dragRef.current;
               setDrag((d) => (d ? { ...d, pos: to } : d));
             }
           }}
