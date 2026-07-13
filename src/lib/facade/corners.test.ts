@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { detectCorners, syncCorners, cornerChoice, type CornerChoice } from "./corners";
+import {
+  detectCorners,
+  syncCorners,
+  cornerChoice,
+  SHELL_FIELDS,
+  type CornerChoice,
+} from "./corners";
 import { DEFAULT_GEN, type FacadeBlock } from "./blocks";
 import { DEFAULT_FACADE } from "./types";
 
@@ -217,5 +223,52 @@ describe("syncCorners", () => {
     const A = mkBlock("A", [0, 0], [10, 0], [10]);
     const blocks = [A];
     expect(syncCorners(blocks, new Map(), 150)).toBe(blocks);
+  });
+
+  it("SHELL_FIELDS is exactly what syncCorners copies (two-facades mode)", () => {
+    const { A, B } = rightAngle();
+    const out = syncCorners([A, B], new Map(), 150, "A");
+    const src = out[0].lots[1].params;
+    const dst = out[1].lots[0].params;
+    for (const f of SHELL_FIELDS) {
+      expect(dst[f]).toEqual(src[f]);
+    }
+    // and the face stays independent:
+    expect(dst.bays).toBe(B.lots[0].params.bays);
+  });
+
+  const chain = () => {
+    // D—C—E : C is a single-lot chamfer block bridging two corners.
+    const D = mkBlock("D", [0, 0], [10, 0], [10]);
+    D.lots[0].params = { ...D.lots[0].params, storeys: 5, wallColor: "#222222" };
+    const C = mkBlock("C", [10, 0], [14, 4], [5.65685424949238]);
+    const E = mkBlock("E", [14, 4], [14, 14], [10]);
+    return { D, C, E };
+  };
+
+  it("chains propagate the edited shell through shared blocks", () => {
+    const { D, C, E } = chain();
+    const out = syncCorners([D, C, E], new Map(), 150, "D");
+    expect(out[1].lots[0].params.storeys).toBe(5);
+    expect(out[2].lots[0].params.storeys).toBe(5);
+    expect(out[2].lots[0].params.wallColor).toBe("#222222");
+  });
+
+  it("chains are idempotent with identity return", () => {
+    const { D, C, E } = chain();
+    const once = syncCorners([D, C, E], new Map(), 150, "D");
+    expect(syncCorners(once, new Map(), 150, "D")).toBe(once);
+    // and with no edited block:
+    const again = syncCorners(once, new Map(), 150);
+    expect(syncCorners(again, new Map(), 150)).toBe(again);
+  });
+
+  it("no-edit chain sync is deterministic from the first corner's primary", () => {
+    const { D, C, E } = chain();
+    const r1 = syncCorners([D, C, E], new Map(), 150);
+    const r2 = syncCorners([D, C, E], new Map(), 150);
+    expect(r1.map((b) => b.lots[0].params.storeys)).toEqual(
+      r2.map((b) => b.lots[0].params.storeys),
+    );
   });
 });

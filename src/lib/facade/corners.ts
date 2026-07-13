@@ -182,7 +182,17 @@ function syncedParams(
 
 /** The one choke point: every block mutation funnels its result through
  * here so corner pairs always share a truthful shell. Pure and idempotent —
- * safe inside React setState updaters. */
+ * safe inside React setState updaters.
+ *
+ * Corners form a graph over blocks — a single-lot block can bridge two
+ * corners (e.g. a chamfer block in a D–C–E chain) — so syncing pairwise,
+ * independently per corner, clobbers shared lots and breaks idempotence
+ * (whichever corner is processed last wins, and re-sourcing from a
+ * neighbour that hasn't seen the edit yet undoes it). Instead the shell
+ * PROPAGATES: breadth-first from a root through each connected component
+ * of blocks-with-corners, syncing every corner exactly once in the
+ * direction the BFS discovered it. One user edit therefore restyles an
+ * entire connected chain, and a second call is a no-op (identity return). */
 export function syncCorners(
   blocks: FacadeBlock[],
   choices: ReadonlyMap<string, CornerChoice>,
@@ -210,16 +220,13 @@ export function syncCorners(
     );
     work.set(side.blockId, { ...block, lots });
   };
-  for (const corner of corners) {
+  const syncEdge = (corner: Corner, srcSide: "a" | "b", dstSide: "a" | "b") => {
     const choice = cornerChoice(choices, corner, blocks);
-    const sourceSide =
-      editedBlockId === corner.a.blockId
-        ? "a"
-        : editedBlockId === corner.b.blockId
-          ? "b"
-          : choice.primary;
-    const src = corner[sourceSide];
-    const dst = corner[sourceSide === "a" ? "b" : "a"];
+    const src = corner[srcSide];
+    const dst = corner[dstSide];
+    // Read the CURRENT (possibly already-patched) state so propagation
+    // carries forward through lots that a prior step in this same call
+    // already synced — that's what lets the shell cross a chain.
     const srcLot = get(src.blockId).lots[src.lotIndex];
     const dstLot = get(dst.blockId).lots[dst.lotIndex];
     patchLot(
@@ -228,7 +235,87 @@ export function syncCorners(
       true,
     );
     patchLot(src, null, true); // depthOffset zeroing on the source side too
+  };
+
+  // Adjacency over blocks that participate in at least one corner.
+  const adjacency = new Map<string, Corner[]>();
+  for (const corner of corners) {
+    for (const blockId of [corner.a.blockId, corner.b.blockId]) {
+      const list = adjacency.get(blockId);
+      if (list) list.push(corner);
+      else adjacency.set(blockId, [corner]);
+    }
   }
+
+  const processed = new Set<string>(); // corner.key, each synced exactly once
+  const globallyVisited = new Set<string>();
+  for (const start of adjacency.keys()) {
+    if (globallyVisited.has(start)) continue;
+
+    // Connected component: every block reachable from `start` via corners.
+    const compNodes = new Set<string>([start]);
+    const compCorners = new Set<Corner>();
+    const stack = [start];
+    while (stack.length) {
+      const x = stack.pop()!;
+      for (const corner of adjacency.get(x)!) {
+        compCorners.add(corner);
+        const other =
+          corner.a.blockId === x ? corner.b.blockId : corner.a.blockId;
+        if (!compNodes.has(other)) {
+          compNodes.add(other);
+          stack.push(other);
+        }
+      }
+    }
+    for (const id of compNodes) globallyVisited.add(id);
+
+    // Root: the edited block when it's in this component; otherwise the
+    // primary side of the component's first corner in sorted key order.
+    let root: string;
+    if (editedBlockId && compNodes.has(editedBlockId)) {
+      root = editedBlockId;
+    } else {
+      const first = [...compCorners].sort((a, b) =>
+        a.key < b.key ? -1 : a.key > b.key ? 1 : 0,
+      )[0];
+      root = first[cornerChoice(choices, first, blocks).primary].blockId;
+    }
+
+    // BFS from root: each tree edge syncs visited (X) -> unvisited (Y).
+    const order = new Map<string, number>([[root, 0]]);
+    const queue = [root];
+    for (let qi = 0; qi < queue.length; qi++) {
+      const x = queue[qi];
+      for (const corner of adjacency.get(x)!) {
+        if (processed.has(corner.key)) continue;
+        const xSide: "a" | "b" = corner.a.blockId === x ? "a" : "b";
+        const otherSide: "a" | "b" = xSide === "a" ? "b" : "a";
+        const other = corner[otherSide].blockId;
+        if (order.has(other)) continue; // cycle edge — handled below
+        syncEdge(corner, xSide, otherSide);
+        processed.add(corner.key);
+        order.set(other, order.size);
+        queue.push(other);
+      }
+    }
+
+    // Cycle edges: corners whose both blocks were already visited by the
+    // time BFS reached them (e.g. a triangular loop of blocks), so they
+    // were never a tree edge above. Still sync each exactly once, from
+    // whichever side entered BFS earlier — deterministic, but a cycle has
+    // no unique root so the resulting seam is arbitrary.
+    for (const corner of compCorners) {
+      if (processed.has(corner.key)) continue;
+      const srcSide: "a" | "b" =
+        order.get(corner.a.blockId)! <= order.get(corner.b.blockId)!
+          ? "a"
+          : "b";
+      syncEdge(corner, srcSide, srcSide === "a" ? "b" : "a");
+      processed.add(corner.key);
+    }
+  }
+
   if (work.size === 0) return blocks;
   return blocks.map((b) => work.get(b.id) ?? b);
 }
