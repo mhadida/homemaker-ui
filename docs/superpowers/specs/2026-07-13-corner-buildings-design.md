@@ -78,6 +78,15 @@ endpoint-aware and flip-aware via `blockFrame`). Corner when
 `turn <= maxTurnDeg`. The end lots are `lotIndex 0` (frame origin at the
 node) or `lots.length - 1` (frame end at the node).
 
+**Continuous-frontage requirement (review finding, 2026-07-13):** the two
+facades must lie on the SAME side when walking through the node (one
+block's node-end at its frame origin, the other's at its frame end —
+opposite `atOrigin` parity). When one street is flipped relative to the
+chain, the frontages face away from each other diagonally: that junction
+is not a corner building and never merges. This also makes convexity
+well-defined — without the guard, the convex/concave sign is an artifact
+of block-id sort order for mixed-parity junctions.
+
 ### Shell sync (one choke point)
 
 Every `setBlocks` mutation path in the page (setParams, handleMoveNode,
