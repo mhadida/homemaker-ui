@@ -108,6 +108,7 @@ function GlobalClear() {
 // ── Pane contents (3D only — rendered inside <View>) ────────────────────────
 
 const MIN_BLOCK_LENGTH = 3;
+const DRAG_THRESHOLD = 0.3; // metres — clicks with sub-threshold jitter select, not drag
 
 /** Pen tool: click chains nodes into welded segments. Lives ONLY in the
  * plan pane. Each click from the second on commits a block immediately;
@@ -299,19 +300,26 @@ function NodeHandles({
   // move — a drag that never moved is a stationary click, which selects the
   // corner under the handle (if any) instead.
   const movedRef = useRef(false);
+  // World position where the current drag started — moves under
+  // DRAG_THRESHOLD from this point are jitter, not intent, and are ignored.
+  const startRef = useRef<[number, number] | null>(null);
   const endDrag = useCallback(() => {
-    const key = drag ? cornerAt.get(`${drag.pos[0]}:${drag.pos[1]}`) : undefined;
+    if (drag === null) return;
+    const key = cornerAt.get(`${drag.pos[0]}:${drag.pos[1]}`);
     if (!movedRef.current && key) onSelectCorner(key);
     setDrag(null);
     onDraggingChange(false);
   }, [onDraggingChange, drag, cornerAt, onSelectCorner]);
-  const dragging = drag !== null;
-  // A release outside the pane must not strand the drag.
+  // Always holds the current endDrag — read from the imperative pointerup
+  // listener registered in onStart (below), which must exist synchronously
+  // before any same-tick pointerup, so it can't close over a stale endDrag
+  // from a useEffect that hasn't committed yet. Kept fresh via a deps-less
+  // effect (runs after every render) rather than a during-render ref write,
+  // which the react-hooks lint rule forbids.
+  const endDragRef = useRef(endDrag);
   useEffect(() => {
-    if (!dragging) return;
-    window.addEventListener("pointerup", endDrag);
-    return () => window.removeEventListener("pointerup", endDrag);
-  }, [dragging, endDrag]);
+    endDragRef.current = endDrag;
+  });
   return (
     <>
       {nodes.map((n) => (
@@ -323,6 +331,7 @@ function NodeHandles({
           isCorner={cornerAt.has(`${n.pos[0]}:${n.pos[1]}`)}
           onStart={() => {
             movedRef.current = false;
+            startRef.current = n.pos;
             const attached = new Set(n.refs.map((r) => r.blockId));
             const targets = nodes
               .filter(
@@ -331,6 +340,16 @@ function NodeHandles({
               .map((m) => m.pos);
             setDrag({ pos: n.pos, targets });
             onDraggingChange(true);
+            // Registered here (not in a useEffect) so it exists before any
+            // pointerup arriving in the same tick as this pointerdown —
+            // an effect-based listener would miss it (React hasn't
+            // committed yet). {once:true} self-cleans; endDrag is also
+            // idempotent in case the catcher's own onPointerUp fires too.
+            window.addEventListener(
+              "pointerup",
+              () => endDragRef.current(),
+              { once: true },
+            );
           }}
         />
       ))}
@@ -350,6 +369,16 @@ function NodeHandles({
               }
             }
             const to = best ?? raw;
+            if (
+              !movedRef.current &&
+              startRef.current &&
+              Math.hypot(
+                to[0] - startRef.current[0],
+                to[1] - startRef.current[1],
+              ) < DRAG_THRESHOLD
+            ) {
+              return;
+            }
             if (onMoveNode(drag.pos, to)) {
               if (to[0] !== drag.pos[0] || to[1] !== drag.pos[1])
                 movedRef.current = true;
