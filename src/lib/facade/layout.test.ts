@@ -641,6 +641,9 @@ describe("computeLayout massing", () => {
     expect(computeLayout(p({ massingDepth: Infinity })).massingDepth).toBe(
       MASSING_DEPTH_DEFAULT,
     );
+    expect(computeLayout(p({ massingDepth: -Infinity })).massingDepth).toBe(
+      MASSING_DEPTH_DEFAULT,
+    );
   });
 
   it("adding a massingDepth does not alter any other layout output", () => {

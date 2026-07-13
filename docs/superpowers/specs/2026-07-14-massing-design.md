@@ -74,9 +74,9 @@ New "Massing" `Section` in the lot panel: a single `Depth` slider
 
 ## Generation
 
-`generateLot` sets `massingDepth` from a seeded draw in [6, 12] (its own
-seed stream offset, like depthOffset — no perturbation of existing streams).
-Reroll regenerates it for unpinned lots; pinned lots keep theirs.
+`generateLot` sets `massingDepth` from a seeded draw in [6, 12], drawn LAST
+from the lot's existing stream so it never perturbs any earlier field's
+determinism. Reroll regenerates it for unpinned lots; pinned lots keep theirs.
 
 ## AI prompt
 
