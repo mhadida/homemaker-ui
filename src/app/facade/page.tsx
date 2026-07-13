@@ -292,11 +292,11 @@ export default function FacadePage() {
     if (!selected) return;
     // The world may become empty — no fallback block is respawned.
     const rest = blocks.filter((b) => b.id !== selected.blockId);
-    setBlocks(rest);
+    setBlocks(syncCorners(rest, cornerChoices, maxCornerAngle));
     setSelected(
       rest.length > 0 ? { blockId: rest[0].id, lot: 0, level: "lot" } : null,
     );
-  }, [blocks, selected]);
+  }, [blocks, selected, cornerChoices, maxCornerAngle]);
 
   // Delete/Backspace removes the selection: the selected lot (street refits,
   // length preserved) or the whole block at block level / last lot. Direct —
@@ -354,7 +354,8 @@ export default function FacadePage() {
   ]);
 
   const handleSelectionLevel = useCallback(
-    (level: "lot" | "block") => setSelected((s) => (s ? { ...s, level } : s)),
+    (level: "lot" | "block") =>
+      setSelected((s) => (s ? { blockId: s.blockId, lot: s.lot, level } : s)),
     [],
   );
 
