@@ -33,6 +33,7 @@ import {
   type Selection,
 } from "@/lib/facade/blocks";
 import type { Corner } from "@/lib/facade/corners";
+import type { Ground } from "@/lib/facade/terrain";
 
 interface FacadeViewerProps {
   blocks: FacadeBlock[];
@@ -45,6 +46,7 @@ interface FacadeViewerProps {
   corners: Corner[];
   onSelectCorner: (key: string) => void;
   maxCornerAngle: number;
+  ground: Ground;
 }
 
 type PaneId = "plan" | "perspective" | "overview" | "detail";
@@ -419,6 +421,7 @@ function PlanPane({
   corners,
   onSelectCorner,
   maxCornerAngle,
+  ground,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -431,6 +434,7 @@ function PlanPane({
   corners: Corner[];
   onSelectCorner: (key: string) => void;
   maxCornerAngle: number;
+  ground: Ground;
 }) {
   const [nodeDrag, setNodeDrag] = useState(false);
   const dragEndAt = useRef(0);
@@ -498,6 +502,7 @@ function PlanPane({
         onSelectLot={guardedSelectLot}
         view={view}
         maxCornerAngle={maxCornerAngle}
+        ground={ground}
       />
       <PenSurface blocks={blocks} active={drawMode} onCommitLine={onCommitLine} />
       <NodeHandles
@@ -535,12 +540,14 @@ function PerspectivePane({
   onSelectLot,
   view,
   maxCornerAngle,
+  ground,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
   onSelectLot: (blockId: string, lot: number) => void;
   view: ViewSettings;
   maxCornerAngle: number;
+  ground: Ground;
 }) {
   return (
     <>
@@ -550,6 +557,7 @@ function PerspectivePane({
         onSelectLot={onSelectLot}
         view={view}
         maxCornerAngle={maxCornerAngle}
+        ground={ground}
       />
       <PerspectiveCamera
         makeDefault
@@ -589,6 +597,7 @@ function ElevationPane({
   size,
   mode,
   maxCornerAngle,
+  ground,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -597,6 +606,7 @@ function ElevationPane({
   size: { w: number; h: number };
   mode: "overview" | "detail";
   maxCornerAngle: number;
+  ground: Ground;
 }) {
   // Zero-block world: `block` is undefined. Hooks below must still run
   // unconditionally (Rules of Hooks) — every derived value falls back to a
@@ -689,6 +699,7 @@ function ElevationPane({
         onSelectLot={onSelectLot}
         view={view}
         maxCornerAngle={maxCornerAngle}
+        ground={ground}
       />
       <OrthographicCamera
         ref={camRef}
@@ -724,6 +735,7 @@ export default function FacadeViewer({
   corners,
   onSelectCorner,
   maxCornerAngle,
+  ground,
 }: FacadeViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null!);
   const planRef = useRef<HTMLDivElement>(null);
@@ -818,6 +830,7 @@ export default function FacadeViewer({
             corners={corners}
             onSelectCorner={onSelectCorner}
             maxCornerAngle={maxCornerAngle}
+        ground={ground}
           />
         );
       case "perspective":
@@ -828,6 +841,7 @@ export default function FacadeViewer({
             onSelectLot={onSelectLot}
             view={view}
             maxCornerAngle={maxCornerAngle}
+        ground={ground}
           />
         );
       case "overview":
@@ -840,6 +854,7 @@ export default function FacadeViewer({
             size={overviewSize}
             mode="overview"
             maxCornerAngle={maxCornerAngle}
+        ground={ground}
           />
         );
       case "detail":
@@ -852,6 +867,7 @@ export default function FacadeViewer({
             size={detailSize}
             mode="detail"
             maxCornerAngle={maxCornerAngle}
+        ground={ground}
           />
         );
     }

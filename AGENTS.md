@@ -140,6 +140,14 @@ NOT involved; every edit is live (no Update button). Spec:
   Default flat (no mesh); generator seeds variety; `roofType`+`roofHeight`
   are corner shell fields (orientation stays per-wing). Corner hip-valley
   merge deferred. Spec: `docs/superpowers/specs/2026-07-14-roofs-design.md`.
+- **Topography + basements**: a global tilted ground (`ground: {slope,
+  azimuth}` page state; `src/lib/facade/terrain.ts` pure — `groundHeightAt`,
+  `levelingFor`, `groundNormal`). Each building levels its floor to the
+  front-centre ground height and grows a stone basement (thin horizontal
+  windows) down to the lowest footprint corner; the ground plane + grid
+  tilt to the slope. `slope 0` = flat = byte-identical. Per-node/heightfield
+  "arbitrary" topography deferred. Spec:
+  `docs/superpowers/specs/2026-07-14-topography-design.md`.
 - **AI prompt**: `/api/facade-prompt` (flat fully-required zod spec — OpenAI
   structured output rejects optionals) targets the selected lot, plus an
   instant local keyword parser.

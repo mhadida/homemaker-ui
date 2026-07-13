@@ -12,8 +12,43 @@ import {
   type FacadeBlock,
   type Selection,
 } from "@/lib/facade/blocks";
-import { computeLayout } from "@/lib/facade/layout";
+import { computeLayout, MASSING_DEPTH_DEFAULT } from "@/lib/facade/layout";
 import { detectCorners, miterFor, type LotMiter } from "@/lib/facade/corners";
+import { levelingFor, groundNormal, type Ground } from "@/lib/facade/terrain";
+
+const BASEMENT_MIN = 0.3; // no sliver plinths below this drop
+const BASEMENT_COLOR = "#6f6a62"; // stone
+
+/** Leveling plinth below a building on sloping ground: a stone box from the
+ * floor (local y=0) down to −drop, pierced by a row of thin horizontal
+ * semi-basement windows on the street face. */
+function Basement({ width, depth, drop }: { width: number; depth: number; drop: number }) {
+  if (drop < BASEMENT_MIN) return null;
+  const n = Math.max(1, Math.floor(width / 1.3));
+  const winW = Math.min(0.75, (width / n) * 0.7);
+  const winY = -Math.min(drop * 0.45, drop - 0.12);
+  return (
+    <group>
+      <mesh position={[0, -drop / 2, -depth / 2]} castShadow receiveShadow>
+        <boxGeometry args={[width, drop, depth]} />
+        <meshStandardMaterial color={BASEMENT_COLOR} roughness={0.92} />
+      </mesh>
+      {Array.from({ length: n }, (_, i) => {
+        const x = -width / 2 + ((i + 0.5) * width) / n;
+        return (
+          <mesh key={i} position={[x, winY, 0.03]}>
+            <boxGeometry args={[winW, 0.28, 0.05]} />
+            <meshStandardMaterial
+              color="#2a2e33"
+              roughness={0.2}
+              metalness={0.4}
+            />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
 
 /** Copied from BuildingViewer — sun azimuth/altitude → directional light pos. */
 function sunPositionFromAngles(
@@ -77,11 +112,13 @@ function BlockGroup({
   selected,
   onSelectLot,
   miters,
+  ground,
 }: {
   block: FacadeBlock;
   selected: Selection | null;
   onSelectLot: (blockId: string, lot: number) => void;
   miters: Map<string, LotMiter>;
+  ground: Ground;
 }) {
   const placements = useMemo(() => lotPlacements(block), [block]);
   const frame = useMemo(() => blockFrame(block), [block]);
@@ -94,25 +131,38 @@ function BlockGroup({
   const yaw = Math.atan2(-frame.dir[1], frame.dir[0]);
   return (
     <group>
-      {block.lots.map((lot, i) => (
-        <group
-          key={`${block.id}-${i}`}
-          position={placements[i].position}
-          rotation={[0, placements[i].rotationY, 0]}
-          onClick={(e) => {
-            e.stopPropagation();
-            onSelectLot(block.id, i);
-          }}
-        >
-          <FacadeMesh
-            params={lot.params}
-            miter={miters.get(`${block.id}:${i}`)}
-          />
-          {isSelectedBlock && selected?.lot === i && (
-            <SelectionMarker params={lot.params} />
-          )}
-        </group>
-      ))}
+      {block.lots.map((lot, i) => {
+        const pos = placements[i].position;
+        const depth = lot.params.massingDepth ?? MASSING_DEPTH_DEFAULT;
+        const { datum, drop } = levelingFor(
+          pos[0],
+          pos[2],
+          lot.params.width,
+          depth,
+          placements[i].rotationY,
+          ground,
+        );
+        return (
+          <group
+            key={`${block.id}-${i}`}
+            position={[pos[0], datum, pos[2]]}
+            rotation={[0, placements[i].rotationY, 0]}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelectLot(block.id, i);
+            }}
+          >
+            <FacadeMesh
+              params={lot.params}
+              miter={miters.get(`${block.id}:${i}`)}
+            />
+            <Basement width={lot.params.width} depth={depth} drop={drop} />
+            {isSelectedBlock && selected?.lot === i && (
+              <SelectionMarker params={lot.params} />
+            )}
+          </group>
+        );
+      })}
       {/* Per-block sidewalk strip on the street side of the line */}
       <group position={mid} rotation={[0, yaw, 0]}>
         <mesh position={[0, 0.005, 1.25]} receiveShadow>
@@ -143,14 +193,24 @@ export default function SceneContents({
   onSelectLot,
   view,
   maxCornerAngle,
+  ground,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
   onSelectLot: (blockId: string, lot: number) => void;
   view: ViewSettings;
   maxCornerAngle: number;
+  ground: Ground;
 }) {
   const groundGeo = useGroundGeometry();
+  const groundQuat = useMemo(() => {
+    const q = new THREE.Quaternion();
+    q.setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(...groundNormal(ground)),
+    );
+    return q;
+  }, [ground]);
   const sunPos = useMemo(
     () => sunPositionFromAngles(view.sunAzimuth, view.sunAltitude),
     [view.sunAzimuth, view.sunAltitude],
@@ -203,36 +263,39 @@ export default function SceneContents({
           selected={selected}
           onSelectLot={onSelectLot}
           miters={miters}
+          ground={ground}
         />
       ))}
-      {/* Ground plane — polygonOffset pushes it back so the sidewalk, road
-       * strip, and grid lines all win the depth test (same trick as the
-       * main viewer). */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow geometry={groundGeo}>
-        <meshStandardMaterial
-          vertexColors
-          transparent
-          roughness={0.95}
-          metalness={0}
-          polygonOffset
-          polygonOffsetFactor={1}
-          polygonOffsetUnits={1}
-        />
-      </mesh>
+      {/* Ground plane + grid tilt to the slope so buildings sit on it at
+       * their datums. polygonOffset keeps the sidewalk/road/grid winning
+       * the depth test. */}
+      <group quaternion={groundQuat}>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow geometry={groundGeo}>
+          <meshStandardMaterial
+            vertexColors
+            transparent
+            roughness={0.95}
+            metalness={0}
+            polygonOffset
+            polygonOffsetFactor={1}
+            polygonOffsetUnits={1}
+          />
+        </mesh>
 
-      <Grid
-        position={[0, 0, 0]}
-        args={[60, 60]}
-        cellSize={1}
-        cellThickness={0.7}
-        cellColor="#1f1d1b"
-        sectionSize={5}
-        sectionThickness={1.4}
-        sectionColor="#0d0c0b"
-        fadeDistance={70}
-        fadeStrength={1.2}
-        infiniteGrid
-      />
+        <Grid
+          position={[0, 0, 0]}
+          args={[60, 60]}
+          cellSize={1}
+          cellThickness={0.7}
+          cellColor="#1f1d1b"
+          sectionSize={5}
+          sectionThickness={1.4}
+          sectionColor="#0d0c0b"
+          fadeDistance={70}
+          fadeStrength={1.2}
+          infiniteGrid
+        />
+      </group>
 
       <ContactShadows
         position={[0, 0.005, 0]}

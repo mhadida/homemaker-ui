@@ -31,6 +31,7 @@ import {
 } from "@/lib/facade/blocks";
 import { rerollBlock, generateBlock, deleteLot } from "@/lib/facade/generate";
 import { moveNode } from "@/lib/facade/nodes";
+import { DEFAULT_GROUND, type Ground } from "@/lib/facade/terrain";
 import {
   syncCorners,
   detectCorners,
@@ -213,6 +214,7 @@ export default function FacadePage() {
     () => new Map(),
   );
   const [maxCornerAngle, setMaxCornerAngle] = useState(DEFAULT_MAX_CORNER_ANGLE);
+  const [ground, setGround] = useState<Ground>(DEFAULT_GROUND);
 
   const selectedBlock = selected
     ? (blocks.find((b) => b.id === selected.blockId) ?? null)
@@ -581,6 +583,7 @@ export default function FacadePage() {
             corners={corners}
             onSelectCorner={handleSelectCorner}
             maxCornerAngle={maxCornerAngle}
+            ground={ground}
           />
         </div>
 
@@ -618,6 +621,8 @@ export default function FacadePage() {
                   onCornerChoice={handleCornerChoice}
                   maxCornerAngle={maxCornerAngle}
                   onMaxCornerAngle={setMaxCornerAngle}
+                  ground={ground}
+                  onGroundChange={setGround}
                 />
               </>
             ) : (

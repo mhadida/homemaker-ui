@@ -29,6 +29,7 @@ import {
   ROOF_HEIGHT_MAX,
   ROOF_HEIGHT_DEFAULT,
 } from "@/lib/facade/roof";
+import { GROUND_SLOPE_MAX, type Ground } from "@/lib/facade/terrain";
 import {
   withSectionCount,
   withSectionOffset,
@@ -55,6 +56,8 @@ interface FacadeControlsProps {
   onCornerChoice: (key: string, choice: CornerChoice) => void;
   maxCornerAngle: number;
   onMaxCornerAngle: (deg: number) => void;
+  ground: Ground;
+  onGroundChange: (g: Ground) => void;
 }
 
 function SliderRow({
@@ -197,6 +200,8 @@ export default function FacadeControls({
   onCornerChoice,
   maxCornerAngle,
   onMaxCornerAngle,
+  ground,
+  onGroundChange,
 }: FacadeControlsProps) {
   const update = (u: Partial<FacadeParams>) => onChange({ ...params, ...u });
   const L = FACADE_LIMITS;
@@ -588,6 +593,27 @@ export default function FacadeControls({
           swatches={DOOR_SWATCHES}
           value={params.doorColor}
           onPick={(hex) => update({ doorColor: hex })}
+        />
+      </Section>
+
+      <Section title="Topography">
+        <SliderRow
+          label="Ground slope"
+          value={ground.slope}
+          display={`${Math.round(ground.slope * 100)}%`}
+          min={0}
+          max={GROUND_SLOPE_MAX}
+          step={0.01}
+          onChange={(slope) => onGroundChange({ ...ground, slope })}
+        />
+        <SliderRow
+          label="Slope direction"
+          value={ground.azimuth}
+          display={`${Math.round(ground.azimuth)}°`}
+          min={0}
+          max={360}
+          step={5}
+          onChange={(azimuth) => onGroundChange({ ...ground, azimuth })}
         />
       </Section>
 
