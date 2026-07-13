@@ -8,6 +8,7 @@ import {
   SHOPFRONT_FASCIA,
   type FacadeLayout,
   type OpeningRect,
+  type SectionStrip,
 } from "@/lib/facade/layout";
 import type { FacadeParams, WindowStyleId } from "@/lib/facade/types";
 import type { LotMiter } from "@/lib/facade/corners";
@@ -17,18 +18,25 @@ const FRAME_D = 0.06; // frame depth
 const GLASS_RECESS = 0.15; // how far frames/glass sit behind the wall face
 const GLAZING_BAR = 0.04; // thin internal glazing-bar thickness
 
-/** Wall body: outer rect with punched opening holes, extruded to thickness.
- * ExtrudeGeometry runs +z from the shape plane, so we shift it back so the
- * front face lands at z=0 (the facade plane). `miterL`/`miterR` extend (+)
- * or trim (−) the outer rectangle at each end to meet a corner neighbour —
- * openings/holes are untouched, they never reach the corner sliver. */
-function buildWallGeometry(
+/** Does this bay belong to the strip? The layout guarantees strips tile the
+ * bay range, so every opening/sill/stoop lands in exactly one strip. */
+const inStrip = (bay: number, s: SectionStrip): boolean =>
+  bay >= s.startBay && bay < s.startBay + s.bays;
+
+/** One section strip's wall body: the strip rect (lap included) with its own
+ * punched opening holes, extruded to thickness. ExtrudeGeometry runs +z from
+ * the shape plane, so we shift it back so the front face lands at z=0 (the
+ * strip group applies the section's relief offset). `extendL`/`extendR` are
+ * the corner miter extensions — nonzero only on the outer strips; the
+ * mitered sliver carries no openings. */
+function buildStripGeometry(
   layout: FacadeLayout,
-  miterL = 0,
-  miterR = 0,
+  strip: SectionStrip,
+  extendL = 0,
+  extendR = 0,
 ): THREE.ExtrudeGeometry {
-  const x0 = -layout.width / 2 - miterL;
-  const x1 = layout.width / 2 + miterR;
+  const x0 = strip.x0 - extendL;
+  const x1 = strip.x1 + extendR;
   const shape = new THREE.Shape();
   shape.moveTo(x0, 0);
   shape.lineTo(x1, 0);
@@ -36,6 +44,7 @@ function buildWallGeometry(
   shape.lineTo(x0, layout.wallTop);
   shape.closePath();
   for (const o of layout.openings) {
+    if (!inStrip(o.bay, strip)) continue;
     const hole = new THREE.Path();
     hole.moveTo(o.x, o.y);
     hole.lineTo(o.x + o.w, o.y);
@@ -284,20 +293,26 @@ function GarageFill({ o, doorColor }: { o: OpeningRect; doorColor: string }) {
   );
 }
 
-/** Stepped classical cornice: three stacked boxes with growing projection.
- * `ml`/`mr` (corner miter extensions, metres) widen the boxes and shift them
- * so a mitered corner's cornice/parapet run continuously into the
- * neighbour's, matching the wall's extended x-extent. */
-function Cornice({
+/** Stepped classical cornice for one section strip: three stacked boxes with
+ * growing projection spanning [x0, x1] (miter extensions folded in by the
+ * caller). Sideways projection applies only at the OUTER facade ends
+ * (`projectLeft`/`projectRight`) — internal section ends butt flush so
+ * same-offset neighbors' boxes never overlap/z-fight, and offset steps read
+ * as clean returns. */
+function CorniceSegment({
   layout,
   trimColor,
-  ml = 0,
-  mr = 0,
+  x0,
+  x1,
+  projectLeft,
+  projectRight,
 }: {
   layout: FacadeLayout;
   trimColor: string;
-  ml?: number;
-  mr?: number;
+  x0: number;
+  x1: number;
+  projectLeft: boolean;
+  projectRight: boolean;
 }) {
   if (!layout.cornice) return null;
   const { y, height, projection } = layout.cornice;
@@ -314,18 +329,24 @@ function Cornice({
   });
   return (
     <>
-      {boxes.map((b, i) => (
-        <mesh
-          key={i}
-          position={[(mr - ml) / 2, b.yCenter, (-WALL_THICKNESS + b.p) / 2]}
-          castShadow
-        >
-          <boxGeometry
-            args={[layout.width + ml + mr + b.p * 2, b.h, WALL_THICKNESS + b.p]}
-          />
-          <Trim color={trimColor} />
-        </mesh>
-      ))}
+      {boxes.map((b, i) => {
+        const pl = projectLeft ? b.p : 0;
+        const pr = projectRight ? b.p : 0;
+        return (
+          <mesh
+            key={i}
+            position={[
+              (x0 - pl + x1 + pr) / 2,
+              b.yCenter,
+              (-WALL_THICKNESS + b.p) / 2,
+            ]}
+            castShadow
+          >
+            <boxGeometry args={[x1 - x0 + pl + pr, b.h, WALL_THICKNESS + b.p]} />
+            <Trim color={trimColor} />
+          </mesh>
+        );
+      })}
     </>
   );
 }
@@ -340,129 +361,174 @@ export default function FacadeMesh({
   const ml = miter?.left ?? 0;
   const mr = miter?.right ?? 0;
   const layout = useMemo(() => computeLayout(params), [params]);
-  const wallGeo = useMemo(
-    () => buildWallGeometry(layout, ml, mr),
+  const stripGeos = useMemo(
+    () =>
+      layout.sections.map((strip, i) =>
+        buildStripGeometry(
+          layout,
+          strip,
+          i === 0 ? ml : 0,
+          i === layout.sections.length - 1 ? mr : 0,
+        ),
+      ),
     [layout, ml, mr],
   );
   // R3F does NOT auto-dispose geometry passed via the `geometry` prop —
-  // without this, every slider tick leaks a GPU buffer.
-  useEffect(() => () => wallGeo.dispose(), [wallGeo]);
+  // without this, every slider tick leaks GPU buffers.
+  useEffect(() => () => stripGeos.forEach((g) => g.dispose()), [stripGeos]);
 
+  // Everything renders per section strip inside a group carrying the strip's
+  // perpendicular relief offset — openings, sills, surrounds, cornice,
+  // parapet, and the stoop all step with their strip.
   return (
     <group>
-      <mesh geometry={wallGeo} castShadow receiveShadow>
-        <meshStandardMaterial color={params.wallColor} roughness={0.85} />
-      </mesh>
-
-      {layout.openings.map((o) => {
-        const key = `${o.storey}-${o.bay}`;
-        switch (o.kind) {
-          case "window":
-            return (
-              <WindowFill
-                key={key}
-                o={o}
-                trimColor={params.trimColor}
-                windowStyle={params.windowStyle}
-              />
-            );
-          case "door":
-            return (
-              <DoorFill
-                key={key}
-                o={o}
-                doorColor={params.doorColor}
-                trimColor={params.trimColor}
-                windowStyle={params.windowStyle}
-              />
-            );
-          case "shopfront":
-            return <ShopfrontFill key={key} o={o} trimColor={params.trimColor} />;
-          case "garage":
-            return <GarageFill key={key} o={o} doorColor={params.doorColor} />;
-          default:
-            return null;
-        }
-      })}
-
-      {/* sills: proud boxes under windows */}
-      {layout.sills.map((s, i) => (
-        <mesh key={i} position={[s.x + s.w / 2, s.y + 0.04, 0]} castShadow>
-          <boxGeometry args={[s.w, 0.08, 0.2]} />
-          <Trim color={params.trimColor} />
-        </mesh>
-      ))}
-
-      {/* surrounds: top + side trim around windows (sill covers the bottom) */}
-      {layout.surrounds.map((o, i) => (
-        <group key={i}>
-          <mesh position={[o.x + o.w / 2, o.y + o.h + 0.07, 0]} castShadow>
-            <boxGeometry args={[o.w + 0.28, 0.14, 0.1]} />
-            <Trim color={params.trimColor} />
-          </mesh>
-          <mesh position={[o.x - 0.07, o.y + o.h / 2, 0]}>
-            <boxGeometry args={[0.14, o.h, 0.1]} />
-            <Trim color={params.trimColor} />
-          </mesh>
-          <mesh position={[o.x + o.w + 0.07, o.y + o.h / 2, 0]}>
-            <boxGeometry args={[0.14, o.h, 0.1]} />
-            <Trim color={params.trimColor} />
-          </mesh>
-        </group>
-      ))}
-
-      <Cornice layout={layout} trimColor={params.trimColor} ml={ml} mr={mr} />
-
-      {/* parapet: wall-colored extension + thin trim coping */}
-      {layout.parapet && (
-        <group>
-          <mesh
-            position={[
-              (mr - ml) / 2,
-              layout.parapet.y + layout.parapet.height / 2,
-              -WALL_THICKNESS / 2,
-            ]}
-            castShadow
-          >
-            <boxGeometry
-              args={[layout.width + ml + mr, layout.parapet.height, WALL_THICKNESS]}
-            />
-            <meshStandardMaterial color={params.wallColor} roughness={0.85} />
-          </mesh>
-          <mesh
-            position={[
-              (mr - ml) / 2,
-              layout.parapet.y + layout.parapet.height + 0.04,
-              -WALL_THICKNESS / 2,
-            ]}
-            castShadow
-          >
-            <boxGeometry
-              args={[layout.width + ml + mr + 0.1, 0.08, WALL_THICKNESS + 0.1]}
-            />
-            <Trim color={params.trimColor} />
-          </mesh>
-        </group>
-      )}
-
-      {/* stoop: stacked overlapping blocks reading as steps */}
-      {layout.stoop &&
-        Array.from({ length: layout.stoop.steps }, (_, i) => {
-          const st = layout.stoop!;
-          const h = st.rise * (i + 1);
-          const d = st.run * (st.steps - i);
-          return (
-            <mesh
-              key={i}
-              position={[st.x + st.w / 2, h / 2, d / 2]}
-              castShadow
-              receiveShadow
-            >
-              <boxGeometry args={[st.w, h, d]} />
-              <meshStandardMaterial color="#9a938a" roughness={0.9} />
+      {layout.sections.map((strip, si) => {
+        const first = si === 0;
+        const last = si === layout.sections.length - 1;
+        // Ornament band x-extents: strip edges plus corner miter extensions
+        // at the outer facade ends only.
+        const bandX0 = strip.x0 - (first ? ml : 0);
+        const bandX1 = strip.x1 + (last ? mr : 0);
+        const copingL = first ? 0.05 : 0;
+        const copingR = last ? 0.05 : 0;
+        return (
+          <group key={si} position={[0, 0, strip.offset]}>
+            <mesh geometry={stripGeos[si]} castShadow receiveShadow>
+              <meshStandardMaterial color={params.wallColor} roughness={0.85} />
             </mesh>
-          );
-        })}
+
+            {layout.openings
+              .filter((o) => inStrip(o.bay, strip))
+              .map((o) => {
+                const key = `${o.storey}-${o.bay}`;
+                switch (o.kind) {
+                  case "window":
+                    return (
+                      <WindowFill
+                        key={key}
+                        o={o}
+                        trimColor={params.trimColor}
+                        windowStyle={params.windowStyle}
+                      />
+                    );
+                  case "door":
+                    return (
+                      <DoorFill
+                        key={key}
+                        o={o}
+                        doorColor={params.doorColor}
+                        trimColor={params.trimColor}
+                        windowStyle={params.windowStyle}
+                      />
+                    );
+                  case "shopfront":
+                    return (
+                      <ShopfrontFill key={key} o={o} trimColor={params.trimColor} />
+                    );
+                  case "garage":
+                    return <GarageFill key={key} o={o} doorColor={params.doorColor} />;
+                  default:
+                    return null;
+                }
+              })}
+
+            {/* sills: proud boxes under windows */}
+            {layout.sills
+              .filter((s) => inStrip(s.bay, strip))
+              .map((s, i) => (
+                <mesh key={i} position={[s.x + s.w / 2, s.y + 0.04, 0]} castShadow>
+                  <boxGeometry args={[s.w, 0.08, 0.2]} />
+                  <Trim color={params.trimColor} />
+                </mesh>
+              ))}
+
+            {/* surrounds: top + side trim around windows (sill covers the bottom) */}
+            {layout.surrounds
+              .filter((o) => inStrip(o.bay, strip))
+              .map((o, i) => (
+                <group key={i}>
+                  <mesh position={[o.x + o.w / 2, o.y + o.h + 0.07, 0]} castShadow>
+                    <boxGeometry args={[o.w + 0.28, 0.14, 0.1]} />
+                    <Trim color={params.trimColor} />
+                  </mesh>
+                  <mesh position={[o.x - 0.07, o.y + o.h / 2, 0]}>
+                    <boxGeometry args={[0.14, o.h, 0.1]} />
+                    <Trim color={params.trimColor} />
+                  </mesh>
+                  <mesh position={[o.x + o.w + 0.07, o.y + o.h / 2, 0]}>
+                    <boxGeometry args={[0.14, o.h, 0.1]} />
+                    <Trim color={params.trimColor} />
+                  </mesh>
+                </group>
+              ))}
+
+            <CorniceSegment
+              layout={layout}
+              trimColor={params.trimColor}
+              x0={bandX0}
+              x1={bandX1}
+              projectLeft={first}
+              projectRight={last}
+            />
+
+            {/* parapet: wall-colored extension + thin trim coping */}
+            {layout.parapet && (
+              <group>
+                <mesh
+                  position={[
+                    (bandX0 + bandX1) / 2,
+                    layout.parapet.y + layout.parapet.height / 2,
+                    -WALL_THICKNESS / 2,
+                  ]}
+                  castShadow
+                >
+                  <boxGeometry
+                    args={[bandX1 - bandX0, layout.parapet.height, WALL_THICKNESS]}
+                  />
+                  <meshStandardMaterial color={params.wallColor} roughness={0.85} />
+                </mesh>
+                <mesh
+                  position={[
+                    (bandX0 - copingL + bandX1 + copingR) / 2,
+                    layout.parapet.y + layout.parapet.height + 0.04,
+                    -WALL_THICKNESS / 2,
+                  ]}
+                  castShadow
+                >
+                  <boxGeometry
+                    args={[
+                      bandX1 - bandX0 + copingL + copingR,
+                      0.08,
+                      WALL_THICKNESS + 0.1,
+                    ]}
+                  />
+                  <Trim color={params.trimColor} />
+                </mesh>
+              </group>
+            )}
+
+            {/* stoop: stacked overlapping blocks reading as steps */}
+            {layout.stoop &&
+              inStrip(layout.stoop.bay, strip) &&
+              Array.from({ length: layout.stoop.steps }, (_, i) => {
+                const st = layout.stoop!;
+                const h = st.rise * (i + 1);
+                const d = st.run * (st.steps - i);
+                return (
+                  <mesh
+                    key={i}
+                    position={[st.x + st.w / 2, h / 2, d / 2]}
+                    castShadow
+                    receiveShadow
+                  >
+                    <boxGeometry args={[st.w, h, d]} />
+                    <meshStandardMaterial color="#9a938a" roughness={0.9} />
+                  </mesh>
+                );
+              })}
+          </group>
+        );
+      })}
     </group>
   );
 }
