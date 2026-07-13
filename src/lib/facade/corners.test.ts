@@ -3,11 +3,13 @@ import {
   detectCorners,
   syncCorners,
   cornerChoice,
+  miterFor,
   SHELL_FIELDS,
   type CornerChoice,
 } from "./corners";
 import { DEFAULT_GEN, type FacadeBlock } from "./blocks";
 import { DEFAULT_FACADE } from "./types";
+import { WALL_THICKNESS } from "./layout";
 
 const mkBlock = (
   id: string,
@@ -270,5 +272,43 @@ describe("syncCorners", () => {
     expect(r1.map((b) => b.lots[0].params.storeys)).toEqual(
       r2.map((b) => b.lots[0].params.storeys),
     );
+  });
+});
+
+describe("miterFor", () => {
+  it("convex right angle: side a extends by tan(45°)·T = T; side b untouched", () => {
+    const A = mkBlock("A", [0, 0], [10, 0], [10]);
+    const B = mkBlock("B", [10, 0], [10, 10], [10]);
+    const [c] = detectCorners([A, B], 150);
+    const m = miterFor(c);
+    expect(m.a).toBeCloseTo(WALL_THICKNESS, 9);
+    expect(m.b).toBe(0);
+  });
+
+  it("concave right angle: side a trims (negative, half depth)", () => {
+    const A = mkBlock("A", [0, 0], [10, 0], [10]);
+    const B2 = mkBlock("B2", [10, 0], [10, -10], [10]);
+    const [c] = detectCorners([A, B2], 150);
+    const m = miterFor(c);
+    expect(m.a).toBeCloseTo(-WALL_THICKNESS / 2, 9);
+    expect(m.b).toBe(0);
+  });
+
+  it("straight through: no correction", () => {
+    const A = mkBlock("A", [0, 0], [10, 0], [10]);
+    const B = mkBlock("B", [10, 0], [20, 0], [10]);
+    const [c] = detectCorners([A, B], 150);
+    expect(miterFor(c)).toEqual({ a: 0, b: 0 });
+  });
+
+  it("clamps at extreme turns", () => {
+    // Near-hairpin: B doubles back toward A's start -> turn ≈ 177°,
+    // tan(turn/2)·T ≈ 38·T, clamped to 3·T.
+    const A = mkBlock("A", [0, 0], [10, 0], [10]);
+    const B = mkBlock("B", [10, 0], [0, 0.5], [10]);
+    const [c] = detectCorners([A, B], 179);
+    expect(c.turn).toBeGreaterThan(170);
+    const m = miterFor(c);
+    expect(Math.abs(m.a)).toBeCloseTo(3 * WALL_THICKNESS, 9);
   });
 });

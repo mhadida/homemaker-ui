@@ -1,5 +1,6 @@
 import type { FacadeBlock } from "./blocks";
 import { blockFrame } from "./blocks";
+import { WALL_THICKNESS } from "./layout";
 import { deriveNodes } from "./nodes";
 import type { FacadeParams } from "./types";
 
@@ -318,4 +319,25 @@ export function syncCorners(
 
   if (work.size === 0) return blocks;
   return blocks.map((b) => work.get(b.id) ?? b);
+}
+
+/** Per-lot wall extension at each end, metres. */
+export interface LotMiter {
+  left: number;
+  right: number;
+}
+
+/** How far each side's wall extends (+) or trims (−) at the corner so the
+ * two slabs meet without a wedge gap (convex) or z-fighting overlap
+ * (concave). Only side a is corrected: one slab fills the corner while the
+ * other butts against it — extending both would create exactly coincident
+ * faces. Openings never enter the correction (layout engine untouched). */
+export function miterFor(corner: Corner): { a: number; b: number } {
+  const turnRad = (corner.turn * Math.PI) / 180;
+  const base = Math.min(
+    Math.tan(turnRad / 2) * WALL_THICKNESS,
+    3 * WALL_THICKNESS,
+  );
+  if (base < 1e-9) return { a: 0, b: 0 };
+  return { a: corner.convex ? base : -base / 2, b: 0 };
 }

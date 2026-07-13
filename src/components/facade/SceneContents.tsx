@@ -13,6 +13,7 @@ import {
   type Selection,
 } from "@/lib/facade/blocks";
 import { computeLayout } from "@/lib/facade/layout";
+import { detectCorners, miterFor, type LotMiter } from "@/lib/facade/corners";
 
 /** Copied from BuildingViewer — sun azimuth/altitude → directional light pos. */
 function sunPositionFromAngles(
@@ -75,10 +76,12 @@ function BlockGroup({
   block,
   selected,
   onSelectLot,
+  miters,
 }: {
   block: FacadeBlock;
   selected: Selection | null;
   onSelectLot: (blockId: string, lot: number) => void;
+  miters: Map<string, LotMiter>;
 }) {
   const placements = useMemo(() => lotPlacements(block), [block]);
   const frame = useMemo(() => blockFrame(block), [block]);
@@ -101,7 +104,10 @@ function BlockGroup({
             onSelectLot(block.id, i);
           }}
         >
-          <FacadeMesh params={lot.params} />
+          <FacadeMesh
+            params={lot.params}
+            miter={miters.get(`${block.id}:${i}`)}
+          />
           {isSelectedBlock && selected?.lot === i && (
             <SelectionMarker params={lot.params} />
           )}
@@ -136,17 +142,35 @@ export default function SceneContents({
   selected,
   onSelectLot,
   view,
+  maxCornerAngle,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
   onSelectLot: (blockId: string, lot: number) => void;
   view: ViewSettings;
+  maxCornerAngle: number;
 }) {
   const groundGeo = useGroundGeometry();
   const sunPos = useMemo(
     () => sunPositionFromAngles(view.sunAzimuth, view.sunAltitude),
     [view.sunAzimuth, view.sunAltitude],
   );
+  const miters = useMemo(() => {
+    const m = new Map<string, LotMiter>();
+    for (const c of detectCorners(blocks, maxCornerAngle)) {
+      const ext = miterFor(c);
+      for (const [side, e] of [
+        [c.a, ext.a],
+        [c.b, ext.b],
+      ] as const) {
+        if (e === 0) continue;
+        const key = `${side.blockId}:${side.lotIndex}`;
+        const cur = m.get(key) ?? { left: 0, right: 0 };
+        m.set(key, { ...cur, [side.lotSide]: e });
+      }
+    }
+    return m;
+  }, [blocks, maxCornerAngle]);
   return (
     <>
       <ambientLight intensity={0.35} />
@@ -178,6 +202,7 @@ export default function SceneContents({
           block={block}
           selected={selected}
           onSelectLot={onSelectLot}
+          miters={miters}
         />
       ))}
       {/* Ground plane — polygonOffset pushes it back so the sidewalk, road

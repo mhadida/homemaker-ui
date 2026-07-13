@@ -41,6 +41,7 @@ interface FacadeViewerProps {
   onMoveNode: (from: [number, number], to: [number, number]) => boolean;
   view?: ViewSettings;
   onDrawModeChange?: (drawMode: boolean) => void;
+  maxCornerAngle: number;
 }
 
 type PaneId = "plan" | "perspective" | "overview" | "detail";
@@ -339,6 +340,7 @@ function PlanPane({
   drawMode,
   onCommitLine,
   onMoveNode,
+  maxCornerAngle,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -348,6 +350,7 @@ function PlanPane({
   drawMode: boolean;
   onCommitLine: (a: [number, number], b: [number, number]) => void;
   onMoveNode: (from: [number, number], to: [number, number]) => boolean;
+  maxCornerAngle: number;
 }) {
   const [nodeDrag, setNodeDrag] = useState(false);
   const dragEndAt = useRef(0);
@@ -414,6 +417,7 @@ function PlanPane({
         selected={selected}
         onSelectLot={guardedSelectLot}
         view={view}
+        maxCornerAngle={maxCornerAngle}
       />
       <PenSurface blocks={blocks} active={drawMode} onCommitLine={onCommitLine} />
       <NodeHandles
@@ -448,11 +452,13 @@ function PerspectivePane({
   selected,
   onSelectLot,
   view,
+  maxCornerAngle,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
   onSelectLot: (blockId: string, lot: number) => void;
   view: ViewSettings;
+  maxCornerAngle: number;
 }) {
   return (
     <>
@@ -461,6 +467,7 @@ function PerspectivePane({
         selected={selected}
         onSelectLot={onSelectLot}
         view={view}
+        maxCornerAngle={maxCornerAngle}
       />
       <PerspectiveCamera
         makeDefault
@@ -499,6 +506,7 @@ function ElevationPane({
   view,
   size,
   mode,
+  maxCornerAngle,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -506,6 +514,7 @@ function ElevationPane({
   view: ViewSettings;
   size: { w: number; h: number };
   mode: "overview" | "detail";
+  maxCornerAngle: number;
 }) {
   // Zero-block world: `block` is undefined. Hooks below must still run
   // unconditionally (Rules of Hooks) — every derived value falls back to a
@@ -597,6 +606,7 @@ function ElevationPane({
         selected={selected}
         onSelectLot={onSelectLot}
         view={view}
+        maxCornerAngle={maxCornerAngle}
       />
       <OrthographicCamera
         ref={camRef}
@@ -629,6 +639,7 @@ export default function FacadeViewer({
   onMoveNode,
   view = FACADE_DEFAULT_VIEW,
   onDrawModeChange,
+  maxCornerAngle,
 }: FacadeViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null!);
   const planRef = useRef<HTMLDivElement>(null);
@@ -720,6 +731,7 @@ export default function FacadeViewer({
             drawMode={drawMode}
             onCommitLine={onCommitLine}
             onMoveNode={onMoveNode}
+            maxCornerAngle={maxCornerAngle}
           />
         );
       case "perspective":
@@ -729,6 +741,7 @@ export default function FacadeViewer({
             selected={selected}
             onSelectLot={onSelectLot}
             view={view}
+            maxCornerAngle={maxCornerAngle}
           />
         );
       case "overview":
@@ -740,6 +753,7 @@ export default function FacadeViewer({
             view={view}
             size={overviewSize}
             mode="overview"
+            maxCornerAngle={maxCornerAngle}
           />
         );
       case "detail":
@@ -751,6 +765,7 @@ export default function FacadeViewer({
             view={view}
             size={detailSize}
             mode="detail"
+            maxCornerAngle={maxCornerAngle}
           />
         );
     }

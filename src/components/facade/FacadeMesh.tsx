@@ -18,13 +18,21 @@ const GLAZING_BAR = 0.04; // thin internal glazing-bar thickness
 
 /** Wall body: outer rect with punched opening holes, extruded to thickness.
  * ExtrudeGeometry runs +z from the shape plane, so we shift it back so the
- * front face lands at z=0 (the facade plane). */
-function buildWallGeometry(layout: FacadeLayout): THREE.ExtrudeGeometry {
+ * front face lands at z=0 (the facade plane). `miterL`/`miterR` extend (+)
+ * or trim (−) the outer rectangle at each end to meet a corner neighbour —
+ * openings/holes are untouched, they never reach the corner sliver. */
+function buildWallGeometry(
+  layout: FacadeLayout,
+  miterL = 0,
+  miterR = 0,
+): THREE.ExtrudeGeometry {
+  const x0 = -layout.width / 2 - miterL;
+  const x1 = layout.width / 2 + miterR;
   const shape = new THREE.Shape();
-  shape.moveTo(-layout.width / 2, 0);
-  shape.lineTo(layout.width / 2, 0);
-  shape.lineTo(layout.width / 2, layout.wallTop);
-  shape.lineTo(-layout.width / 2, layout.wallTop);
+  shape.moveTo(x0, 0);
+  shape.lineTo(x1, 0);
+  shape.lineTo(x1, layout.wallTop);
+  shape.lineTo(x0, layout.wallTop);
   shape.closePath();
   for (const o of layout.openings) {
     const hole = new THREE.Path();
@@ -275,8 +283,21 @@ function GarageFill({ o, doorColor }: { o: OpeningRect; doorColor: string }) {
   );
 }
 
-/** Stepped classical cornice: three stacked boxes with growing projection. */
-function Cornice({ layout, trimColor }: { layout: FacadeLayout; trimColor: string }) {
+/** Stepped classical cornice: three stacked boxes with growing projection.
+ * `ml`/`mr` (corner miter extensions, metres) widen the boxes and shift them
+ * so a mitered corner's cornice/parapet run continuously into the
+ * neighbour's, matching the wall's extended x-extent. */
+function Cornice({
+  layout,
+  trimColor,
+  ml = 0,
+  mr = 0,
+}: {
+  layout: FacadeLayout;
+  trimColor: string;
+  ml?: number;
+  mr?: number;
+}) {
   if (!layout.cornice) return null;
   const { y, height, projection } = layout.cornice;
   const steps = [
@@ -295,10 +316,12 @@ function Cornice({ layout, trimColor }: { layout: FacadeLayout; trimColor: strin
       {boxes.map((b, i) => (
         <mesh
           key={i}
-          position={[0, b.yCenter, (-WALL_THICKNESS + b.p) / 2]}
+          position={[(mr - ml) / 2, b.yCenter, (-WALL_THICKNESS + b.p) / 2]}
           castShadow
         >
-          <boxGeometry args={[layout.width + b.p * 2, b.h, WALL_THICKNESS + b.p]} />
+          <boxGeometry
+            args={[layout.width + ml + mr + b.p * 2, b.h, WALL_THICKNESS + b.p]}
+          />
           <Trim color={trimColor} />
         </mesh>
       ))}
@@ -306,9 +329,20 @@ function Cornice({ layout, trimColor }: { layout: FacadeLayout; trimColor: strin
   );
 }
 
-export default function FacadeMesh({ params }: { params: FacadeParams }) {
+export default function FacadeMesh({
+  params,
+  miter,
+}: {
+  params: FacadeParams;
+  miter?: { left: number; right: number };
+}) {
+  const ml = miter?.left ?? 0;
+  const mr = miter?.right ?? 0;
   const layout = useMemo(() => computeLayout(params), [params]);
-  const wallGeo = useMemo(() => buildWallGeometry(layout), [layout]);
+  const wallGeo = useMemo(
+    () => buildWallGeometry(layout, ml, mr),
+    [layout, ml, mr],
+  );
   // R3F does NOT auto-dispose geometry passed via the `geometry` prop —
   // without this, every slider tick leaks a GPU buffer.
   useEffect(() => () => wallGeo.dispose(), [wallGeo]);
@@ -376,23 +410,35 @@ export default function FacadeMesh({ params }: { params: FacadeParams }) {
         </group>
       ))}
 
-      <Cornice layout={layout} trimColor={params.trimColor} />
+      <Cornice layout={layout} trimColor={params.trimColor} ml={ml} mr={mr} />
 
       {/* parapet: wall-colored extension + thin trim coping */}
       {layout.parapet && (
         <group>
           <mesh
-            position={[0, layout.parapet.y + layout.parapet.height / 2, -WALL_THICKNESS / 2]}
+            position={[
+              (mr - ml) / 2,
+              layout.parapet.y + layout.parapet.height / 2,
+              -WALL_THICKNESS / 2,
+            ]}
             castShadow
           >
-            <boxGeometry args={[layout.width, layout.parapet.height, WALL_THICKNESS]} />
+            <boxGeometry
+              args={[layout.width + ml + mr, layout.parapet.height, WALL_THICKNESS]}
+            />
             <meshStandardMaterial color={params.wallColor} roughness={0.85} />
           </mesh>
           <mesh
-            position={[0, layout.parapet.y + layout.parapet.height + 0.04, -WALL_THICKNESS / 2]}
+            position={[
+              (mr - ml) / 2,
+              layout.parapet.y + layout.parapet.height + 0.04,
+              -WALL_THICKNESS / 2,
+            ]}
             castShadow
           >
-            <boxGeometry args={[layout.width + 0.1, 0.08, WALL_THICKNESS + 0.1]} />
+            <boxGeometry
+              args={[layout.width + ml + mr + 0.1, 0.08, WALL_THICKNESS + 0.1]}
+            />
             <Trim color={params.trimColor} />
           </mesh>
         </group>

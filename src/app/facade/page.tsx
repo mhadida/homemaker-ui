@@ -25,6 +25,7 @@ import {
 } from "@/lib/facade/blocks";
 import { rerollBlock, generateBlock, deleteLot } from "@/lib/facade/generate";
 import { moveNode } from "@/lib/facade/nodes";
+import { DEFAULT_MAX_CORNER_ANGLE } from "@/lib/facade/corners";
 import type { ViewSettings } from "@/lib/building/types";
 import { WALL_SWATCHES } from "@/lib/building/types";
 import FacadeControls from "@/components/facade/FacadeControls";
@@ -436,6 +437,8 @@ export default function FacadePage() {
             onMoveNode={handleMoveNode}
             view={view}
             onDrawModeChange={setDrawActive}
+            // T4 wires the live state
+            maxCornerAngle={DEFAULT_MAX_CORNER_ANGLE}
           />
         </div>
 
