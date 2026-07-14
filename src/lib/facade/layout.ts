@@ -345,7 +345,9 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
         h = sh - PASSAGE_HEAD_GAP;
         w = Math.min(PASSAGE_WIDTH_MAX, maxW);
         if (h - w / 2 < PASSAGE_MIN_SIDE) w = 2 * (h - PASSAGE_MIN_SIDE);
-        if (w < MIN_OPENING_WIDTH || w > maxW) continue; // can't host a real arch
+        // w = min(…, maxW) then only shrinks, so it stays ≤ maxW; this guard
+        // catches a degenerate/negative w on a too-short storey.
+        if (w < MIN_OPENING_WIDTH) continue; // can't host a real arch
         x = bayCenter - w / 2;
         y = floorY;
         openings.push({ kind, storey: s, bay: b, x, y, w, h, arched: true });
@@ -405,8 +407,13 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
   const surrounds = params.ornament.surrounds ? [...windows] : [];
 
   // Pass-through tunnel: the void the mesh cuts through the mass behind the
-  // passage arch (full massing depth). null when there's no passage.
-  const passageOpening = openings.find((o) => o.kind === "passage");
+  // passage arch (full massing depth). null when there's no passage. Only a
+  // GROUND-storey passage pierces the mass — an upper-storey one (only
+  // reachable via a hand-authored cellOverride) would open a full-height slot
+  // from the ground, so it stays a wall opening without a tunnel.
+  const passageOpening = openings.find(
+    (o) => o.kind === "passage" && o.storey === 0,
+  );
   const passage: PassagePlan | null = passageOpening
     ? {
         x0: passageOpening.x,

@@ -162,6 +162,19 @@ NOT involved; every edit is live (no Update button). Spec:
   oriented by `f` alone and then defines the street. Guides render in the
   plan pane only; orientation applies on creation only. Spec:
   `docs/superpowers/specs/2026-07-14-street-awareness-design.md`.
+- **Pass-through arch**: a ground-floor treatment `"passage"` — a tall
+  semicircular carriage arch at the door bay that pierces the massing box so
+  you see through to behind (`src/lib/facade/layout.ts` — `resolveGrid` maps
+  the door bay to `"passage"`; the opening is arched (`OpeningRect.arched`,
+  head radius w/2, width shrinks on short storeys to keep a `PASSAGE_MIN_SIDE`
+  jamb); `computeLayout` exposes `layout.passage: PassagePlan` — the tunnel
+  void — only for a ground-storey passage). `FacadeMesh.buildStripGeometry`
+  punches an arched wall hole; `StripMass` splits the strip's box into piers +
+  lintel around the full-depth void (+ dark cobble floor); `PassageFill` adds a
+  keystone + imposts. Toggle in the treatment row; AI/local prompt know
+  passage/tunnel/carriage-arch/porte-cochère. Absent = byte-identical (single
+  box, rectangular holes). Spec:
+  `docs/superpowers/specs/2026-07-14-passage-arch-design.md`.
 - **Save / Load**: the whole scene is a JSON-native object graph, so
   persistence is a versioned `FacadeDocument` (`src/lib/facade/document.ts`
   pure — `serializeScene`/`toJSON`, `deserializeScene`/`fromJSON`;
