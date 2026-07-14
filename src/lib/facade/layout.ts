@@ -411,12 +411,17 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
   }
 
   // ── Ornament ──
-  const cornice = params.ornament.cornice
-    ? { y: wallTop, height: CORNICE_HEIGHT, projection: CORNICE_PROJECTION }
-    : null;
-  const parapet = params.ornament.parapet
-    ? { y: wallTop + (cornice ? cornice.height : 0), height: PARAPET_HEIGHT }
-    : null;
+  // A shaped gable IS the wall-top treatment, so it replaces the cornice +
+  // parapet (which would otherwise be embedded in / poke through the gable).
+  const hasGable = !!params.gableStyle;
+  const cornice =
+    params.ornament.cornice && !hasGable
+      ? { y: wallTop, height: CORNICE_HEIGHT, projection: CORNICE_PROJECTION }
+      : null;
+  const parapet =
+    params.ornament.parapet && !hasGable
+      ? { y: wallTop + (cornice ? cornice.height : 0), height: PARAPET_HEIGHT }
+      : null;
   const totalHeight =
     wallTop + (cornice ? cornice.height : 0) + (parapet ? parapet.height : 0);
 

@@ -73,11 +73,12 @@ function GableMesh({
     for (let i = 1; i < p.length; i++)
       shape.lineTo(p[i][0], gable.baseY + p[i][1]);
     shape.closePath(); // close along the eave (bottom) back to the start
-    const g = new THREE.ExtrudeGeometry(shape, {
-      depth: WALL_THICKNESS,
-      bevelEnabled: false,
-    });
-    g.translate(0, 0, -WALL_THICKNESS); // front face at z = 0
+    // Extrude slightly DEEPER than the wall so the gable's opaque volume
+    // covers a perpendicular roof's front gable-end (which sits at
+    // −WALL_THICKNESS) instead of z-fighting a coplanar face with it.
+    const depth = WALL_THICKNESS + 0.08;
+    const g = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false });
+    g.translate(0, 0, -depth); // front face at z = 0
     return g;
   }, [gable]);
   useEffect(() => () => geo.dispose(), [geo]);

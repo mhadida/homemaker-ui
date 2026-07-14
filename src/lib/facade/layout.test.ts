@@ -744,3 +744,25 @@ describe("passage (pass-through carriage arch)", () => {
     expect(() => computeLayout(passageParams({ storeys: 1 }))).not.toThrow();
   });
 });
+
+describe("shaped gable (computeLayout)", () => {
+  it("no gableStyle → layout.gable is null (byte-identical)", () => {
+    expect(computeLayout(DEFAULT_FACADE).gable).toBeNull();
+  });
+
+  it("a gableStyle populates layout.gable and suppresses cornice/parapet", () => {
+    const l = computeLayout(
+      p({
+        gableStyle: "curved",
+        gableHeight: 3,
+        ornament: { cornice: true, parapet: true, sills: true, surrounds: false },
+      }),
+    );
+    expect(l.gable).not.toBeNull();
+    expect(l.gable!.style).toBe("curved");
+    expect(l.gable!.baseY).toBeCloseTo(l.wallTop, 9);
+    // the gable replaces the wall-top ornament (would otherwise poke through)
+    expect(l.cornice).toBeNull();
+    expect(l.parapet).toBeNull();
+  });
+});

@@ -53,8 +53,12 @@ describe("gableProfile", () => {
     for (let i = 1; i < leftUp.length; i++) {
       expect(leftUp[i][1]).toBeGreaterThanOrEqual(leftUp[i - 1][1] - 1e-9);
     }
-    // treads (horizontal) and risers (vertical) alternate → GABLE_STEPS treads
-    expect(GABLE_STEPS).toBe(4);
+    // count treads (horizontal segments) in the left half → GABLE_STEPS
+    let treads = 0;
+    for (let i = 1; i < leftUp.length; i++) {
+      if (Math.abs(leftUp[i][1] - leftUp[i - 1][1]) < 1e-9 && Math.abs(leftUp[i][0] - leftUp[i - 1][0]) > 1e-9) treads++;
+    }
+    expect(treads).toBe(GABLE_STEPS);
   });
 
   it("curved gable produces a smooth many-point silhouette", () => {
