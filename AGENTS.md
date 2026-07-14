@@ -29,7 +29,7 @@ Four parts work together:
 | MCP server (dev only) | `uv run ../homemaker-blender/mcp_server.py` | Bridges agents to a running Blender; lives in the sibling repo |
 | Tests | `npm test` | vitest — src/lib/facade unit tests |
 
-**Tests:** vitest covers the pure facade modules — layout engine (incl. section strips), prompt parser, street generator (`refit`/`deleteLot`), node welding, corner detection/sync/miters, and section edit helpers (`src/lib/facade/*.test.ts`) — run `npm test`. No e2e/playwright; everything else is verified visually.
+**Tests:** vitest covers the pure facade modules — layout engine (incl. section strips), prompt parser, street generator (`refit`/`deleteLot`), node welding, corner detection/sync/miters, section edit helpers, and street-aware orientation (`src/lib/facade/*.test.ts`) — run `npm test`. No e2e/playwright; everything else is verified visually.
 
 ## Blender is NOT a runtime dependency of the web app
 
@@ -148,6 +148,17 @@ NOT involved; every edit is live (no Update button). Spec:
   tilt to the slope. `slope 0` = flat = byte-identical. Per-node/heightfield
   "arbitrary" topography deferred. Spec:
   `docs/superpowers/specs/2026-07-14-topography-design.md`.
+- **Street awareness**: a centreline + mirror (far-frontage) derive live from
+  the first block's facade normal (`src/lib/facade/street.ts` pure —
+  `streetRefOf`, `streetLines`, `streetAwareFlipped`, `resolveFacing`; width a
+  page-state slider, default 14 m). New blocks drawn inside the street
+  corridor auto-orient their facade toward the centreline (fixes "inside-out"
+  drawing); the pen shows a live green facing tick and `f` flips it
+  (`resolveFacing` = street-aware auto XOR the f-toggle). The first block (no
+  reference yet) is oriented by `f` alone and then defines the street.
+  Construction guides render in the plan pane only; orientation applies on
+  creation only. Spec:
+  `docs/superpowers/specs/2026-07-14-street-awareness-design.md`.
 - **AI prompt**: `/api/facade-prompt` (flat fully-required zod spec — OpenAI
   structured output rejects optionals) targets the selected lot, plus an
   instant local keyword parser.
