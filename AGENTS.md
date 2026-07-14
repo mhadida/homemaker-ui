@@ -162,6 +162,16 @@ NOT involved; every edit is live (no Update button). Spec:
   oriented by `f` alone and then defines the street. Guides render in the
   plan pane only; orientation applies on creation only. Spec:
   `docs/superpowers/specs/2026-07-14-street-awareness-design.md`.
+- **Save / Load**: the whole scene is a JSON-native object graph, so
+  persistence is a versioned `FacadeDocument` (`src/lib/facade/document.ts`
+  pure — `serializeScene`/`toJSON`, `deserializeScene`/`fromJSON`;
+  `cornerChoices` Map ⇄ entries; `deserializeScene` validates version + block
+  shape and defaults missing scalars, never throws). Header **Save** downloads
+  `facade-scene.json`, **Load** imports one; a debounced localStorage autosave
+  (`facademaker:autosave`) restores the scene on refresh. `reserveBlockIds`
+  (blocks.ts) bumps the session id counter past loaded ids so drawn blocks
+  never collide. No backend. Spec:
+  `docs/superpowers/specs/2026-07-14-save-load-design.md`.
 - **AI prompt**: `/api/facade-prompt` (flat fully-required zod spec — OpenAI
   structured output rejects optionals) targets the selected lot, plus an
   instant local keyword parser.

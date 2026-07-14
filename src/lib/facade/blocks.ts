@@ -137,6 +137,16 @@ export function nextBlockId(): string {
   return `block-${idCounter}`;
 }
 
+/** After loading a saved scene, bump the id counter past every loaded
+ * `block-N` id so freshly-drawn blocks can never collide with loaded ones.
+ * (Ids are session-local strings; only the numeric suffix matters.) */
+export function reserveBlockIds(blocks: FacadeBlock[]): void {
+  for (const b of blocks) {
+    const m = /^block-(\d+)$/.exec(b.id);
+    if (m) idCounter = Math.max(idCounter, Number(m[1]));
+  }
+}
+
 /** The v1 single-facade world: one block, one unpinned lot. */
 export function initialWorld(params: FacadeParams): FacadeBlock {
   return {
