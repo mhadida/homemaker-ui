@@ -984,12 +984,17 @@ function PlanPane({
         near={0.1}
         far={200}
       />
+      {/* Keep the control ENABLED so wheel-zoom always works (even while
+       * drawing / node-dragging / marquee-dragging); gate only PAN so a
+       * left-drag can't hijack a draw click or a marquee sweep. Rotate is off
+       * for the top-down plan. The pan gate mirrors the old `enabled`
+       * expression, so pan-suppression timing is unchanged. */}
       <MapControls
         makeDefault
         enableRotate={false}
+        enablePan={!drawMode && !nodeDrag && !selectMode}
         target={target}
         zoomSpeed={1}
-        enabled={!drawMode && !nodeDrag && !selectMode}
       />
     </>
   );
