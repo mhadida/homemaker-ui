@@ -287,7 +287,11 @@ function PenSurface({
           } else {
             setPath([...path, target]);
             if (chainBase === null) setChainBase(base);
-            setChainIds([...chainIds, id]);
+            // Sync the ref NOW (not just via the effect) so an f pressed in
+            // the same tick as this commit still flips the new segment.
+            const nextIds = [...chainIds, id];
+            chainIdsRef.current = nextIds;
+            setChainIds(nextIds);
           }
         }}
         onPointerMove={(e) =>
