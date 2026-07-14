@@ -96,7 +96,7 @@ describe("deserialize validation", () => {
     if (!res.ok) expect(res.error).toMatch(/version/i);
   });
   it("rejects a missing blocks array", () => {
-    const doc = serializeScene(scene()) as Record<string, unknown>;
+    const doc = serializeScene(scene()) as unknown as Record<string, unknown>;
     delete doc.blocks;
     expect(deserializeScene(doc).ok).toBe(false);
   });
@@ -117,6 +117,83 @@ describe("deserialize validation", () => {
     const res = fromJSON("{not json");
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toMatch(/json/i);
+  });
+});
+
+describe("params normalization (partial lots render safe)", () => {
+  it("fills missing nested groundFloor/ornament from defaults", () => {
+    const res = deserializeScene({
+      version: SCENE_VERSION,
+      blocks: [
+        {
+          id: "block-1",
+          line: { a: [0, 0], b: [6, 0] },
+          flipped: false,
+          gen: structuredClone(DEFAULT_GEN),
+          seed: 3,
+          lots: [{ params: { width: 6 }, customized: false }], // no groundFloor/ornament
+        },
+      ],
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const p = res.scene.blocks[0].lots[0].params;
+    // the fields computeLayout dereferences unguarded are now present
+    expect(p.groundFloor).toEqual(DEFAULT_FACADE.groundFloor);
+    expect(p.ornament).toEqual(DEFAULT_FACADE.ornament);
+    expect(p.width).toBe(6);
+  });
+  it("rejects a lot whose params is null/non-object (graceful error, no crash)", () => {
+    const bad = {
+      version: SCENE_VERSION,
+      blocks: [
+        {
+          id: "block-1",
+          line: { a: [0, 0], b: [6, 0] },
+          flipped: false,
+          gen: structuredClone(DEFAULT_GEN),
+          seed: 3,
+          lots: [{ params: null }],
+        },
+      ],
+    };
+    expect(deserializeScene(bad).ok).toBe(false);
+  });
+  it("round-trips optional facade fields (sections, massingDepth, roofType)", () => {
+    const s: SceneState = {
+      blocks: [
+        {
+          ...mkBlock("block-1", [0, 0], [8, 0], [8]),
+          lots: [
+            {
+              params: {
+                ...DEFAULT_FACADE,
+                width: 8,
+                massingDepth: 11,
+                roofType: "hip",
+                roofColor: "red",
+                sections: [{ bays: 2, offset: 0.1 }],
+              },
+              customized: true,
+              depthOffset: 0.07,
+            },
+          ],
+        },
+      ],
+      cornerChoices: new Map(),
+      ground: DEFAULT_GROUND,
+      streetWidth: STREET_WIDTH_DEFAULT,
+      maxCornerAngle: DEFAULT_MAX_CORNER_ANGLE,
+    };
+    const res = fromJSON(toJSON(s));
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const lot = res.scene.blocks[0].lots[0];
+    expect(lot.params.massingDepth).toBe(11);
+    expect(lot.params.roofType).toBe("hip");
+    expect(lot.params.sections).toEqual([{ bays: 2, offset: 0.1 }]);
+    expect(lot.depthOffset).toBe(0.07);
+    expect(lot.customized).toBe(true);
   });
 });
 

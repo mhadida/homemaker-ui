@@ -4,6 +4,8 @@ import { DEFAULT_MAX_CORNER_ANGLE } from "./corners";
 import type { Ground } from "./terrain";
 import { DEFAULT_GROUND } from "./terrain";
 import { STREET_WIDTH_DEFAULT } from "./street";
+import type { FacadeParams } from "./types";
+import { DEFAULT_FACADE } from "./types";
 
 /** Bump when the on-disk shape changes incompatibly. Loaders reject unknown
  * versions rather than silently mis-reading (beta data-preservation rule). */
@@ -63,23 +65,50 @@ function validLine(line: unknown): boolean {
   return pt(l.a) && pt(l.b);
 }
 
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null;
+
 /** Structural validation of one block — enough to keep the renderer from
- * crashing (id, line endpoints, a non-empty lots array). Deep per-field
- * facade validation is intentionally NOT done: the layout engine already
- * clamps every FacadeParams field, so a stale/partial lot renders safely. */
+ * crashing (id, line endpoints, a non-empty lots array whose lots each carry
+ * an object `params`). Missing scalar fields are tolerated (the layout engine
+ * clamps them); missing NESTED objects are filled by normalizeParams below,
+ * which is what makes "partial lot renders safely" actually true. A
+ * non-object `params` is genuinely broken and rejected (graceful error). */
 function validBlock(b: unknown): boolean {
-  if (typeof b !== "object" || b === null) return false;
-  const x = b as Record<string, unknown>;
   return (
-    typeof x.id === "string" &&
-    typeof x.flipped === "boolean" &&
-    validLine(x.line) &&
-    Array.isArray(x.lots) &&
-    x.lots.length > 0 &&
-    x.lots.every(
-      (l) => typeof l === "object" && l !== null && "params" in l,
-    )
+    isObject(b) &&
+    typeof b.id === "string" &&
+    typeof b.flipped === "boolean" &&
+    validLine(b.line) &&
+    Array.isArray(b.lots) &&
+    b.lots.length > 0 &&
+    b.lots.every((l) => isObject(l) && isObject((l as { params?: unknown }).params))
   );
+}
+
+/** Fill any missing FacadeParams fields from DEFAULT_FACADE — critically the
+ * nested `groundFloor`/`ornament` objects that computeLayout dereferences
+ * unguarded — so a partial/hand-edited lot renders instead of crashing. */
+function normalizeParams(raw: Record<string, unknown>): FacadeParams {
+  const gf = isObject(raw.groundFloor) ? raw.groundFloor : {};
+  const orn = isObject(raw.ornament) ? raw.ornament : {};
+  return {
+    ...DEFAULT_FACADE,
+    ...raw,
+    groundFloor: { ...DEFAULT_FACADE.groundFloor, ...gf },
+    ornament: { ...DEFAULT_FACADE.ornament, ...orn },
+  } as FacadeParams;
+}
+
+/** Normalize every lot's params so the loaded blocks are render-safe. */
+function normalizeBlocks(blocks: Record<string, unknown>[]): FacadeBlock[] {
+  return blocks.map((b) => ({
+    ...(b as unknown as FacadeBlock),
+    lots: (b.lots as Record<string, unknown>[]).map((l) => ({
+      ...(l as { customized?: boolean; depthOffset?: number }),
+      params: normalizeParams(l.params as Record<string, unknown>),
+    })),
+  })) as FacadeBlock[];
 }
 
 /** Pure: validate + normalize a parsed document into live scene state.
@@ -121,7 +150,7 @@ export function deserializeScene(raw: unknown): LoadResult {
   return {
     ok: true,
     scene: {
-      blocks: doc.blocks as FacadeBlock[],
+      blocks: normalizeBlocks(doc.blocks as Record<string, unknown>[]),
       cornerChoices,
       ground,
       streetWidth: isFiniteNumber(doc.streetWidth)

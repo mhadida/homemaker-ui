@@ -271,8 +271,12 @@ export default function FacadePage() {
     const a = document.createElement("a");
     a.href = url;
     a.download = "facade-scene.json";
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    a.remove();
+    // Defer the revoke so the download has surely started (revoking on the
+    // same tick is the fragile variant).
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
   }, [blocks, cornerChoices, ground, streetWidth, maxCornerAngle]);
 
   const handleLoadFile = useCallback(
@@ -305,9 +309,17 @@ export default function FacadePage() {
   }, [applyScene]);
 
   // Debounced autosave — one write 500 ms after the last change, so live
-  // node drags don't hammer localStorage every frame.
+  // node drags don't hammer localStorage every frame. Emptying a scene
+  // clears the key so a refresh doesn't resurrect deleted buildings — but
+  // ONLY after the scene has actually held blocks this session, so the
+  // mount-time empty pass can't wipe a good save before restore lands.
+  const everHadBlocksRef = useRef(false);
   useEffect(() => {
-    if (blocks.length === 0) return;
+    if (blocks.length === 0) {
+      if (everHadBlocksRef.current) window.localStorage.removeItem(AUTOSAVE_KEY);
+      return;
+    }
+    everHadBlocksRef.current = true;
     const id = window.setTimeout(() => {
       window.localStorage.setItem(
         AUTOSAVE_KEY,
