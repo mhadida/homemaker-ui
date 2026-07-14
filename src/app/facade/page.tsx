@@ -41,9 +41,20 @@ import {
   type CornerChoice,
   type Corner,
 } from "@/lib/facade/corners";
+import {
+  hitTest,
+  normalizeRect,
+  marqueeEmpty,
+  affectedBlockIds,
+  deleteMarquee,
+  translateMarquee,
+  type Marquee,
+} from "@/lib/facade/marquee";
 import type { ViewSettings } from "@/lib/building/types";
 import { WALL_SWATCHES } from "@/lib/building/types";
-import FacadeControls from "@/components/facade/FacadeControls";
+import FacadeControls, {
+  MarqueeControls,
+} from "@/components/facade/FacadeControls";
 import PromptInput from "@/components/demo/PromptInput";
 
 const FacadeViewer = dynamic(() => import("@/components/facade/FacadeViewer"), {
@@ -218,6 +229,16 @@ export default function FacadePage() {
   const [maxCornerAngle, setMaxCornerAngle] = useState(DEFAULT_MAX_CORNER_ANGLE);
   const [ground, setGround] = useState<Ground>(DEFAULT_GROUND);
   const [streetWidth, setStreetWidth] = useState(STREET_WIDTH_DEFAULT);
+  // Marquee (rubber-band) multi-selection. Coexists with single `selected`:
+  // a plain click sets `selected` + clears this; a marquee sets this + clears
+  // `selected`. null (the default, Select tool off) → every existing path is
+  // byte-identical.
+  const [marquee, setMarquee] = useState<Marquee | null>(null);
+  // Snapshot of blocks+marquee at the start of a live move drag, so each frame
+  // translates the ORIGINAL by the cumulative delta (no double-application).
+  const moveDragRef = useRef<{ blocks: FacadeBlock[]; marquee: Marquee } | null>(
+    null,
+  );
 
   // The street is derived from the first (earliest surviving) block: its
   // facade normal defines which side the street is on. null in the blank
@@ -363,6 +384,131 @@ export default function FacadePage() {
     );
   }, [blocks, selected, cornerChoices, maxCornerAngle]);
 
+  // ── Marquee (rubber-band) multi-selection ────────────────────────────────
+  const handleMarquee = useCallback(
+    (a: [number, number], b: [number, number]) => {
+      const m = hitTest(blocks, normalizeRect(a, b));
+      if (marqueeEmpty(m)) {
+        setMarquee(null);
+        return;
+      }
+      setMarquee(m);
+      setSelected(null); // a marquee supersedes the single selection
+    },
+    [blocks],
+  );
+
+  const handleMarqueeClear = useCallback(() => setMarquee(null), []);
+
+  const handleMarqueeDelete = useCallback(() => {
+    if (!marquee) return;
+    setBlocks(
+      syncCorners(deleteMarquee(blocks, marquee), cornerChoices, maxCornerAngle),
+    );
+    setMarquee(null);
+    setSelected(null);
+  }, [blocks, marquee, cornerChoices, maxCornerAngle]);
+
+  const handleMarqueeReroll = useCallback(() => {
+    if (!marquee) return;
+    const ids = affectedBlockIds(marquee, blocks);
+    setBlocks(
+      syncCorners(
+        blocks.map((b) =>
+          ids.has(b.id) ? rerollBlock(b, Math.floor(Math.random() * 1e9)) : b,
+        ),
+        cornerChoices,
+        maxCornerAngle,
+      ),
+    );
+  }, [blocks, marquee, cornerChoices, maxCornerAngle]);
+
+  // Bulk restyle: apply `fn` to every selected lot (enclosed block → all lots;
+  // partial block → its selected lots), pin them, then sync line + corners.
+  const handleMarqueeApply = useCallback(
+    (fn: (p: FacadeParams) => FacadeParams) => {
+      if (!marquee) return;
+      const enclosed = new Set(marquee.blocks);
+      const lotSel = new Map<string, Set<number>>();
+      for (const key of marquee.lots) {
+        const sep = key.lastIndexOf(":");
+        const id = key.slice(0, sep);
+        const idx = Number(key.slice(sep + 1));
+        const s = lotSel.get(id) ?? new Set<number>();
+        s.add(idx);
+        lotSel.set(id, s);
+      }
+      setBlocks((bs) =>
+        syncCorners(
+          bs.map((b) => {
+            const all = enclosed.has(b.id);
+            const partial = lotSel.get(b.id);
+            if (!all && !partial) return b;
+            const lots = b.lots.map((l, i) =>
+              all || partial?.has(i)
+                ? { ...l, params: fn(l.params), customized: true }
+                : l,
+            );
+            return syncLineToLots({ ...b, lots });
+          }),
+          cornerChoices,
+          maxCornerAngle,
+        ),
+      );
+    },
+    [marquee, cornerChoices, maxCornerAngle],
+  );
+
+  const handleMarqueeMoveStart = useCallback(() => {
+    if (!marquee) return;
+    moveDragRef.current = { blocks, marquee };
+  }, [blocks, marquee]);
+
+  const handleMarqueeMove = useCallback(
+    (dx: number, dz: number) => {
+      const snap = moveDragRef.current;
+      if (!snap) return;
+      setBlocks(
+        syncCorners(
+          translateMarquee(snap.blocks, snap.marquee, dx, dz),
+          cornerChoices,
+          maxCornerAngle,
+        ),
+      );
+    },
+    [cornerChoices, maxCornerAngle],
+  );
+
+  const handleMarqueeMoveEnd = useCallback(
+    (dx: number, dz: number) => {
+      const snap = moveDragRef.current;
+      moveDragRef.current = null;
+      if (!snap) return;
+      setBlocks(
+        syncCorners(
+          translateMarquee(snap.blocks, snap.marquee, dx, dz),
+          cornerChoices,
+          maxCornerAngle,
+        ),
+      );
+      // Shift the marquee's loose-node positions so later highlights/ops track
+      // the moved geometry (enclosed-block ids are unchanged by a rigid move).
+      if (dx !== 0 || dz !== 0) {
+        setMarquee((m) =>
+          m
+            ? {
+                ...m,
+                nodes: m.nodes.map(
+                  ([x, z]) => [x + dx, z + dz] as [number, number],
+                ),
+              }
+            : m,
+        );
+      }
+    },
+    [cornerChoices, maxCornerAngle],
+  );
+
   // Delete/Backspace removes the selection: the selected lot (street refits,
   // length preserved) or the whole block at block level / last lot. Direct —
   // no two-step confirm for keyboard deletion. Skipped while typing.
@@ -379,6 +525,12 @@ export default function FacadePage() {
           t.isContentEditable)
       )
         return;
+      // A live marquee takes precedence: Delete removes the whole selection.
+      if (marquee) {
+        e.preventDefault();
+        handleMarqueeDelete();
+        return;
+      }
       // Backspace muscle-memory from pen tools must not nuke the selection
       // while the user is mid-sketch on a street.
       if (drawActive) return;
@@ -416,6 +568,8 @@ export default function FacadePage() {
     handleDeleteBlock,
     cornerChoices,
     maxCornerAngle,
+    marquee,
+    handleMarqueeDelete,
   ]);
 
   const handleSelectionLevel = useCallback(
@@ -651,12 +805,26 @@ export default function FacadePage() {
             ground={ground}
             streetRef={streetRef}
             streetWidth={streetWidth}
+            marquee={marquee}
+            onMarquee={handleMarquee}
+            onMarqueeClear={handleMarqueeClear}
+            onMarqueeMoveStart={handleMarqueeMoveStart}
+            onMarqueeMove={handleMarqueeMove}
+            onMarqueeMoveEnd={handleMarqueeMoveEnd}
           />
         </div>
 
         <div className="w-full md:w-80 border-t md:border-t-0 md:border-l border-[var(--border)] bg-[var(--panel-bg)] overflow-y-auto">
           <div className="p-4 space-y-5">
-            {selected && selectedBlock && params ? (
+            {marquee ? (
+              <MarqueeControls
+                marquee={marquee}
+                onDelete={handleMarqueeDelete}
+                onReroll={handleMarqueeReroll}
+                onApply={handleMarqueeApply}
+                onClear={handleMarqueeClear}
+              />
+            ) : selected && selectedBlock && params ? (
               <>
                 <div>
                   <PromptInput

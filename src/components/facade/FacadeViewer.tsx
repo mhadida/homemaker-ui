@@ -34,6 +34,7 @@ import {
 } from "@/lib/facade/blocks";
 import type { Corner } from "@/lib/facade/corners";
 import type { Ground } from "@/lib/facade/terrain";
+import { marqueeEmpty, type Marquee } from "@/lib/facade/marquee";
 import {
   streetLines,
   streetAwareFlipped,
@@ -64,6 +65,13 @@ interface FacadeViewerProps {
    * the plan-pane construction guides. null in the blank world. */
   streetRef: StreetRef | null;
   streetWidth: number;
+  /** Marquee (rubber-band) multi-selection. null → the Select tool is idle. */
+  marquee: Marquee | null;
+  onMarquee: (a: [number, number], b: [number, number]) => void;
+  onMarqueeClear: () => void;
+  onMarqueeMoveStart: () => void;
+  onMarqueeMove: (dx: number, dz: number) => void;
+  onMarqueeMoveEnd: (dx: number, dz: number) => void;
 }
 
 type PaneId = "plan" | "perspective" | "overview" | "detail";
@@ -330,6 +338,246 @@ function PenSurface({
   );
 }
 
+// ── Marquee (rubber-band) multi-selection surface ───────────────────────────
+
+const MARQUEE_COLOR = "#38bdf8"; // sky-blue rubber band
+/** Sub-threshold drags (m) are treated as a click → clear the selection. */
+const MARQUEE_CLICK_EPS = 0.4;
+/** Padding (m) around the selection bbox that still counts as "inside" for
+ * starting a move drag rather than a fresh rectangle. */
+const MARQUEE_MOVE_PAD = 1.5;
+
+interface Bounds {
+  x0: number;
+  x1: number;
+  z0: number;
+  z1: number;
+}
+
+/** Plan bbox of the current selection (enclosed block endpoints, selected lot
+ * centers, node points). null when the marquee is empty. */
+function marqueeBounds(blocks: FacadeBlock[], marquee: Marquee | null): Bounds | null {
+  if (!marquee) return null;
+  const byId = new Map(blocks.map((b) => [b.id, b]));
+  const xs: number[] = [];
+  const zs: number[] = [];
+  const push = (x: number, z: number) => {
+    xs.push(x);
+    zs.push(z);
+  };
+  for (const id of marquee.blocks) {
+    const b = byId.get(id);
+    if (!b) continue;
+    push(b.line.a[0], b.line.a[1]);
+    push(b.line.b[0], b.line.b[1]);
+  }
+  for (const key of marquee.lots) {
+    const sep = key.lastIndexOf(":");
+    const b = byId.get(key.slice(0, sep));
+    if (!b) continue;
+    const p = lotPlacements(b)[Number(key.slice(sep + 1))];
+    if (p) push(p.position[0], p.position[2]);
+  }
+  for (const [x, z] of marquee.nodes) push(x, z);
+  if (xs.length === 0) return null;
+  return {
+    x0: Math.min(...xs),
+    x1: Math.max(...xs),
+    z0: Math.min(...zs),
+    z1: Math.max(...zs),
+  };
+}
+
+/** Rubber-band surface (plan pane only). A left-drag on empty space sweeps a
+ * new rectangle (pointerup → onMarquee); a drag that starts inside the current
+ * selection bbox translates it live (onMarqueeMove*). A sub-threshold click
+ * clears. Mirrors PenSurface's invisible catcher + NodeHandles' window-
+ * pointerup drag lifecycle. */
+function MarqueeSurface({
+  blocks,
+  active,
+  marquee,
+  onMarquee,
+  onMarqueeClear,
+  onMoveStart,
+  onMove,
+  onMoveEnd,
+  onInteractionEnd,
+}: {
+  blocks: FacadeBlock[];
+  active: boolean;
+  marquee: Marquee | null;
+  onMarquee: (a: [number, number], b: [number, number]) => void;
+  onMarqueeClear: () => void;
+  onMoveStart: () => void;
+  onMove: (dx: number, dz: number) => void;
+  onMoveEnd: (dx: number, dz: number) => void;
+  onInteractionEnd: () => void;
+}) {
+  const [rect, setRect] = useState<{ a: [number, number]; b: [number, number] } | null>(
+    null,
+  );
+  const modeRef = useRef<"rect" | "move" | null>(null);
+  const anchorRef = useRef<[number, number] | null>(null);
+  const lastRef = useRef<[number, number] | null>(null);
+
+  const reset = useCallback(() => {
+    modeRef.current = null;
+    anchorRef.current = null;
+    lastRef.current = null;
+    setRect(null);
+  }, []);
+
+  const finalize = useCallback(() => {
+    const mode = modeRef.current;
+    const anchor = anchorRef.current;
+    const last = lastRef.current ?? anchor;
+    reset();
+    // Guard on `active`: finalizeRef always holds the latest closure, so a
+    // pointerup arriving after the tool was switched off cancels cleanly.
+    if (!active || !mode || !anchor || !last) return;
+    onInteractionEnd(); // suppress the synthesized click after this drag
+    const dx = last[0] - anchor[0];
+    const dz = last[1] - anchor[1];
+    if (mode === "move") {
+      onMoveEnd(dx, dz);
+    } else if (Math.hypot(dx, dz) < MARQUEE_CLICK_EPS) {
+      onMarqueeClear(); // a click clears the selection
+    } else {
+      onMarquee(anchor, last);
+    }
+  }, [active, reset, onInteractionEnd, onMoveEnd, onMarqueeClear, onMarquee]);
+
+  // Kept fresh for the imperative window pointerup listener (deps-less effect,
+  // mirroring NodeHandles' endDragRef).
+  const finalizeRef = useRef(finalize);
+  useEffect(() => {
+    finalizeRef.current = finalize;
+  });
+
+  // Escape clears an in-progress drag + the whole selection while active.
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target;
+      if (
+        t instanceof HTMLElement &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.tagName === "SELECT" ||
+          t.isContentEditable)
+      )
+        return;
+      if (e.key === "Escape") {
+        reset();
+        onMarqueeClear();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, reset, onMarqueeClear]);
+
+  // Clear the visible rectangle when the tool is switched off (render-time
+  // state reset, matching PenSurface — refs are cleared by finalize, which
+  // no-ops once inactive). setRect only; no ref access during render.
+  const [wasActive, setWasActive] = useState(active);
+  if (active !== wasActive) {
+    setWasActive(active);
+    if (!active) setRect(null);
+  }
+
+  if (!active) return null;
+
+  const box = rect
+    ? {
+        x0: Math.min(rect.a[0], rect.b[0]),
+        x1: Math.max(rect.a[0], rect.b[0]),
+        z0: Math.min(rect.a[1], rect.b[1]),
+        z1: Math.max(rect.a[1], rect.b[1]),
+      }
+    : null;
+
+  return (
+    <>
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, 0.02, 0]}
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          const p: [number, number] = [e.point.x, e.point.z];
+          anchorRef.current = p;
+          lastRef.current = p;
+          const bounds = marqueeBounds(blocks, marquee);
+          const insideSel =
+            !!marquee &&
+            !marqueeEmpty(marquee) &&
+            !!bounds &&
+            p[0] >= bounds.x0 - MARQUEE_MOVE_PAD &&
+            p[0] <= bounds.x1 + MARQUEE_MOVE_PAD &&
+            p[1] >= bounds.z0 - MARQUEE_MOVE_PAD &&
+            p[1] <= bounds.z1 + MARQUEE_MOVE_PAD;
+          if (insideSel) {
+            modeRef.current = "move";
+            onMoveStart();
+          } else {
+            modeRef.current = "rect";
+            setRect({ a: p, b: p });
+          }
+          window.addEventListener("pointerup", () => finalizeRef.current(), {
+            once: true,
+          });
+        }}
+        onPointerMove={(e) => {
+          if (!modeRef.current || !anchorRef.current) return;
+          const p: [number, number] = [e.point.x, e.point.z];
+          lastRef.current = p;
+          if (modeRef.current === "rect") {
+            setRect({ a: anchorRef.current, b: p });
+          } else {
+            onMove(p[0] - anchorRef.current[0], p[1] - anchorRef.current[1]);
+          }
+        }}
+        onPointerUp={() => finalizeRef.current()}
+      >
+        <planeGeometry args={[600, 600]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+      {box && (
+        <>
+          <Line
+            points={[
+              [box.x0, 0.08, box.z0],
+              [box.x1, 0.08, box.z0],
+              [box.x1, 0.08, box.z1],
+              [box.x0, 0.08, box.z1],
+              [box.x0, 0.08, box.z0],
+            ]}
+            color={MARQUEE_COLOR}
+            lineWidth={1.5}
+          />
+          <mesh
+            position={[(box.x0 + box.x1) / 2, 0.04, (box.z0 + box.z1) / 2]}
+            rotation={[-Math.PI / 2, 0, 0]}
+          >
+            <planeGeometry
+              args={[
+                Math.max(box.x1 - box.x0, 0.01),
+                Math.max(box.z1 - box.z0, 0.01),
+              ]}
+            />
+            <meshBasicMaterial
+              color={MARQUEE_COLOR}
+              transparent
+              opacity={0.12}
+              depthWrite={false}
+            />
+          </mesh>
+        </>
+      )}
+    </>
+  );
+}
+
 /** The street centreline (dashed light) + mirror/far-frontage (dashed dim)
  * construction guides, plan pane only. */
 function StreetGuides({
@@ -579,6 +827,7 @@ function PlanPane({
   view,
   size,
   drawMode,
+  selectMode,
   onCommitLine,
   onFlipChain,
   onMoveNode,
@@ -588,6 +837,12 @@ function PlanPane({
   ground,
   streetRef,
   streetWidth,
+  marquee,
+  onMarquee,
+  onMarqueeClear,
+  onMarqueeMoveStart,
+  onMarqueeMove,
+  onMarqueeMoveEnd,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -595,6 +850,7 @@ function PlanPane({
   view: ViewSettings;
   size: { w: number; h: number };
   drawMode: boolean;
+  selectMode: boolean;
   onCommitLine: (
     a: [number, number],
     b: [number, number],
@@ -608,12 +864,24 @@ function PlanPane({
   ground: Ground;
   streetRef: StreetRef | null;
   streetWidth: number;
+  marquee: Marquee | null;
+  onMarquee: (a: [number, number], b: [number, number]) => void;
+  onMarqueeClear: () => void;
+  onMarqueeMoveStart: () => void;
+  onMarqueeMove: (dx: number, dz: number) => void;
+  onMarqueeMoveEnd: (dx: number, dz: number) => void;
 }) {
   const [nodeDrag, setNodeDrag] = useState(false);
   const dragEndAt = useRef(0);
   const handleDraggingChange = useCallback((dragging: boolean) => {
     if (!dragging) dragEndAt.current = performance.now();
     setNodeDrag(dragging);
+  }, []);
+  // A marquee interaction (rect sweep or move) synthesizes a click on release
+  // just like a node drag; reuse the same suppression window so it can't leak
+  // into a single-lot selection.
+  const suppressNextSelect = useCallback(() => {
+    dragEndAt.current = performance.now();
   }, []);
   // R3F synthesizes a click right after a drag's release, and the lot under
   // the release point was in the original pointerdown's hit set — no
@@ -676,6 +944,7 @@ function PlanPane({
         view={view}
         maxCornerAngle={maxCornerAngle}
         ground={ground}
+        marquee={marquee}
       />
       <StreetGuides streetRef={streetRef} streetWidth={streetWidth} />
       <PenSurface
@@ -686,9 +955,20 @@ function PlanPane({
         streetRef={streetRef}
         streetWidth={streetWidth}
       />
+      <MarqueeSurface
+        blocks={blocks}
+        active={selectMode}
+        marquee={marquee}
+        onMarquee={onMarquee}
+        onMarqueeClear={onMarqueeClear}
+        onMoveStart={onMarqueeMoveStart}
+        onMove={onMarqueeMove}
+        onMoveEnd={onMarqueeMoveEnd}
+        onInteractionEnd={suppressNextSelect}
+      />
       <NodeHandles
         blocks={blocks}
-        interactive={!drawMode}
+        interactive={!drawMode && !selectMode}
         onMoveNode={onMoveNode}
         onDraggingChange={handleDraggingChange}
         corners={corners}
@@ -709,7 +989,7 @@ function PlanPane({
         enableRotate={false}
         target={target}
         zoomSpeed={1}
-        enabled={!drawMode && !nodeDrag}
+        enabled={!drawMode && !nodeDrag && !selectMode}
       />
     </>
   );
@@ -722,6 +1002,7 @@ function PerspectivePane({
   view,
   maxCornerAngle,
   ground,
+  marquee,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -729,6 +1010,7 @@ function PerspectivePane({
   view: ViewSettings;
   maxCornerAngle: number;
   ground: Ground;
+  marquee: Marquee | null;
 }) {
   return (
     <>
@@ -739,6 +1021,7 @@ function PerspectivePane({
         view={view}
         maxCornerAngle={maxCornerAngle}
         ground={ground}
+        marquee={marquee}
       />
       <PerspectiveCamera
         makeDefault
@@ -779,6 +1062,7 @@ function ElevationPane({
   mode,
   maxCornerAngle,
   ground,
+  marquee,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -788,6 +1072,7 @@ function ElevationPane({
   mode: "overview" | "detail";
   maxCornerAngle: number;
   ground: Ground;
+  marquee: Marquee | null;
 }) {
   // Zero-block world: `block` is undefined. Hooks below must still run
   // unconditionally (Rules of Hooks) — every derived value falls back to a
@@ -881,6 +1166,7 @@ function ElevationPane({
         view={view}
         maxCornerAngle={maxCornerAngle}
         ground={ground}
+        marquee={marquee}
       />
       <OrthographicCamera
         ref={camRef}
@@ -920,6 +1206,12 @@ export default function FacadeViewer({
   ground,
   streetRef,
   streetWidth,
+  marquee,
+  onMarquee,
+  onMarqueeClear,
+  onMarqueeMoveStart,
+  onMarqueeMove,
+  onMarqueeMoveEnd,
 }: FacadeViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null!);
   const planRef = useRef<HTMLDivElement>(null);
@@ -937,14 +1229,33 @@ export default function FacadeViewer({
   // A blank world starts with the pen armed — the empty-state copy on the
   // right panel promises the pen is ready immediately.
   const [drawMode, setDrawMode] = useState(blocks.length === 0);
+  // The Select tool (marquee). Mutually exclusive with draw mode; off by
+  // default so every existing path is byte-identical.
+  const [selectMode, setSelectMode] = useState(false);
   useEffect(() => {
     onDrawModeChange?.(drawMode);
   }, [drawMode, onDrawModeChange]);
   // Re-arm the pen whenever the world returns to blank (e.g. the last block
   // was deleted) — the blank-canvas copy promises an armed pen.
   useEffect(() => {
-    if (blocks.length === 0) setDrawMode(true);
+    if (blocks.length === 0) {
+      setDrawMode(true);
+      setSelectMode(false);
+    }
   }, [blocks.length]);
+  const toggleDraw = useCallback(() => {
+    setDrawMode((d) => !d);
+    setSelectMode(false);
+  }, []);
+  const toggleSelect = useCallback(() => {
+    setDrawMode(false);
+    setSelectMode((s) => !s);
+  }, []);
+  // Tool-off clears the selection (matches Escape). Fires on mount too, where
+  // the marquee is already null (no-op).
+  useEffect(() => {
+    if (!selectMode) onMarqueeClear();
+  }, [selectMode, onMarqueeClear]);
   const [isDesktop, setIsDesktop] = useState(true);
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 768px)");
@@ -1009,15 +1320,22 @@ export default function FacadeViewer({
             view={view}
             size={planSize}
             drawMode={drawMode}
+            selectMode={selectMode}
             onCommitLine={onCommitLine}
             onFlipChain={onFlipChain}
             onMoveNode={onMoveNode}
             corners={corners}
             onSelectCorner={onSelectCorner}
             maxCornerAngle={maxCornerAngle}
-        ground={ground}
+            ground={ground}
             streetRef={streetRef}
             streetWidth={streetWidth}
+            marquee={marquee}
+            onMarquee={onMarquee}
+            onMarqueeClear={onMarqueeClear}
+            onMarqueeMoveStart={onMarqueeMoveStart}
+            onMarqueeMove={onMarqueeMove}
+            onMarqueeMoveEnd={onMarqueeMoveEnd}
           />
         );
       case "perspective":
@@ -1028,7 +1346,8 @@ export default function FacadeViewer({
             onSelectLot={onSelectLot}
             view={view}
             maxCornerAngle={maxCornerAngle}
-        ground={ground}
+            ground={ground}
+            marquee={marquee}
           />
         );
       case "overview":
@@ -1041,7 +1360,8 @@ export default function FacadeViewer({
             size={overviewSize}
             mode="overview"
             maxCornerAngle={maxCornerAngle}
-        ground={ground}
+            ground={ground}
+            marquee={marquee}
           />
         );
       case "detail":
@@ -1054,7 +1374,8 @@ export default function FacadeViewer({
             size={detailSize}
             mode="detail"
             maxCornerAngle={maxCornerAngle}
-        ground={ground}
+            ground={ground}
+            marquee={marquee}
           />
         );
     }
@@ -1092,27 +1413,46 @@ export default function FacadeViewer({
             <div className="absolute top-1.5 left-2 text-[10px] font-mono text-white/70 bg-black/40 rounded px-1.5 py-0.5 pointer-events-none">
               {p.label}
             </div>
-            {p.id === "plan" && drawMode && (
-              /* Uniform mode frame: the plan pane is the live drawing
-               * surface while the pen is armed. */
+            {p.id === "plan" && (drawMode || selectMode) && (
+              /* Uniform mode frame: the plan pane is the live drawing surface
+               * while the pen is armed, or the marquee surface while the
+               * Select tool is active (gold to distinguish). */
               <div
                 aria-hidden
-                className="absolute inset-0 pointer-events-none border-[3px] border-[var(--accent)] z-10"
+                className={`absolute inset-0 pointer-events-none border-[3px] z-10 ${
+                  drawMode ? "border-[var(--accent)]" : "border-[#d4a017]"
+                }`}
               />
             )}
             {p.id === "plan" && (
-              <button
-                type="button"
-                onClick={() => setDrawMode((d) => !d)}
-                aria-label={drawMode ? "Exit draw mode" : "Draw a street"}
-                className={`absolute top-1.5 left-16 z-20 flex h-7 items-center gap-1.5 rounded-full px-3 text-[11px] font-medium shadow-lg transition-colors ${
-                  drawMode
-                    ? "bg-[var(--accent)] text-white hover:brightness-110"
-                    : "bg-white/90 text-zinc-900 hover:bg-white"
-                }`}
-              >
-                {drawMode ? "✏ Drawing — Esc to end" : "✏ Draw street"}
-              </button>
+              <div className="absolute top-1.5 left-16 z-20 flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={toggleDraw}
+                  aria-label={drawMode ? "Exit draw mode" : "Draw a street"}
+                  className={`flex h-7 items-center gap-1.5 rounded-full px-3 text-[11px] font-medium shadow-lg transition-colors ${
+                    drawMode
+                      ? "bg-[var(--accent)] text-white hover:brightness-110"
+                      : "bg-white/90 text-zinc-900 hover:bg-white"
+                  }`}
+                >
+                  {drawMode ? "✏ Drawing — Esc to end" : "✏ Draw street"}
+                </button>
+                {blocks.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={toggleSelect}
+                    aria-label={selectMode ? "Exit select mode" : "Select tool"}
+                    className={`flex h-7 items-center gap-1.5 rounded-full px-3 text-[11px] font-medium shadow-lg transition-colors ${
+                      selectMode
+                        ? "bg-[#d4a017] text-white hover:brightness-110"
+                        : "bg-white/90 text-zinc-900 hover:bg-white"
+                    }`}
+                  >
+                    {selectMode ? "⬚ Selecting — Esc" : "⬚ Select"}
+                  </button>
+                )}
+              </div>
             )}
             {isDesktop && (
               <button

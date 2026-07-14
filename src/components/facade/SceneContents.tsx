@@ -14,6 +14,7 @@ import {
 } from "@/lib/facade/blocks";
 import { computeLayout, MASSING_DEPTH_DEFAULT } from "@/lib/facade/layout";
 import { detectCorners, miterFor, type LotMiter } from "@/lib/facade/corners";
+import type { Marquee } from "@/lib/facade/marquee";
 import {
   levelingFor,
   groundNormal,
@@ -119,6 +120,7 @@ function BlockGroup({
   miters,
   ground,
   cornerSides,
+  marqueeLots,
 }: {
   block: FacadeBlock;
   selected: Selection | null;
@@ -126,6 +128,9 @@ function BlockGroup({
   miters: Map<string, LotMiter>;
   ground: Ground;
   cornerSides: Set<string> | null;
+  /** Lot indices highlighted by a live marquee (whole enclosed block → all
+   * indices; partial block → its selected lots). */
+  marqueeLots: Set<number> | null;
 }) {
   const placements = useMemo(() => lotPlacements(block), [block]);
   const frame = useMemo(() => blockFrame(block), [block]);
@@ -171,7 +176,8 @@ function BlockGroup({
              * or a dissolved corner), fall back to the plain selected-lot
              * marker so the edited lot is always visibly highlighted. */}
             {((isSelectedBlock && selected?.lot === i && !cornerSides) ||
-              cornerSides?.has(`${block.id}:${i}`)) && (
+              cornerSides?.has(`${block.id}:${i}`) ||
+              marqueeLots?.has(i)) && (
               <SelectionMarker params={lot.params} />
             )}
           </group>
@@ -217,6 +223,7 @@ export default function SceneContents({
   view,
   maxCornerAngle,
   ground,
+  marquee = null,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -224,6 +231,9 @@ export default function SceneContents({
   view: ViewSettings;
   maxCornerAngle: number;
   ground: Ground;
+  /** Live marquee selection to highlight (blocks/lots via SelectionMarker,
+   * nodes via a gold ring). null → no marquee (byte-identical). */
+  marquee?: Marquee | null;
 }) {
   const groundGeo = useGroundGeometry();
   const groundQuat = useMemo(() => {
@@ -272,6 +282,27 @@ export default function SceneContents({
       `${c.b.blockId}:${c.b.lotIndex}`,
     ]);
   }, [selected, corners]);
+  // Marquee highlight: per-block lot-index sets (enclosed block → every lot;
+  // partial block → its selected lots) + gold rings at selected node points.
+  const marqueeLotsByBlock = useMemo(() => {
+    if (!marquee) return null;
+    const byId = new Map<string, FacadeBlock>(blocks.map((b) => [b.id, b]));
+    const map = new Map<string, Set<number>>();
+    const add = (id: string, i: number) => {
+      const s = map.get(id) ?? new Set<number>();
+      s.add(i);
+      map.set(id, s);
+    };
+    for (const id of marquee.blocks) {
+      const b = byId.get(id);
+      if (b) b.lots.forEach((_, i) => add(id, i));
+    }
+    for (const key of marquee.lots) {
+      const sep = key.lastIndexOf(":");
+      add(key.slice(0, sep), Number(key.slice(sep + 1)));
+    }
+    return map;
+  }, [marquee, blocks]);
   return (
     <>
       <ambientLight intensity={0.35} />
@@ -306,7 +337,23 @@ export default function SceneContents({
           miters={miters}
           ground={ground}
           cornerSides={cornerSides}
+          marqueeLots={marqueeLotsByBlock?.get(block.id) ?? null}
         />
+      ))}
+      {marquee?.nodes.map(([x, z]) => (
+        <mesh
+          key={`marquee-node-${x}:${z}`}
+          position={[x, groundHeightAt(x, z, ground) + 0.12, z]}
+          rotation={[-Math.PI / 2, 0, 0]}
+        >
+          <ringGeometry args={[0.6, 0.95, 28]} />
+          <meshBasicMaterial
+            color="#d4a017"
+            transparent
+            opacity={0.95}
+            depthWrite={false}
+          />
+        </mesh>
       ))}
       {/* Ground plane + grid tilt to the slope so buildings sit on it at
        * their datums. polygonOffset keeps the sidewalk/road/grid winning
