@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
+import { Line } from "@react-three/drei";
 import {
   computeLayout,
   WALL_THICKNESS,
@@ -10,6 +11,7 @@ import {
   type OpeningRect,
   type SectionStrip,
   type PassagePlan,
+  type GablePlan,
 } from "@/lib/facade/layout";
 import type { FacadeParams, WindowStyleId } from "@/lib/facade/types";
 import type { LotMiter } from "@/lib/facade/corners";
@@ -50,6 +52,48 @@ function buildRoofGeometry(plan: RoofPlan): THREE.BufferGeometry {
   geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geo.computeVertexNormals();
   return geo;
+}
+
+/** A shaped ("bent"/compound) front gable: the street wall panel rising above
+ * the eave into the curved/stepped silhouette, extruded to wall thickness with
+ * a thin trim coping tracing the profile. Facade-local; in the outer group. */
+function GableMesh({
+  gable,
+  wallColor,
+  trimColor,
+}: {
+  gable: GablePlan;
+  wallColor: string;
+  trimColor: string;
+}) {
+  const geo = useMemo(() => {
+    const p = gable.points;
+    const shape = new THREE.Shape();
+    shape.moveTo(p[0][0], gable.baseY + p[0][1]);
+    for (let i = 1; i < p.length; i++)
+      shape.lineTo(p[i][0], gable.baseY + p[i][1]);
+    shape.closePath(); // close along the eave (bottom) back to the start
+    const g = new THREE.ExtrudeGeometry(shape, {
+      depth: WALL_THICKNESS,
+      bevelEnabled: false,
+    });
+    g.translate(0, 0, -WALL_THICKNESS); // front face at z = 0
+    return g;
+  }, [gable]);
+  useEffect(() => () => geo.dispose(), [geo]);
+  // Coping outline: the shaped top edge, proud of the wall, in trim colour.
+  const coping = useMemo<[number, number, number][]>(
+    () => gable.points.map((pt) => [pt[0], gable.baseY + pt[1], 0.04]),
+    [gable],
+  );
+  return (
+    <group>
+      <mesh geometry={geo} castShadow receiveShadow>
+        <meshStandardMaterial color={wallColor} roughness={0.85} />
+      </mesh>
+      <Line points={coping} color={trimColor} lineWidth={2.5} />
+    </group>
+  );
 }
 
 type V3 = [number, number, number];
@@ -872,6 +916,15 @@ export default function FacadeMesh({
           roofColor={ROOF_COLORS[params.roofColor ?? "slate"]}
         />
       ))}
+
+      {/* Shaped front gable rising above the eave (null unless chosen). */}
+      {layout.gable && (
+        <GableMesh
+          gable={layout.gable}
+          wallColor={params.wallColor}
+          trimColor={params.trimColor}
+        />
+      )}
     </group>
   );
 }

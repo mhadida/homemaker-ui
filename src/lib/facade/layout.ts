@@ -1,5 +1,21 @@
 import type { FacadeParams, OpeningKind } from "./types";
 import { resolveRoof, roofDormers, type RoofPlan, type Dormer } from "./roof";
+import {
+  gableProfile,
+  GABLE_HEIGHT_MIN,
+  GABLE_HEIGHT_MAX,
+  GABLE_HEIGHT_DEFAULT,
+  type GableStyle,
+  type Vec2,
+} from "./gable";
+
+/** A resolved shaped front gable: its silhouette (facade-local x, y-above-eave)
+ * and the eave height it springs from. */
+export interface GablePlan {
+  style: GableStyle;
+  points: Vec2[];
+  baseY: number;
+}
 
 function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
@@ -222,6 +238,8 @@ export interface FacadeLayout {
   roof: RoofPlan | null;
   /** dormer windows on the roof's front slope (empty unless requested) */
   roofDormers: Dormer[];
+  /** shaped front gable rising above the eave, or null when plain */
+  gable: GablePlan | null;
   /** pass-through tunnel piercing one strip's mass, or null when no passage */
   passage: PassagePlan | null;
   /** wallTop + cornice + parapet */
@@ -412,6 +430,23 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
   const roofPlan = resolveRoof(params, wallTop, massingDepth);
   const dormers = roofDormers(roofPlan, Math.min(params.dormers ?? 0, bays));
 
+  // Shaped front gable (rises above the eave), when a style is chosen.
+  const gable: GablePlan | null = params.gableStyle
+    ? {
+        style: params.gableStyle,
+        points: gableProfile(
+          params.gableStyle,
+          width,
+          clamp(
+            params.gableHeight ?? GABLE_HEIGHT_DEFAULT,
+            GABLE_HEIGHT_MIN,
+            GABLE_HEIGHT_MAX,
+          ),
+        ),
+        baseY: wallTop,
+      }
+    : null;
+
   // Pass-through tunnel: the void the mesh cuts through the mass behind the
   // passage arch (full massing depth). null when there's no passage. Only a
   // GROUND-storey passage pierces the mass — an upper-storey one (only
@@ -453,6 +488,7 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
     massingDepth,
     roof: roofPlan,
     roofDormers: dormers,
+    gable,
     passage,
     totalHeight,
     storeyLevels,

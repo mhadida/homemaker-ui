@@ -112,6 +112,8 @@ export const SHELL_FIELDS = [
   "roofHeight",
   "roofColor",
   "dormers",
+  "gableStyle",
+  "gableHeight",
 ] as const;
 
 const lotOf = (blocks: FacadeBlock[], side: CornerSide) =>
@@ -187,6 +189,8 @@ function syncedParams(
     roofHeight: source.roofHeight,
     roofColor: source.roofColor,
     dormers: source.dormers,
+    gableStyle: source.gableStyle,
+    gableHeight: source.gableHeight,
   };
   if (unified) {
     const rhythm = source.width / source.bays;
@@ -218,6 +222,8 @@ function syncedParams(
     next.roofHeight === target.roofHeight &&
     next.roofColor === target.roofColor &&
     next.dormers === target.dormers &&
+    next.gableStyle === target.gableStyle &&
+    next.gableHeight === target.gableHeight &&
     (!unified ||
       (next.bays === target.bays &&
         next.windowWidthRatio === target.windowWidthRatio &&

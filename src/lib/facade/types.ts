@@ -105,6 +105,12 @@ export interface FacadeParams {
   /** Dormer windows on the street-facing roof slope (parallel pitched roofs
    * only). Absent/0 = none. Clamped to the bay count by the layout engine. */
   dormers?: number;
+  /** Shaped ("bent"/compound) front gable rising above the eave. Absent =
+   * none (plain wall top). */
+  gableStyle?: "curved" | "stepped";
+  /** Gable peak height above the eave, metres. Clamped [GABLE_HEIGHT_MIN,
+   * GABLE_HEIGHT_MAX]. Absent = GABLE_HEIGHT_DEFAULT. Ignored without a style. */
+  gableHeight?: number;
   groundFloor: GroundFloorConfig;
   ornament: OrnamentConfig;
   /** #RRGGBB — wall render color */

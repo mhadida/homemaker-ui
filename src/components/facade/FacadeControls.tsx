@@ -31,6 +31,11 @@ import {
   ROOF_HEIGHT_DEFAULT,
 } from "@/lib/facade/roof";
 import { GROUND_SLOPE_MAX, type Ground } from "@/lib/facade/terrain";
+import {
+  GABLE_HEIGHT_MIN,
+  GABLE_HEIGHT_MAX,
+  GABLE_HEIGHT_DEFAULT,
+} from "@/lib/facade/gable";
 import { STREET_WIDTH_MIN, STREET_WIDTH_MAX } from "@/lib/facade/street";
 import {
   withSectionCount,
@@ -526,6 +531,32 @@ export default function FacadeControls({
               />
             )}
           </>
+        )}
+      </Section>
+
+      <Section title="Gable">
+        <div className="grid grid-cols-3 gap-1">
+          {(["none", "curved", "stepped"] as const).map((g) => (
+            <Toggle
+              key={g}
+              label={g === "none" ? "None" : g === "curved" ? "Curved" : "Stepped"}
+              on={(params.gableStyle ?? "none") === g}
+              onClick={() =>
+                update({ gableStyle: g === "none" ? undefined : g })
+              }
+            />
+          ))}
+        </div>
+        {params.gableStyle && (
+          <SliderRow
+            label="Gable height"
+            value={params.gableHeight ?? GABLE_HEIGHT_DEFAULT}
+            display={`${(params.gableHeight ?? GABLE_HEIGHT_DEFAULT).toFixed(2)}m`}
+            min={GABLE_HEIGHT_MIN}
+            max={GABLE_HEIGHT_MAX}
+            step={0.25}
+            onChange={(gableHeight) => update({ gableHeight })}
+          />
         )}
       </Section>
 

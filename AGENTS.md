@@ -171,6 +171,15 @@ NOT involved; every edit is live (no Update button). Spec:
   watertight, no poke-through). `dormers` is a corner **shell** field (both
   wings match). Slider under Roof (parallel only). Absent/0 = byte-identical.
   Extends `docs/superpowers/specs/2026-07-14-roofs-design.md`.
+- **Shaped gables**: `FacadeParams.gableStyle` (`curved` Dutch ogee /
+  `stepped` crow-step) rises the street wall above the eave into an ornamental
+  silhouette (`src/lib/facade/gable.ts` pure — `gableProfile(style, width,
+  rise)` → symmetric outline points, sampled béziers / crow-steps);
+  `layout.gable: GablePlan`; `GableMesh` extrudes the profile to a wall panel
+  + a trim coping `<Line>`. `gableHeight` clamped `[GABLE_HEIGHT_MIN,MAX]`.
+  Gable style + height are corner **shell** fields. Section under Roof. Absent
+  = byte-identical. Spec:
+  `docs/superpowers/specs/2026-07-14-shaped-gables-design.md`.
 - **Pass-through arch**: a ground-floor treatment `"passage"` — a tall
   semicircular carriage arch at the door bay that pierces the massing box so
   you see through to behind (`src/lib/facade/layout.ts` — `resolveGrid` maps
