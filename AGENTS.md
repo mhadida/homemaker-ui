@@ -162,6 +162,14 @@ NOT involved; every edit is live (no Update button). Spec:
   oriented by `f` alone and then defines the street. Guides render in the
   plan pane only; orientation applies on creation only. Spec:
   `docs/superpowers/specs/2026-07-14-street-awareness-design.md`.
+- **Dormers**: `FacadeParams.dormers` (0..bays, clamped) adds gabled dormer
+  windows to the street-facing slope of a **parallel** pitched roof so it reads
+  as an occupied storey (Nyhavn). Pure `roofDormers(plan, count)` in `roof.ts`
+  (front-slope placements, empty for flat/perpendicular/too-shallow);
+  `layout.roofDormers`; `DormerMesh` in `FacadeMesh.tsx` (window + cheeks + a
+  little gable roof whose base buries in the opaque main roof). Slider under
+  Roof (parallel only). Absent/0 = byte-identical. Spec:
+  `docs/superpowers/specs/2026-07-14-corner-roof-design.md` (roof-storey work).
 - **Pass-through arch**: a ground-floor treatment `"passage"` — a tall
   semicircular carriage arch at the door bay that pierces the massing box so
   you see through to behind (`src/lib/facade/layout.ts` — `resolveGrid` maps

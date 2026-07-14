@@ -5,6 +5,8 @@ import {
   ROOF_HEIGHT_MIN,
   ROOF_HEIGHT_MAX,
   ROOF_HEIGHT_DEFAULT,
+  roofDormers,
+  DORMER_MAX,
 } from "./roof";
 import { WALL_THICKNESS } from "./layout";
 import { DEFAULT_FACADE, type FacadeParams } from "./types";
@@ -120,5 +122,54 @@ describe("roofTriangles", () => {
       expect(v[2]).toBeLessThanOrEqual(plan.zFront + 1e-9);
       expect(v[2]).toBeGreaterThanOrEqual(plan.zBack - 1e-9);
     }
+  });
+});
+
+describe("roofDormers", () => {
+  const plan = (o: Partial<FacadeParams> = {}) =>
+    resolveRoof(p({ roofType: "gable", roofOrientation: "parallel", roofHeight: 3, ...o }), WALLTOP, DEPTH);
+
+  it("none for a flat roof (null plan) or zero count", () => {
+    expect(roofDormers(null, 3)).toEqual([]);
+    expect(roofDormers(plan(), 0)).toEqual([]);
+  });
+
+  it("none on a perpendicular roof (front slope is a hip/gable end)", () => {
+    const perp = resolveRoof(
+      p({ roofType: "gable", roofOrientation: "perpendicular", roofHeight: 3 }),
+      WALLTOP,
+      DEPTH,
+    );
+    expect(roofDormers(perp, 3)).toEqual([]);
+  });
+
+  it("places `count` dormers spread across the roof width, within it", () => {
+    const pl = plan()!;
+    const ds = roofDormers(pl, 3);
+    expect(ds).toHaveLength(3);
+    for (const d of ds) {
+      expect(d.x - d.w / 2).toBeGreaterThanOrEqual(pl.x0 - 1e-9);
+      expect(d.x + d.w / 2).toBeLessThanOrEqual(pl.x1 + 1e-9);
+      expect(d.headY).toBeGreaterThan(d.sillY);
+      expect(d.sillY).toBeGreaterThan(pl.eaveY); // above the eave
+      expect(d.headY).toBeLessThan(pl.ridgeY); // under the ridge
+    }
+    // evenly spaced, ascending
+    expect(ds[0].x).toBeLessThan(ds[1].x);
+    expect(ds[1].x).toBeLessThan(ds[2].x);
+  });
+
+  it("clamps count to DORMER_MAX and floors fractional counts", () => {
+    expect(roofDormers(plan(), 99)).toHaveLength(DORMER_MAX);
+    expect(roofDormers(plan(), 2.9)).toHaveLength(2);
+  });
+
+  it("none when the rise is too shallow for a dormer", () => {
+    const shallow = resolveRoof(
+      p({ roofType: "gable", roofOrientation: "parallel", roofHeight: 0.5 }),
+      WALLTOP,
+      DEPTH,
+    );
+    expect(roofDormers(shallow, 3)).toEqual([]);
   });
 });

@@ -1,5 +1,5 @@
 import type { FacadeParams, OpeningKind } from "./types";
-import { resolveRoof, type RoofPlan } from "./roof";
+import { resolveRoof, roofDormers, type RoofPlan, type Dormer } from "./roof";
 
 function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
@@ -220,6 +220,8 @@ export interface FacadeLayout {
   massingDepth: number;
   /** roof plan over the mass, or null for a flat roof (no roof mesh) */
   roof: RoofPlan | null;
+  /** dormer windows on the roof's front slope (empty unless requested) */
+  roofDormers: Dormer[];
   /** pass-through tunnel piercing one strip's mass, or null when no passage */
   passage: PassagePlan | null;
   /** wallTop + cornice + parapet */
@@ -406,6 +408,10 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
     : [];
   const surrounds = params.ornament.surrounds ? [...windows] : [];
 
+  // Roof + dormers (dormer count clamped to the bay count).
+  const roofPlan = resolveRoof(params, wallTop, massingDepth);
+  const dormers = roofDormers(roofPlan, Math.min(params.dormers ?? 0, bays));
+
   // Pass-through tunnel: the void the mesh cuts through the mass behind the
   // passage arch (full massing depth). null when there's no passage. Only a
   // GROUND-storey passage pierces the mass — an upper-storey one (only
@@ -445,7 +451,8 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
     width,
     wallTop,
     massingDepth,
-    roof: resolveRoof(params, wallTop, massingDepth),
+    roof: roofPlan,
+    roofDormers: dormers,
     passage,
     totalHeight,
     storeyLevels,

@@ -81,6 +81,47 @@ export function resolveRoof(
   return { type, axis, eaveY, ridgeY, x0, x1, zFront, zBack, ridge };
 }
 
+export const DORMER_WIDTH = 0.9; // window width
+export const DORMER_MAX = 9; // hard cap on dormer count
+
+/** A dormer window on the front (street) roof slope, facade-local. The mesh
+ * builds a small gabled house-let whose lower part buries in the opaque roof;
+ * the window face sits proud of the eave at `faceZ`. */
+export interface Dormer {
+  /** center x */
+  x: number;
+  /** window sill height */
+  sillY: number;
+  /** window head height */
+  headY: number;
+  /** z of the vertical window face (proud of the eave toward the street) */
+  faceZ: number;
+  /** window width */
+  w: number;
+}
+
+/** Pure: dormer placements on a parallel pitched roof's front slope. Empty for
+ * flat/perpendicular roofs or a too-shallow rise. `count` is clamped to
+ * [0, DORMER_MAX]; dormers space evenly across the width (bay-center aligned
+ * when count === bays). */
+export function roofDormers(plan: RoofPlan | null, count: number): Dormer[] {
+  if (!plan || plan.axis !== "x") return [];
+  const n = Math.min(DORMER_MAX, Math.max(0, Math.floor(count)));
+  if (n === 0) return [];
+  const rise = plan.ridgeY - plan.eaveY;
+  const h = Math.min(1.05, rise * 0.5);
+  if (h < 0.5) return []; // too shallow to host a real dormer
+  const sillY = plan.eaveY + 0.3; // sit above the eave line
+  const faceZ = plan.zFront + 0.15; // proud of the eave toward the street
+  const span = plan.x1 - plan.x0;
+  const out: Dormer[] = [];
+  for (let i = 0; i < n; i++) {
+    const x = plan.x0 + (span * (i + 0.5)) / n;
+    out.push({ x, sillY, headY: sillY + h, faceZ, w: DORMER_WIDTH });
+  }
+  return out;
+}
+
 export type Vec3 = [number, number, number];
 
 /** Pure: the roof's triangle soup (flat list, every 3 = one triangle),

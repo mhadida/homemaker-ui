@@ -102,6 +102,9 @@ export interface FacadeParams {
   roofHeight?: number;
   /** Roof covering. Absent = "slate". Ignored when flat. */
   roofColor?: "slate" | "red";
+  /** Dormer windows on the street-facing roof slope (parallel pitched roofs
+   * only). Absent/0 = none. Clamped to the bay count by the layout engine. */
+  dormers?: number;
   groundFloor: GroundFloorConfig;
   ornament: OrnamentConfig;
   /** #RRGGBB — wall render color */

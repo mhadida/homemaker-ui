@@ -13,7 +13,7 @@ import {
 } from "@/lib/facade/layout";
 import type { FacadeParams, WindowStyleId } from "@/lib/facade/types";
 import type { LotMiter } from "@/lib/facade/corners";
-import { roofTriangles, type RoofPlan } from "@/lib/facade/roof";
+import { roofTriangles, type RoofPlan, type Dormer } from "@/lib/facade/roof";
 
 const ROOF_COLORS = { slate: "#4a4e57", red: "#8a3b2e" } as const;
 
@@ -50,6 +50,80 @@ function buildRoofGeometry(plan: RoofPlan): THREE.BufferGeometry {
   geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geo.computeVertexNormals();
   return geo;
+}
+
+const DORMER_DEPTH = 0.75; // how far back a dormer buries into the roof
+
+/** A gabled dormer window on the front roof slope: cheeks + framed glass + a
+ * little gable roof. The back buries into the opaque main roof, so no
+ * slope-conforming cut is needed. Facade-local; rendered in the roof group. */
+function DormerMesh({
+  d,
+  wallColor,
+  trimColor,
+  roofColor,
+}: {
+  d: Dormer;
+  wallColor: string;
+  trimColor: string;
+  roofColor: string;
+}) {
+  const h = d.headY - d.sillY;
+  const cy = (d.sillY + d.headY) / 2;
+  const zb = d.faceZ - DORMER_DEPTH;
+  const roofGeo = useMemo(() => {
+    const over = 0.1;
+    const xl = -d.w / 2 - over;
+    const xr = d.w / 2 + over;
+    type V = [number, number, number];
+    const peakF: V = [0, d.headY + 0.34, d.faceZ];
+    const peakB: V = [0, d.headY + 0.18, zb];
+    const FL: V = [xl, d.headY, d.faceZ];
+    const FR: V = [xr, d.headY, d.faceZ];
+    const BL: V = [xl, d.headY - 0.16, zb];
+    const BR: V = [xr, d.headY - 0.16, zb];
+    const t: number[] = [];
+    const push = (...vs: V[]) => vs.forEach((v) => t.push(v[0], v[1], v[2]));
+    // left slope, right slope, front gable infill (double-sided material, so
+    // winding doesn't matter for these few small faces).
+    push(FL, peakF, peakB, FL, peakB, BL);
+    push(FR, BR, peakB, FR, peakB, peakF);
+    push(FL, FR, peakF);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(t, 3));
+    geo.computeVertexNormals();
+    return geo;
+  }, [d.w, d.headY, d.faceZ, zb]);
+  useEffect(() => () => roofGeo.dispose(), [roofGeo]);
+  return (
+    <group position={[d.x, 0, 0]}>
+      {[-1, 1].map((s) => (
+        <mesh
+          key={s}
+          position={[s * (d.w / 2 + 0.03), cy - 0.05, d.faceZ - DORMER_DEPTH / 2]}
+          castShadow
+        >
+          <boxGeometry args={[0.06, h + 0.1, DORMER_DEPTH]} />
+          <meshStandardMaterial color={wallColor} roughness={0.85} />
+        </mesh>
+      ))}
+      <mesh position={[0, cy, d.faceZ + 0.01]} castShadow>
+        <boxGeometry args={[d.w + 0.08, h + 0.08, 0.05]} />
+        <meshStandardMaterial color={trimColor} roughness={0.7} />
+      </mesh>
+      <mesh position={[0, cy, d.faceZ + 0.03]}>
+        <boxGeometry args={[d.w, h, 0.04]} />
+        <meshStandardMaterial color="#2a2e33" roughness={0.2} metalness={0.4} />
+      </mesh>
+      <mesh geometry={roofGeo} castShadow>
+        <meshStandardMaterial
+          color={roofColor}
+          roughness={0.8}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+    </group>
+  );
 }
 
 const FRAME_T = 0.07; // window frame member thickness
@@ -764,6 +838,17 @@ export default function FacadeMesh({
           />
         </mesh>
       )}
+
+      {/* Dormers on the front roof slope (empty unless requested). */}
+      {layout.roofDormers.map((d, i) => (
+        <DormerMesh
+          key={i}
+          d={d}
+          wallColor={params.wallColor}
+          trimColor={params.trimColor}
+          roofColor={ROOF_COLORS[params.roofColor ?? "slate"]}
+        />
+      ))}
     </group>
   );
 }

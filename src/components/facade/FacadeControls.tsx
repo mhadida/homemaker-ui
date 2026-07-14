@@ -513,6 +513,18 @@ export default function FacadeControls({
                 />
               ))}
             </div>
+            {/* Dormers apply to the street-facing (parallel) roof slope. */}
+            {(params.roofOrientation ?? "parallel") === "parallel" && (
+              <SliderRow
+                label="Dormers"
+                value={Math.min(params.dormers ?? 0, params.bays)}
+                display={`${Math.min(params.dormers ?? 0, params.bays)}`}
+                min={0}
+                max={params.bays}
+                step={1}
+                onChange={(dormers) => update({ dormers })}
+              />
+            )}
           </>
         )}
       </Section>
