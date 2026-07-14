@@ -30,6 +30,7 @@ import {
   ROOF_HEIGHT_DEFAULT,
 } from "@/lib/facade/roof";
 import { GROUND_SLOPE_MAX, type Ground } from "@/lib/facade/terrain";
+import { STREET_WIDTH_MIN, STREET_WIDTH_MAX } from "@/lib/facade/street";
 import {
   withSectionCount,
   withSectionOffset,
@@ -58,6 +59,8 @@ interface FacadeControlsProps {
   onMaxCornerAngle: (deg: number) => void;
   ground: Ground;
   onGroundChange: (g: Ground) => void;
+  streetWidth: number;
+  onStreetWidth: (w: number) => void;
 }
 
 function SliderRow({
@@ -202,6 +205,8 @@ export default function FacadeControls({
   onMaxCornerAngle,
   ground,
   onGroundChange,
+  streetWidth,
+  onStreetWidth,
 }: FacadeControlsProps) {
   const update = (u: Partial<FacadeParams>) => onChange({ ...params, ...u });
   const L = FACADE_LIMITS;
@@ -629,7 +634,25 @@ export default function FacadeControls({
         </>
       )}
 
-      {/* Topography is world state — always reachable (lot / block / corner). */}
+      {/* Street + Topography are world state — always reachable. */}
+      <Section title="Street">
+        <SliderRow
+          label="Street width"
+          value={streetWidth}
+          display={`${streetWidth.toFixed(0)}m`}
+          min={STREET_WIDTH_MIN}
+          max={STREET_WIDTH_MAX}
+          step={1}
+          onChange={onStreetWidth}
+        />
+        <p className="text-[10px] leading-snug text-[var(--muted)]">
+          Centreline + mirror derive from the first block. New blocks near the
+          street auto-face it; press{" "}
+          <kbd className="rounded bg-[var(--border)] px-1 font-mono">f</kbd>{" "}
+          while drawing to flip the facing.
+        </p>
+      </Section>
+
       <Section title="Topography">
         <SliderRow
           label="Ground slope"

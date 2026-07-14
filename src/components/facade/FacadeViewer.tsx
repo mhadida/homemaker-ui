@@ -34,12 +34,21 @@ import {
 } from "@/lib/facade/blocks";
 import type { Corner } from "@/lib/facade/corners";
 import type { Ground } from "@/lib/facade/terrain";
+import {
+  streetLines,
+  resolveFacing,
+  type StreetRef,
+} from "@/lib/facade/street";
 
 interface FacadeViewerProps {
   blocks: FacadeBlock[];
   selected: Selection | null;
   onSelectLot: (blockId: string, lot: number) => void;
-  onCommitLine: (a: [number, number], b: [number, number]) => void;
+  onCommitLine: (
+    a: [number, number],
+    b: [number, number],
+    fFlip: boolean,
+  ) => void;
   onMoveNode: (from: [number, number], to: [number, number]) => boolean;
   view?: ViewSettings;
   onDrawModeChange?: (drawMode: boolean) => void;
@@ -47,6 +56,10 @@ interface FacadeViewerProps {
   onSelectCorner: (key: string) => void;
   maxCornerAngle: number;
   ground: Ground;
+  /** Street reference (first block) + width for street-aware orientation and
+   * the plan-pane construction guides. null in the blank world. */
+  streetRef: StreetRef | null;
+  streetWidth: number;
 }
 
 type PaneId = "plan" | "perspective" | "overview" | "detail";
@@ -117,17 +130,33 @@ const DRAG_THRESHOLD = 0.3; // metres — clicks with sub-threshold jitter selec
  * Escape (or leaving draw mode) ends the path; clicking near the FIRST
  * node closes the loop. Consecutive segments share exact endpoint
  * coordinates — welded by construction. */
+/** The facing indicator's colour — green "this side faces the street". */
+const FACING_COLOR = "#22c55e";
+/** Length of the facing tick, metres. */
+const FACING_TICK = 2.5;
+
 function PenSurface({
   blocks,
   active,
   onCommitLine,
+  streetRef,
+  streetWidth,
 }: {
   blocks: FacadeBlock[];
   active: boolean;
-  onCommitLine: (a: [number, number], b: [number, number]) => void;
+  onCommitLine: (
+    a: [number, number],
+    b: [number, number],
+    fFlip: boolean,
+  ) => void;
+  streetRef: StreetRef | null;
+  streetWidth: number;
 }) {
   const [path, setPath] = useState<[number, number][]>([]);
   const [cursor, setCursor] = useState<[number, number] | null>(null);
+  // Manual facing override, XORed over street-awareness. Reset per commit so
+  // each new segment starts from its own auto orientation (and toggled by f).
+  const [facingFlip, setFacingFlip] = useState(false);
 
   // Reset the in-progress path when draw mode is switched off. Adjusted
   // during render (React's documented pattern for resetting state on a
@@ -140,13 +169,19 @@ function PenSurface({
     if (!active) {
       setPath([]);
       setCursor(null);
+      setFacingFlip(false);
     }
   }
 
   useEffect(() => {
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPath([]);
+      if (e.key === "Escape") {
+        setPath([]);
+        setFacingFlip(false);
+      } else if (e.key === "f" || e.key === "F") {
+        setFacingFlip((v) => !v);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -155,6 +190,28 @@ function PenSurface({
   if (!active) return null;
   const first = path[0];
   const last = path[path.length - 1];
+  // Resolved facing of the segment being drawn (last → cursor), so the tick
+  // previews exactly what a commit would build.
+  let facingTick: [[number, number, number], [number, number, number]] | null =
+    null;
+  if (last && cursor) {
+    const dx = cursor[0] - last[0];
+    const dz = cursor[1] - last[1];
+    const len = Math.hypot(dx, dz);
+    if (len > 1e-6) {
+      const flipped = resolveFacing(streetRef, streetWidth, last, cursor, facingFlip);
+      const s = flipped ? -1 : 1;
+      // blockFrame normal for flipped=false is [-dz, dx]; flip negates it.
+      const nx = (s * -dz) / len;
+      const nz = (s * dx) / len;
+      const mx = (last[0] + cursor[0]) / 2;
+      const mz = (last[1] + cursor[1]) / 2;
+      facingTick = [
+        [mx, 0.08, mz],
+        [mx + nx * FACING_TICK, 0.08, mz + nz * FACING_TICK],
+      ];
+    }
+  }
   return (
     <>
       <mesh
@@ -173,8 +230,9 @@ function PenSurface({
           const target = closing ? first : p;
           const len = Math.hypot(target[0] - last[0], target[1] - last[1]);
           if (len < MIN_BLOCK_LENGTH) return;
-          onCommitLine(last, target);
+          onCommitLine(last, target, facingFlip);
           setPath(closing ? [] : [...path, target]);
+          setFacingFlip(false); // next segment starts from its own auto facing
         }}
         onPointerMove={(e) =>
           setCursor(snapPoint([e.point.x, e.point.z], blocks))
@@ -196,6 +254,9 @@ function PenSurface({
           gapSize={0.3}
         />
       )}
+      {facingTick && (
+        <Line points={facingTick} color={FACING_COLOR} lineWidth={4} />
+      )}
       {path.length >= 2 && (
         <mesh
           position={[first[0], 0.09, first[1]]}
@@ -205,6 +266,48 @@ function PenSurface({
           <meshBasicMaterial color="#3b82f6" transparent opacity={0.9} />
         </mesh>
       )}
+    </>
+  );
+}
+
+/** The street centreline (dashed light) + mirror/far-frontage (dashed dim)
+ * construction guides, plan pane only. */
+function StreetGuides({
+  streetRef,
+  streetWidth,
+}: {
+  streetRef: StreetRef | null;
+  streetWidth: number;
+}) {
+  const lines = useMemo(
+    () => (streetRef ? streetLines(streetRef, streetWidth) : null),
+    [streetRef, streetWidth],
+  );
+  if (!lines) return null;
+  return (
+    <>
+      <Line
+        points={[
+          [lines.centre.a[0], 0.05, lines.centre.a[1]],
+          [lines.centre.b[0], 0.05, lines.centre.b[1]],
+        ]}
+        color="#9ca3af"
+        lineWidth={1.5}
+        dashed
+        dashSize={1.2}
+        gapSize={0.8}
+      />
+      <Line
+        points={[
+          [lines.mirror.a[0], 0.05, lines.mirror.a[1]],
+          [lines.mirror.b[0], 0.05, lines.mirror.b[1]],
+        ]}
+        color="#6b7280"
+        lineWidth={1.5}
+        dashed
+        dashSize={0.8}
+        gapSize={0.8}
+      />
     </>
   );
 }
@@ -422,6 +525,8 @@ function PlanPane({
   onSelectCorner,
   maxCornerAngle,
   ground,
+  streetRef,
+  streetWidth,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -429,12 +534,18 @@ function PlanPane({
   view: ViewSettings;
   size: { w: number; h: number };
   drawMode: boolean;
-  onCommitLine: (a: [number, number], b: [number, number]) => void;
+  onCommitLine: (
+    a: [number, number],
+    b: [number, number],
+    fFlip: boolean,
+  ) => void;
   onMoveNode: (from: [number, number], to: [number, number]) => boolean;
   corners: Corner[];
   onSelectCorner: (key: string) => void;
   maxCornerAngle: number;
   ground: Ground;
+  streetRef: StreetRef | null;
+  streetWidth: number;
 }) {
   const [nodeDrag, setNodeDrag] = useState(false);
   const dragEndAt = useRef(0);
@@ -504,7 +615,14 @@ function PlanPane({
         maxCornerAngle={maxCornerAngle}
         ground={ground}
       />
-      <PenSurface blocks={blocks} active={drawMode} onCommitLine={onCommitLine} />
+      <StreetGuides streetRef={streetRef} streetWidth={streetWidth} />
+      <PenSurface
+        blocks={blocks}
+        active={drawMode}
+        onCommitLine={onCommitLine}
+        streetRef={streetRef}
+        streetWidth={streetWidth}
+      />
       <NodeHandles
         blocks={blocks}
         interactive={!drawMode}
@@ -736,6 +854,8 @@ export default function FacadeViewer({
   onSelectCorner,
   maxCornerAngle,
   ground,
+  streetRef,
+  streetWidth,
 }: FacadeViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null!);
   const planRef = useRef<HTMLDivElement>(null);
@@ -831,6 +951,8 @@ export default function FacadeViewer({
             onSelectCorner={onSelectCorner}
             maxCornerAngle={maxCornerAngle}
         ground={ground}
+            streetRef={streetRef}
+            streetWidth={streetWidth}
           />
         );
       case "perspective":

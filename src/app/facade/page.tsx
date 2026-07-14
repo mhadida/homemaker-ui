@@ -33,6 +33,11 @@ import { rerollBlock, generateBlock, deleteLot } from "@/lib/facade/generate";
 import { moveNode } from "@/lib/facade/nodes";
 import { DEFAULT_GROUND, type Ground } from "@/lib/facade/terrain";
 import {
+  streetRefOf,
+  resolveFacing,
+  STREET_WIDTH_DEFAULT,
+} from "@/lib/facade/street";
+import {
   syncCorners,
   detectCorners,
   cornerChoice,
@@ -216,6 +221,15 @@ export default function FacadePage() {
   );
   const [maxCornerAngle, setMaxCornerAngle] = useState(DEFAULT_MAX_CORNER_ANGLE);
   const [ground, setGround] = useState<Ground>(DEFAULT_GROUND);
+  const [streetWidth, setStreetWidth] = useState(STREET_WIDTH_DEFAULT);
+
+  // The street is derived from the first (earliest surviving) block: its
+  // facade normal defines which side the street is on. null in the blank
+  // world, so the first block is oriented by the pen's f-toggle alone.
+  const streetRef = useMemo(
+    () => (blocks[0] ? streetRefOf(blocks[0]) : null),
+    [blocks],
+  );
 
   const selectedBlock = selected
     ? (blocks.find((b) => b.id === selected.blockId) ?? null)
@@ -415,24 +429,27 @@ export default function FacadePage() {
   );
 
   const handleCommitLine = useCallback(
-    (a: [number, number], b: [number, number]) => {
+    (a: [number, number], b: [number, number], fFlip: boolean) => {
       const seed = Math.floor(Math.random() * 1e9);
       const line = { a, b };
       const gen = structuredClone(DEFAULT_GEN);
+      // Street-aware: face the centreline when in the corridor, XOR the
+      // user's f-toggle. No reference (first block) → f-toggle alone.
+      const flipped = resolveFacing(streetRef, streetWidth, a, b, fFlip);
       const newBlock: FacadeBlock = {
         id: nextBlockId(),
         line,
-        flipped: false,
+        flipped,
         gen,
         seed,
-        lots: generateBlock(line, false, gen, seed),
+        lots: generateBlock(line, flipped, gen, seed),
       };
       setBlocks((bs) =>
         syncCorners([...bs, newBlock], cornerChoices, maxCornerAngle),
       );
       setSelected({ blockId: newBlock.id, lot: 0, level: "block" });
     },
-    [cornerChoices, maxCornerAngle],
+    [cornerChoices, maxCornerAngle, streetRef, streetWidth],
   );
 
   const handleMoveNode = useCallback(
@@ -613,6 +630,8 @@ export default function FacadePage() {
             onSelectCorner={handleSelectCorner}
             maxCornerAngle={maxCornerAngle}
             ground={ground}
+            streetRef={streetRef}
+            streetWidth={streetWidth}
           />
         </div>
 
@@ -652,6 +671,8 @@ export default function FacadePage() {
                   onMaxCornerAngle={setMaxCornerAngle}
                   ground={ground}
                   onGroundChange={setGround}
+                  streetWidth={streetWidth}
+                  onStreetWidth={setStreetWidth}
                 />
               </>
             ) : (
