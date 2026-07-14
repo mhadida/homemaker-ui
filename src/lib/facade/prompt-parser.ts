@@ -81,6 +81,12 @@ export function parseFacadePromptLocal(prompt: string): FacadePromptUpdates {
   if (/shop\s?front|\bretail\b|\bshop\b|\bstore\b/.test(lower))
     gf.treatment = "shopfront";
   if (/\bgarage\b/.test(lower)) gf.treatment = "garage";
+  if (
+    /\bpassage\b|\btunnel\b|carriage\s?arch|porte[\s-]?coch[eè]re|pass[\s-]?through/.test(
+      lower,
+    )
+  )
+    gf.treatment = "passage";
   if (/\bstoop\b|\bentry steps\b/.test(lower)) gf.stoop = true;
   if (Object.keys(gf).length > 0) updates.groundFloor = gf;
 

@@ -1,9 +1,19 @@
 import type { ViewSettings } from "@/lib/building/types";
 import { classicalStoreyHeights } from "@/lib/building/types";
 
-export type OpeningKind = "window" | "door" | "blank" | "shopfront" | "garage";
+export type OpeningKind =
+  | "window"
+  | "door"
+  | "blank"
+  | "shopfront"
+  | "garage"
+  | "passage";
 
-export type GroundTreatment = "residential" | "shopfront" | "garage";
+export type GroundTreatment =
+  | "residential"
+  | "shopfront"
+  | "garage"
+  | "passage";
 
 export interface GroundFloorConfig {
   treatment: GroundTreatment;

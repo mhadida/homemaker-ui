@@ -54,6 +54,16 @@ describe("resolveGrid", () => {
     expect(grid[0]).toEqual(["window", "window", "garage"]);
   });
 
+  it("passage ground row: passage at doorBay, windows elsewhere", () => {
+    const grid = resolveGrid(
+      p({
+        bays: 3,
+        groundFloor: { treatment: "passage", doorBay: 1, stoop: false },
+      }),
+    );
+    expect(grid[0]).toEqual(["window", "passage", "window"]);
+  });
+
   it("out-of-range doorBay clamps to the last bay", () => {
     const grid = resolveGrid(
       p({
@@ -676,5 +686,61 @@ describe("computeLayout roof", () => {
   it("roof footprint depth follows the clamped massingDepth", () => {
     const l = computeLayout(p({ roofType: "hip", massingDepth: 12 }));
     expect(l.roof!.zBack).toBe(-12);
+  });
+});
+
+describe("passage (pass-through carriage arch)", () => {
+  const passageParams = (o: Partial<FacadeParams> = {}) =>
+    p({
+      bays: 3,
+      storeys: 3,
+      groundFloor: { treatment: "passage", doorBay: 1, stoop: false },
+      ...o,
+    });
+
+  it("the door bay's ground opening is an arched passage", () => {
+    const layout = computeLayout(passageParams());
+    const op = layout.openings.find(
+      (o) => o.storey === 0 && o.bay === 1,
+    );
+    expect(op?.kind).toBe("passage");
+    expect(op?.arched).toBe(true);
+  });
+
+  it("layout.passage matches the opening extent and clears the crown", () => {
+    const layout = computeLayout(passageParams());
+    const op = layout.openings.find((o) => o.kind === "passage")!;
+    expect(layout.passage).not.toBeNull();
+    expect(layout.passage!.x0).toBeCloseTo(op.x, 9);
+    expect(layout.passage!.x1).toBeCloseTo(op.x + op.w, 9);
+    expect(layout.passage!.top).toBeCloseTo(op.y + op.h, 9); // crown height
+  });
+
+  it("non-passage treatments leave passage null and nothing arched", () => {
+    for (const treatment of ["residential", "shopfront", "garage"] as const) {
+      const layout = computeLayout(
+        p({
+          bays: 3,
+          groundFloor: { treatment, doorBay: 1, stoop: false },
+        }),
+      );
+      expect(layout.passage).toBeNull();
+      expect(layout.openings.some((o) => o.arched)).toBe(false);
+    }
+  });
+
+  it("a short storey shrinks the arch width to keep a real jamb", () => {
+    // storeyHeight small → the semicircular head would eat the jamb, so width
+    // shrinks; the opening must still be a valid arch spanning < the bay.
+    const layout = computeLayout(
+      passageParams({ storeys: 1, storeyHeight: 2.4, storeyHeights: [2.4] }),
+    );
+    const op = layout.openings.find((o) => o.kind === "passage");
+    if (op) {
+      // jamb (h − w/2) is at least the minimum straight side
+      expect(op.h - op.w / 2).toBeGreaterThanOrEqual(1.4 - 1e-9);
+    }
+    // (if too small to host any arch, computeLayout simply omits it — no throw)
+    expect(() => computeLayout(passageParams({ storeys: 1 }))).not.toThrow();
   });
 });

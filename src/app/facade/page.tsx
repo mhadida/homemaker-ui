@@ -76,7 +76,7 @@ interface FacadeSpec {
   storeys?: number;
   width?: number;
   bays?: number;
-  treatment?: "residential" | "shopfront" | "garage";
+  treatment?: "residential" | "shopfront" | "garage" | "passage";
   doorBay?: number; // 1-based over the wire
   stoop?: boolean;
   cornice?: boolean;

@@ -31,7 +31,7 @@ const FacadeSpec = z.object({
   storeys: z.number().int().min(1).max(6),
   width: z.number().min(4).max(20),
   bays: z.number().int().min(1).max(9),
-  treatment: z.enum(["residential", "shopfront", "garage"]),
+  treatment: z.enum(["residential", "shopfront", "garage", "passage"]),
   doorBay: z.number().int().min(1).max(9), // 1 = leftmost bay (1-based for the model)
   stoop: z.boolean(),
   cornice: z.boolean(),
@@ -111,7 +111,7 @@ function SYSTEM_PROMPT(current: Partial<FacadeSpec> | undefined): string {
     `- preset: ${have.preset ?? "none"}`,
     "",
     "Meanings:",
-    '- treatment "residential": windows + front door. "shopfront": retail glazing across the ground floor. "garage": vehicle door instead of an entrance.',
+    '- treatment "residential": windows + front door. "shopfront": retail glazing across the ground floor. "garage": vehicle door instead of an entrance. "passage": a tall carriage arch / porte-cochère that tunnels through the building to a rear courtyard.',
     "- stoop: entry steps in front of the door (residential only).",
     "- windowSize small/medium/large controls window proportions within each bay.",
     "- doorBay is 1-based from the left and must not exceed bays.",

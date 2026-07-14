@@ -9,6 +9,7 @@ import {
   type FacadeLayout,
   type OpeningRect,
   type SectionStrip,
+  type PassagePlan,
 } from "@/lib/facade/layout";
 import type { FacadeParams, WindowStyleId } from "@/lib/facade/types";
 import type { LotMiter } from "@/lib/facade/corners";
@@ -84,10 +85,23 @@ function buildStripGeometry(
   for (const o of layout.openings) {
     if (!inStrip(o.bay, strip)) continue;
     const hole = new THREE.Path();
-    hole.moveTo(o.x, o.y);
-    hole.lineTo(o.x + o.w, o.y);
-    hole.lineTo(o.x + o.w, o.y + o.h);
-    hole.lineTo(o.x, o.y + o.h);
+    if (o.arched) {
+      // Semicircular head (radius w/2 at springline y + h − w/2): up the
+      // jambs, then an arc right → top → left across the crown.
+      const r = o.w / 2;
+      const spring = o.y + o.h - r;
+      const cx = o.x + r;
+      hole.moveTo(o.x, o.y);
+      hole.lineTo(o.x + o.w, o.y);
+      hole.lineTo(o.x + o.w, spring);
+      hole.absarc(cx, spring, r, 0, Math.PI, false);
+      hole.lineTo(o.x, o.y);
+    } else {
+      hole.moveTo(o.x, o.y);
+      hole.lineTo(o.x + o.w, o.y);
+      hole.lineTo(o.x + o.w, o.y + o.h);
+      hole.lineTo(o.x, o.y + o.h);
+    }
     hole.closePath();
     shape.holes.push(hole);
   }
@@ -374,6 +388,102 @@ function GarageFill({ o, doorColor }: { o: OpeningRect; doorColor: string }) {
   );
 }
 
+/** Carriage-arch surround for a pass-through passage: a stone keystone at the
+ * crown + impost blocks at the springline. The see-through void itself is the
+ * arched wall hole (punched in buildStripGeometry) + the pierced mass
+ * (StripMass); this is the facade decoration that reads it as an arch. */
+function PassageFill({ o, trimColor }: { o: OpeningRect; trimColor: string }) {
+  const r = o.w / 2;
+  const spring = o.y + o.h - r; // springline
+  const crown = o.y + o.h;
+  const cx = o.x + r;
+  return (
+    <group>
+      <mesh position={[cx, crown - 0.15, 0.05]} castShadow>
+        <boxGeometry args={[0.34, 0.5, 0.16]} />
+        <meshStandardMaterial color={trimColor} roughness={0.8} />
+      </mesh>
+      {[o.x, o.x + o.w].map((ix, i) => (
+        <mesh key={i} position={[ix, spring, 0.04]} castShadow>
+          <boxGeometry args={[0.2, 0.16, 0.13]} />
+          <meshStandardMaterial color={trimColor} roughness={0.8} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+const MASS_EPS = 0.02; // sliver guard for pier/lintel boxes
+const TUNNEL_FLOOR_COLOR = "#2b2724"; // dark cobbles under the passage
+
+/** One section strip's massing body. Normally a single wall-colored box; when
+ * a pass-through passage falls inside this strip's band it splits into two
+ * piers + a lintel around a full-depth tunnel void (plus a dark floor), so the
+ * arch reads all the way through to behind the building. Depth/center match
+ * the original box (front flush with the wall back, extending back by
+ * massingDepth). */
+function StripMass({
+  x0,
+  x1,
+  wallTop,
+  massingDepth,
+  color,
+  passage,
+}: {
+  x0: number;
+  x1: number;
+  wallTop: number;
+  massingDepth: number;
+  color: string;
+  /** non-null only when the passage lies within [x0, x1] */
+  passage: PassagePlan | null;
+}) {
+  const zc = -(WALL_THICKNESS + massingDepth) / 2;
+  const dz = massingDepth - WALL_THICKNESS;
+  if (!passage) {
+    return (
+      <mesh position={[(x0 + x1) / 2, wallTop / 2, zc]} castShadow receiveShadow>
+        <boxGeometry args={[x1 - x0, wallTop, dz]} />
+        <meshStandardMaterial color={color} roughness={0.85} />
+      </mesh>
+    );
+  }
+  const { x0: px0, x1: px1, top } = passage;
+  const leftW = px0 - x0;
+  const rightW = x1 - px1;
+  const lintelH = wallTop - top;
+  return (
+    <group>
+      {leftW > MASS_EPS && (
+        <mesh position={[(x0 + px0) / 2, wallTop / 2, zc]} castShadow receiveShadow>
+          <boxGeometry args={[leftW, wallTop, dz]} />
+          <meshStandardMaterial color={color} roughness={0.85} />
+        </mesh>
+      )}
+      {rightW > MASS_EPS && (
+        <mesh position={[(px1 + x1) / 2, wallTop / 2, zc]} castShadow receiveShadow>
+          <boxGeometry args={[rightW, wallTop, dz]} />
+          <meshStandardMaterial color={color} roughness={0.85} />
+        </mesh>
+      )}
+      {lintelH > MASS_EPS && (
+        <mesh
+          position={[(px0 + px1) / 2, (top + wallTop) / 2, zc]}
+          castShadow
+          receiveShadow
+        >
+          <boxGeometry args={[px1 - px0, lintelH, dz]} />
+          <meshStandardMaterial color={color} roughness={0.85} />
+        </mesh>
+      )}
+      <mesh position={[(px0 + px1) / 2, 0.02, zc]} receiveShadow>
+        <boxGeometry args={[px1 - px0, 0.04, dz]} />
+        <meshStandardMaterial color={TUNNEL_FLOOR_COLOR} roughness={0.95} />
+      </mesh>
+    </group>
+  );
+}
+
 /** Stepped classical cornice for one section strip: three stacked boxes with
  * growing projection spanning [x0, x1] (miter extensions folded in by the
  * caller). Sideways projection applies only at the OUTER facade ends
@@ -481,26 +591,23 @@ export default function FacadeMesh({
           <group key={si} position={[0, 0, strip.offset]}>
             {/* Massing: the building body behind this section's wall. Front
              * flush with the wall back (−WALL_THICKNESS), extending back by
-             * the clamped depth; wall-colored so the building reads solid.
-             * The strip group's offset places it at world z = offset − … */}
-            <mesh
-              position={[
-                (bandX0 + bandX1) / 2,
-                layout.wallTop / 2,
-                -(WALL_THICKNESS + layout.massingDepth) / 2,
-              ]}
-              castShadow
-              receiveShadow
-            >
-              <boxGeometry
-                args={[
-                  bandX1 - bandX0,
-                  layout.wallTop,
-                  layout.massingDepth - WALL_THICKNESS,
-                ]}
-              />
-              <meshStandardMaterial color={params.wallColor} roughness={0.85} />
-            </mesh>
+             * the clamped depth; wall-colored so the building reads solid. A
+             * pass-through passage within this strip pierces it (piers +
+             * lintel + tunnel). The strip group's offset applies the relief. */}
+            <StripMass
+              x0={bandX0}
+              x1={bandX1}
+              wallTop={layout.wallTop}
+              massingDepth={layout.massingDepth}
+              color={params.wallColor}
+              passage={
+                layout.passage &&
+                layout.passage.x0 >= bandX0 - 1e-6 &&
+                layout.passage.x1 <= bandX1 + 1e-6
+                  ? layout.passage
+                  : null
+              }
+            />
             <mesh geometry={stripGeos[si]} castShadow receiveShadow>
               <meshStandardMaterial color={params.wallColor} roughness={0.85} />
             </mesh>
@@ -540,6 +647,10 @@ export default function FacadeMesh({
                     );
                   case "garage":
                     return <GarageFill key={key} o={o} doorColor={params.doorColor} />;
+                  case "passage":
+                    return (
+                      <PassageFill key={key} o={o} trimColor={params.trimColor} />
+                    );
                   default:
                     return null;
                 }

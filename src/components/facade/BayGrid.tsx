@@ -3,6 +3,9 @@
 import type { FacadeParams, OpeningKind } from "@/lib/facade/types";
 import { resolveGrid } from "@/lib/facade/layout";
 
+// `passage` is a ground-floor TREATMENT (whole-bay arch that pierces the
+// mass), not a per-cell override — so it's excluded from the tap CYCLE but
+// still needs a glyph for the Record<OpeningKind> type + display.
 const CYCLE: OpeningKind[] = ["window", "blank", "door", "shopfront", "garage"];
 const GLYPH: Record<OpeningKind, string> = {
   window: "▢",
@@ -10,6 +13,7 @@ const GLYPH: Record<OpeningKind, string> = {
   door: "▯",
   shopfront: "▭",
   garage: "▤",
+  passage: "∩",
 };
 
 interface BayGridProps {

@@ -18,7 +18,10 @@ export function resolveGrid(params: FacadeParams): OpeningKind[][] {
     const row: OpeningKind[] = [];
     for (let b = 0; b < bays; b++) {
       if (s === 0) {
-        if (b === doorBay) row.push(t === "garage" ? "garage" : "door");
+        if (b === doorBay)
+          row.push(
+            t === "garage" ? "garage" : t === "passage" ? "passage" : "door",
+          );
         else row.push(t === "shopfront" ? "shopfront" : "window");
       } else {
         row.push("window");
@@ -47,6 +50,9 @@ export const DOOR_LEAF_HEIGHT = 2.1; // fixed door-leaf height; transom fills ab
 export const TRANSOM_MIN = 0.3; // no sliver transoms — leaf stretches instead
 export const GARAGE_WIDTH_MAX = 2.6;
 export const GARAGE_HEIGHT_MAX = 2.4;
+export const PASSAGE_WIDTH_MAX = 3.2; // carriage-arch mouth, wider than a garage
+export const PASSAGE_HEAD_GAP = 0.25; // wall above the arch crown within the storey
+export const PASSAGE_MIN_SIDE = 1.4; // min straight jamb below the arch springline
 export const SHOPFRONT_FASCIA = 0.5; // wall band above shopfront glazing
 export const SHOPFRONT_MULLION = 0.06; // half-gap between adjacent shopfront bays
 export const STOOP_RISE = 0.15;
@@ -78,6 +84,17 @@ export interface OpeningRect {
   /** Glazed transom height above a DOOR_LEAF_HEIGHT leaf (door kind only;
    * absent when the leaf fills the whole opening). */
   transomH?: number;
+  /** Round-headed hole (passage kind): a semicircular head of radius w/2 at
+   * springline `y + h − w/2` (crown at `y + h`). Absent = rectangular. */
+  arched?: boolean;
+}
+
+/** The pass-through tunnel void that pierces one section strip's massing box.
+ * Facade-local x range + the crown height the mass must clear. */
+export interface PassagePlan {
+  x0: number;
+  x1: number;
+  top: number;
 }
 
 export interface ResolvedSection {
@@ -203,6 +220,8 @@ export interface FacadeLayout {
   massingDepth: number;
   /** roof plan over the mass, or null for a flat roof (no roof mesh) */
   roof: RoofPlan | null;
+  /** pass-through tunnel piercing one strip's mass, or null when no passage */
+  passage: PassagePlan | null;
   /** wallTop + cornice + parapet */
   totalHeight: number;
   /** y of each storey floor, length storeys+1 (last = wallTop) */
@@ -319,6 +338,18 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
         if (h < 1.6) continue;
         x = bayCenter - w / 2;
         y = floorY;
+      } else if (kind === "passage") {
+        // Tall carriage arch with a semicircular head (radius w/2). Nearly the
+        // full ground storey; shrink the width if a short storey wouldn't
+        // leave a straight jamb of at least PASSAGE_MIN_SIDE below the spring.
+        h = sh - PASSAGE_HEAD_GAP;
+        w = Math.min(PASSAGE_WIDTH_MAX, maxW);
+        if (h - w / 2 < PASSAGE_MIN_SIDE) w = 2 * (h - PASSAGE_MIN_SIDE);
+        if (w < MIN_OPENING_WIDTH || w > maxW) continue; // can't host a real arch
+        x = bayCenter - w / 2;
+        y = floorY;
+        openings.push({ kind, storey: s, bay: b, x, y, w, h, arched: true });
+        continue; // fully built (arched set); skip the generic rectangular push
       } else {
         // shopfront: fill the bay; MIN_PIER at party edges, slim mullion gap
         // against a shopfront neighbor, else half a pier (the neighbor's own
@@ -373,6 +404,17 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
     : [];
   const surrounds = params.ornament.surrounds ? [...windows] : [];
 
+  // Pass-through tunnel: the void the mesh cuts through the mass behind the
+  // passage arch (full massing depth). null when there's no passage.
+  const passageOpening = openings.find((o) => o.kind === "passage");
+  const passage: PassagePlan | null = passageOpening
+    ? {
+        x0: passageOpening.x,
+        x1: passageOpening.x + passageOpening.w,
+        top: passageOpening.y + passageOpening.h,
+      }
+    : null;
+
   const door = openings.find((o) => o.kind === "door" && o.storey === 0);
   const stoop =
     door &&
@@ -397,6 +439,7 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
     wallTop,
     massingDepth,
     roof: resolveRoof(params, wallTop, massingDepth),
+    passage,
     totalHeight,
     storeyLevels,
     grid,

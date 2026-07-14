@@ -186,6 +186,7 @@ const TREATMENTS: { id: GroundTreatment; label: string }[] = [
   { id: "residential", label: "Residential" },
   { id: "shopfront", label: "Shopfront" },
   { id: "garage", label: "Garage" },
+  { id: "passage", label: "Passage" },
 ];
 
 export default function FacadeControls({
