@@ -36,7 +36,7 @@ import {
   type SceneState,
 } from "@/lib/facade/document";
 import { rerollBlock, generateBlock, deleteLot } from "@/lib/facade/generate";
-import { moveNode } from "@/lib/facade/nodes";
+import { moveNode, deriveNodes } from "@/lib/facade/nodes";
 import { DEFAULT_GROUND, type Ground } from "@/lib/facade/terrain";
 import { streetRefOf, STREET_WIDTH_DEFAULT } from "@/lib/facade/street";
 import {
@@ -415,6 +415,10 @@ export default function FacadePage() {
   const cornersRef = useRef<Corner[]>([]);
   const handleSelectLot = useCallback(
     (blockId: string, lot: number) => {
+      // A single-lot selection supersedes any live marquee (symmetric to
+      // handleMarquee clearing `selected`), so clicking a building in any pane
+      // can't leave a hidden marquee underneath the single selection.
+      setMarquee(null);
       // A single-lot chamfer block can bridge two corners (both ends of its
       // one lot). One facade mesh can't disambiguate which the user meant, so
       // we take the first — the plan-pane node handles reach either corner
@@ -504,11 +508,20 @@ export default function FacadePage() {
 
   const handleMarqueeDelete = useCallback(() => {
     if (!marquee) return;
-    setBlocks(
-      syncCorners(deleteMarquee(blocks, marquee), cornerChoices, maxCornerAngle),
+    const next = syncCorners(
+      deleteMarquee(blocks, marquee),
+      cornerChoices,
+      maxCornerAngle,
     );
+    setBlocks(next);
     setMarquee(null);
-    setSelected(null);
+    // Reselect a surviving block so the panel doesn't fall through to the
+    // blank-canvas copy while buildings still exist (matches handleDeleteBlock).
+    setSelected(
+      next.length > 0
+        ? { blockId: next[0].id, lot: 0, level: "block" }
+        : null,
+    );
   }, [blocks, marquee, cornerChoices, maxCornerAngle]);
 
   const handleMarqueeReroll = useCallback(() => {
@@ -586,26 +599,30 @@ export default function FacadePage() {
       const snap = moveDragRef.current;
       moveDragRef.current = null;
       if (!snap) return;
-      setBlocks(
-        syncCorners(
-          translateMarquee(snap.blocks, snap.marquee, dx, dz),
-          cornerChoices,
-          maxCornerAngle,
-        ),
+      const next = syncCorners(
+        translateMarquee(snap.blocks, snap.marquee, dx, dz),
+        cornerChoices,
+        maxCornerAngle,
       );
-      // Shift the marquee's loose-node positions so later highlights/ops track
-      // the moved geometry (enclosed-block ids are unchanged by a rigid move).
+      setBlocks(next);
+      // Rebuild the marquee's loose-node positions from the ACTUAL moved
+      // geometry: a node whose move was rejected (its block couldn't absorb)
+      // stays at its origin, and one that no longer exists is dropped — so no
+      // gold ring is stranded at a phantom coordinate. Enclosed-block ids are
+      // unchanged by a rigid move, so only nodes need reconciling.
       if (dx !== 0 || dz !== 0) {
-        setMarquee((m) =>
-          m
-            ? {
-                ...m,
-                nodes: m.nodes.map(
-                  ([x, z]) => [x + dx, z + dz] as [number, number],
-                ),
-              }
-            : m,
+        const present = new Set(
+          deriveNodes(next).map((n) => `${n.pos[0]}:${n.pos[1]}`),
         );
+        setMarquee((m) => {
+          if (!m) return m;
+          const nodes = m.nodes
+            .map(([x, z]): [number, number] =>
+              present.has(`${x + dx}:${z + dz}`) ? [x + dx, z + dz] : [x, z],
+            )
+            .filter(([x, z]) => present.has(`${x}:${z}`));
+          return { ...m, nodes };
+        });
       }
     },
     [cornerChoices, maxCornerAngle],
@@ -616,17 +633,25 @@ export default function FacadePage() {
   // no two-step confirm for keyboard deletion. Skipped while typing.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Delete" && e.key !== "Backspace") return;
-      if (e.repeat) return; // OS key-repeat must not cascade-delete lots
       const t = e.target;
-      if (
+      const typing =
         t instanceof HTMLElement &&
         (t.tagName === "INPUT" ||
           t.tagName === "TEXTAREA" ||
           t.tagName === "SELECT" ||
-          t.isContentEditable)
-      )
+          t.isContentEditable);
+      // Cmd/Ctrl+A → select every block as one whole-block marquee. Skipped
+      // while typing (let the field's own select-all work) or mid-sketch.
+      if ((e.metaKey || e.ctrlKey) && (e.key === "a" || e.key === "A")) {
+        if (typing || drawActive || blocks.length === 0) return;
+        e.preventDefault();
+        setSelected(null);
+        setMarquee({ blocks: blocks.map((b) => b.id), lots: [], nodes: [] });
         return;
+      }
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      if (e.repeat) return; // OS key-repeat must not cascade-delete lots
+      if (typing) return;
       // A live marquee takes precedence: Delete removes the whole selection.
       if (marquee) {
         e.preventDefault();

@@ -1063,8 +1063,10 @@ export function MarqueeControls({
       </Section>
 
       <p className="text-[10px] text-[var(--muted)] leading-relaxed">
-        Selected nodes move with the selection. Node-merge (welding) isn&rsquo;t
-        supported yet.
+        <kbd className="rounded bg-[var(--border)] px-1 font-mono">⌘/Ctrl</kbd>
+        <kbd className="ml-0.5 rounded bg-[var(--border)] px-1 font-mono">A</kbd>{" "}
+        selects every block. Selected nodes move with the selection; node-merge
+        (welding) isn&rsquo;t supported yet.
       </p>
     </div>
   );

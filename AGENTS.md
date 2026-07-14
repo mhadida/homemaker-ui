@@ -186,7 +186,9 @@ NOT involved; every edit is live (no Update button). Spec:
   enclosed blocks + `moveNode` ripple for loose nodes); the Selection panel
   (`MarqueeControls` in `FacadeControls.tsx`) deletes (`deleteMarquee`, split-
   safe multi-lot removal), rerolls (`affectedBlockIds`), or bulk-restyles
-  every selected lot. Every mutation funnels through `syncCorners`; `marquee`
+  every selected lot. `⌘/Ctrl+A` selects every block (whole-block marquee);
+  a single-lot click clears the marquee (the two selection models are mutually
+  exclusive both ways). Every mutation funnels through `syncCorners`; `marquee`
   defaults null + the tool defaults off so the unused feature is byte-
   identical. Node-merge (welding selected nodes) is deferred — nodes move
   only. Spec: `docs/superpowers/specs/2026-07-14-marquee-selection-design.md`.
