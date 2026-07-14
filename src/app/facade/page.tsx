@@ -32,11 +32,7 @@ import {
 import { rerollBlock, generateBlock, deleteLot } from "@/lib/facade/generate";
 import { moveNode } from "@/lib/facade/nodes";
 import { DEFAULT_GROUND, type Ground } from "@/lib/facade/terrain";
-import {
-  streetRefOf,
-  resolveFacing,
-  STREET_WIDTH_DEFAULT,
-} from "@/lib/facade/street";
+import { streetRefOf, STREET_WIDTH_DEFAULT } from "@/lib/facade/street";
 import {
   syncCorners,
   detectCorners,
@@ -429,15 +425,16 @@ export default function FacadePage() {
   );
 
   const handleCommitLine = useCallback(
-    (a: [number, number], b: [number, number], fFlip: boolean) => {
+    (a: [number, number], b: [number, number], flipped: boolean): string => {
       const seed = Math.floor(Math.random() * 1e9);
       const line = { a, b };
       const gen = structuredClone(DEFAULT_GEN);
-      // Street-aware: face the centreline when in the corridor, XOR the
-      // user's f-toggle. No reference (first block) → f-toggle alone.
-      const flipped = resolveFacing(streetRef, streetWidth, a, b, fFlip);
+      // The pen resolves the facing (chain-consistent, street-aware ⊕ f); we
+      // just build the block with it and return its id so the pen can track
+      // and later flip the whole chain.
+      const id = nextBlockId();
       const newBlock: FacadeBlock = {
-        id: nextBlockId(),
+        id,
         line,
         flipped,
         gen,
@@ -447,9 +444,30 @@ export default function FacadePage() {
       setBlocks((bs) =>
         syncCorners([...bs, newBlock], cornerChoices, maxCornerAngle),
       );
-      setSelected({ blockId: newBlock.id, lot: 0, level: "block" });
+      setSelected({ blockId: id, lot: 0, level: "block" });
+      return id;
     },
-    [cornerChoices, maxCornerAngle, streetRef, streetWidth],
+    [cornerChoices, maxCornerAngle],
+  );
+
+  // f while drawing flips the entire chain being drawn (every committed
+  // segment), so a block's facade side stays consistent however late f is
+  // pressed. Same operation as the "Flip side" button, applied to a set.
+  const handleFlipChain = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return;
+      const idSet = new Set(ids);
+      setBlocks((bs) =>
+        syncCorners(
+          bs.map((b) =>
+            idSet.has(b.id) ? { ...b, flipped: !b.flipped } : b,
+          ),
+          cornerChoices,
+          maxCornerAngle,
+        ),
+      );
+    },
+    [cornerChoices, maxCornerAngle],
   );
 
   const handleMoveNode = useCallback(
@@ -623,6 +641,7 @@ export default function FacadePage() {
             selected={selected}
             onSelectLot={handleSelectLot}
             onCommitLine={handleCommitLine}
+            onFlipChain={handleFlipChain}
             onMoveNode={handleMoveNode}
             view={view}
             onDrawModeChange={setDrawActive}

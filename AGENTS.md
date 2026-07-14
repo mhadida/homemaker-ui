@@ -150,14 +150,17 @@ NOT involved; every edit is live (no Update button). Spec:
   `docs/superpowers/specs/2026-07-14-topography-design.md`.
 - **Street awareness**: a centreline + mirror (far-frontage) derive live from
   the first block's facade normal (`src/lib/facade/street.ts` pure —
-  `streetRefOf`, `streetLines`, `streetAwareFlipped`, `resolveFacing`; width a
-  page-state slider, default 14 m). New blocks drawn inside the street
-  corridor auto-orient their facade toward the centreline (fixes "inside-out"
-  drawing); the pen shows a live green facing tick and `f` flips it
-  (`resolveFacing` = street-aware auto XOR the f-toggle). The first block (no
-  reference yet) is oriented by `f` alone and then defines the street.
-  Construction guides render in the plan pane only; orientation applies on
-  creation only. Spec:
+  `streetRefOf`, `streetLines`, `streetAwareFlipped`; width a page-state
+  slider, default 14 m). New blocks drawn inside the street corridor
+  auto-orient their facade toward the centreline (fixes "inside-out"
+  drawing). Facing is a **chain-level** decision so a block's side never
+  flips between welded segments: the pen locks the street-aware orientation
+  at the chain's first segment and reuses it for every later segment; `f`
+  flips the whole chain (persistent + retroactively flips already-committed
+  segments via `onFlipChain`, same op as the "Flip side" button). A live
+  green tick previews the facing. The first block (no reference yet) is
+  oriented by `f` alone and then defines the street. Guides render in the
+  plan pane only; orientation applies on creation only. Spec:
   `docs/superpowers/specs/2026-07-14-street-awareness-design.md`.
 - **AI prompt**: `/api/facade-prompt` (flat fully-required zod spec — OpenAI
   structured output rejects optionals) targets the selected lot, plus an

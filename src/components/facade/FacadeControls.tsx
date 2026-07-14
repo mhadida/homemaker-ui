@@ -649,7 +649,7 @@ export default function FacadeControls({
           Centreline + mirror derive from the first block. New blocks near the
           street auto-face it; press{" "}
           <kbd className="rounded bg-[var(--border)] px-1 font-mono">f</kbd>{" "}
-          while drawing to flip the facing.
+          while drawing to flip the whole block&rsquo;s facing.
         </p>
       </Section>
 

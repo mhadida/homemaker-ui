@@ -36,7 +36,7 @@ import type { Corner } from "@/lib/facade/corners";
 import type { Ground } from "@/lib/facade/terrain";
 import {
   streetLines,
-  resolveFacing,
+  streetAwareFlipped,
   type StreetRef,
 } from "@/lib/facade/street";
 
@@ -44,11 +44,15 @@ interface FacadeViewerProps {
   blocks: FacadeBlock[];
   selected: Selection | null;
   onSelectLot: (blockId: string, lot: number) => void;
+  /** Commit one drawn segment with its resolved facing; returns the new
+   * block id so the pen can flip the whole chain later. */
   onCommitLine: (
     a: [number, number],
     b: [number, number],
-    fFlip: boolean,
-  ) => void;
+    flipped: boolean,
+  ) => string;
+  /** Flip the facing of a set of blocks at once (the chain being drawn). */
+  onFlipChain: (ids: string[]) => void;
   onMoveNode: (from: [number, number], to: [number, number]) => boolean;
   view?: ViewSettings;
   onDrawModeChange?: (drawMode: boolean) => void;
@@ -139,6 +143,7 @@ function PenSurface({
   blocks,
   active,
   onCommitLine,
+  onFlipChain,
   streetRef,
   streetWidth,
 }: {
@@ -147,16 +152,43 @@ function PenSurface({
   onCommitLine: (
     a: [number, number],
     b: [number, number],
-    fFlip: boolean,
-  ) => void;
+    flipped: boolean,
+  ) => string;
+  onFlipChain: (ids: string[]) => void;
   streetRef: StreetRef | null;
   streetWidth: number;
 }) {
   const [path, setPath] = useState<[number, number][]>([]);
   const [cursor, setCursor] = useState<[number, number] | null>(null);
-  // Manual facing override, XORed over street-awareness. Reset per commit so
-  // each new segment starts from its own auto orientation (and toggled by f).
-  const [facingFlip, setFacingFlip] = useState(false);
+  // Facing is a CHAIN-level decision so a block's facade side never flips
+  // between welded segments:
+  //  • chainBase — the street-aware auto orientation, locked at the chain's
+  //    FIRST segment and applied to every later segment (each relative to its
+  //    own drawn direction → same physical side).
+  //  • fFlip — the user's f-toggle for the whole chain (persistent, NOT reset
+  //    per segment). f also flips every already-committed segment (chainIds)
+  //    so pressing it any time keeps the whole block consistent.
+  // Every segment builds with `chainBase !== fFlip`.
+  const [fFlip, setFFlip] = useState(false);
+  const [chainBase, setChainBase] = useState<boolean | null>(null);
+  const [chainIds, setChainIds] = useState<string[]>([]);
+
+  // Read by the window keydown listener (deps kept to [active]) so f sees the
+  // live committed-chain ids and the current flip callback without re-binding.
+  // Synced in a deps-less effect — mirrors NodeHandles' endDragRef pattern.
+  const chainIdsRef = useRef<string[]>([]);
+  const onFlipChainRef = useRef(onFlipChain);
+  useEffect(() => {
+    chainIdsRef.current = chainIds;
+    onFlipChainRef.current = onFlipChain;
+  });
+
+  const resetChain = () => {
+    setPath([]);
+    setFFlip(false);
+    setChainBase(null);
+    setChainIds([]);
+  };
 
   // Reset the in-progress path when draw mode is switched off. Adjusted
   // during render (React's documented pattern for resetting state on a
@@ -167,9 +199,8 @@ function PenSurface({
   if (active !== wasActive) {
     setWasActive(active);
     if (!active) {
-      setPath([]);
       setCursor(null);
-      setFacingFlip(false);
+      resetChain();
     }
   }
 
@@ -189,10 +220,12 @@ function PenSurface({
       )
         return;
       if (e.key === "Escape") {
-        setPath([]);
-        setFacingFlip(false);
+        resetChain();
       } else if (e.key === "f" || e.key === "F") {
-        setFacingFlip((v) => !v);
+        // Flip the whole block: toggle the pending facing AND flip every
+        // segment already committed in this chain, so it stays consistent.
+        setFFlip((v) => !v);
+        onFlipChainRef.current(chainIdsRef.current);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -202,8 +235,9 @@ function PenSurface({
   if (!active) return null;
   const first = path[0];
   const last = path[path.length - 1];
-  // Resolved facing of the segment being drawn (last → cursor), so the tick
-  // previews exactly what a commit would build.
+  // Resolved facing of the segment being drawn (last → cursor). Uses the
+  // locked chainBase once the chain has started, so the preview tick matches
+  // what every segment of the chain gets.
   let facingTick: [[number, number, number], [number, number, number]] | null =
     null;
   if (last && cursor) {
@@ -211,7 +245,9 @@ function PenSurface({
     const dz = cursor[1] - last[1];
     const len = Math.hypot(dx, dz);
     if (len > 1e-6) {
-      const flipped = resolveFacing(streetRef, streetWidth, last, cursor, facingFlip);
+      const base =
+        chainBase ?? streetAwareFlipped(streetRef, streetWidth, last, cursor);
+      const flipped = base !== fFlip;
       const s = flipped ? -1 : 1;
       // blockFrame normal for flipped=false is [-dz, dx]; flip negates it.
       const nx = (s * -dz) / len;
@@ -242,9 +278,17 @@ function PenSurface({
           const target = closing ? first : p;
           const len = Math.hypot(target[0] - last[0], target[1] - last[1]);
           if (len < MIN_BLOCK_LENGTH) return;
-          onCommitLine(last, target, facingFlip);
-          setPath(closing ? [] : [...path, target]);
-          setFacingFlip(false); // next segment starts from its own auto facing
+          // Lock the chain's side at the first segment; reuse it thereafter.
+          const base =
+            chainBase ?? streetAwareFlipped(streetRef, streetWidth, last, target);
+          const id = onCommitLine(last, target, base !== fFlip);
+          if (closing) {
+            resetChain();
+          } else {
+            setPath([...path, target]);
+            if (chainBase === null) setChainBase(base);
+            setChainIds([...chainIds, id]);
+          }
         }}
         onPointerMove={(e) =>
           setCursor(snapPoint([e.point.x, e.point.z], blocks))
@@ -532,6 +576,7 @@ function PlanPane({
   size,
   drawMode,
   onCommitLine,
+  onFlipChain,
   onMoveNode,
   corners,
   onSelectCorner,
@@ -549,8 +594,9 @@ function PlanPane({
   onCommitLine: (
     a: [number, number],
     b: [number, number],
-    fFlip: boolean,
-  ) => void;
+    flipped: boolean,
+  ) => string;
+  onFlipChain: (ids: string[]) => void;
   onMoveNode: (from: [number, number], to: [number, number]) => boolean;
   corners: Corner[];
   onSelectCorner: (key: string) => void;
@@ -632,6 +678,7 @@ function PlanPane({
         blocks={blocks}
         active={drawMode}
         onCommitLine={onCommitLine}
+        onFlipChain={onFlipChain}
         streetRef={streetRef}
         streetWidth={streetWidth}
       />
@@ -859,6 +906,7 @@ export default function FacadeViewer({
   selected,
   onSelectLot,
   onCommitLine,
+  onFlipChain,
   onMoveNode,
   view = FACADE_DEFAULT_VIEW,
   onDrawModeChange,
@@ -958,6 +1006,7 @@ export default function FacadeViewer({
             size={planSize}
             drawMode={drawMode}
             onCommitLine={onCommitLine}
+            onFlipChain={onFlipChain}
             onMoveNode={onMoveNode}
             corners={corners}
             onSelectCorner={onSelectCorner}
