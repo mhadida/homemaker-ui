@@ -106,6 +106,57 @@ describe("streetAwareFlipped", () => {
   });
 });
 
+describe("rotated street + corridor boundary", () => {
+  // 45° reference: facade normal points north-west (−x, +z).
+  const ROT: StreetRef = streetRefOf(mkBlock("R", [0, 0], [10, 10], [14]));
+  const c: [number, number] = [
+    ROT.a[0] + ROT.normal[0] * (W / 2),
+    ROT.a[1] + ROT.normal[1] * (W / 2),
+  ]; // a point on the centreline
+
+  // Facade normal a block actually gets once built with the resolved flip.
+  const builtNormal = (
+    a: [number, number],
+    b: [number, number],
+    flipped: boolean,
+  ) => blockFrame(mkBlock("x", a, b, [5], flipped)).normal;
+
+  // Segment parallel to ROT, offset `o` metres along the reference normal.
+  const seg = (o: number): [[number, number], [number, number]] => [
+    [ROT.a[0] + ROT.normal[0] * o, ROT.a[1] + ROT.normal[1] * o],
+    [ROT.b[0] + ROT.normal[0] * o, ROT.b[1] + ROT.normal[1] * o],
+  ];
+  const facesCentre = (a: [number, number], b: [number, number]) => {
+    const flipped = streetAwareFlipped(ROT, W, a, b);
+    const n = builtNormal(a, b, flipped);
+    const mid: [number, number] = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    // built facade normal points toward the centreline
+    return n[0] * (c[0] - mid[0]) + n[1] * (c[1] - mid[1]);
+  };
+
+  it("near-side block on a diagonal street faces the centreline", () => {
+    const [a, b] = seg(2); // 2 m past the frontage toward centre (d=-5)
+    expect(facesCentre(a, b)).toBeGreaterThan(0);
+  });
+  it("far-side block on a diagonal street faces back toward the centreline", () => {
+    const [a, b] = seg(12); // past the spine, near the mirror (d=+5)
+    expect(facesCentre(a, b)).toBeGreaterThan(0);
+  });
+  it("drag direction does not change the built facade normal (diagonal)", () => {
+    const [a, b] = seg(2);
+    const fwd = builtNormal(a, b, streetAwareFlipped(ROT, W, a, b));
+    const rev = builtNormal(b, a, streetAwareFlipped(ROT, W, b, a));
+    expect(rev[0]).toBeCloseTo(fwd[0], 9);
+    expect(rev[1]).toBeCloseTo(fwd[1], 9);
+  });
+
+  it("corridor boundary: just inside orients, just outside does not", () => {
+    // axis-aligned REF: spine at z=7, corridor |d|<=W → zmid ∈ [-7, 21].
+    expect(streetAwareFlipped(REF, W, [-5, 20.9], [5, 20.9])).toBe(true);
+    expect(streetAwareFlipped(REF, W, [-5, 21.1], [5, 21.1])).toBe(false);
+  });
+});
+
 describe("resolveFacing", () => {
   it("XORs the f-toggle over the auto orientation", () => {
     // near-side same-direction: auto=false

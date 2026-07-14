@@ -176,6 +176,18 @@ function PenSurface({
   useEffect(() => {
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
+      // Don't hijack keystrokes typed into a field (the inline AI prompt
+      // stays mounted while the pen is armed) — matches the page's own
+      // keydown guard.
+      const t = e.target;
+      if (
+        t instanceof HTMLElement &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.tagName === "SELECT" ||
+          t.isContentEditable)
+      )
+        return;
       if (e.key === "Escape") {
         setPath([]);
         setFacingFlip(false);
