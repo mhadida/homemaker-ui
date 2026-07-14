@@ -17,6 +17,7 @@ import type { ViewSettings } from "@/lib/building/types";
 import { WALL_SWATCHES, classicalStoreyHeights } from "@/lib/building/types";
 import type { Selection, FacadeBlock, BlockGenSettings } from "@/lib/facade/blocks";
 import type { Corner, CornerChoice } from "@/lib/facade/corners";
+import type { Marquee } from "@/lib/facade/marquee";
 import {
   resolveSections,
   SECTION_OFFSET_MAX,
@@ -921,6 +922,152 @@ function BlockInspector({
         maxCornerAngle={maxCornerAngle}
         onMaxCornerAngle={onMaxCornerAngle}
       />
+    </div>
+  );
+}
+
+/** The marquee (rubber-band) selection inspector: whole-selection actions
+ * (delete, reroll) plus bulk restyle applied to every selected lot. Rendered
+ * INSTEAD of the lot/block/corner inspector while a marquee is live. */
+export function MarqueeControls({
+  marquee,
+  onDelete,
+  onReroll,
+  onApply,
+  onClear,
+}: {
+  marquee: Marquee;
+  onDelete: () => void;
+  onReroll: () => void;
+  /** Apply a per-lot transform to every selected lot. */
+  onApply: (fn: (p: FacadeParams) => FacadeParams) => void;
+  onClear: () => void;
+}) {
+  const [storeys, setStoreys] = useState(3);
+  const nBlocks = marquee.blocks.length;
+  const nLots = marquee.lots.length;
+  const nNodes = marquee.nodes.length;
+  const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+
+  const applyPreset = (id: PresetId) =>
+    // Preserve each lot's own width — a bulk preset restyles character across
+    // a street of varying widths, it must not collapse every lot to one size.
+    onApply((p) => ({
+      ...DEFAULT_FACADE,
+      ...FACADE_PRESETS[id].params,
+      width: p.width,
+      cellOverrides: [],
+      preset: id,
+    }));
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-[var(--foreground)]">
+          Selection
+        </span>
+        <button
+          type="button"
+          onClick={onClear}
+          className="text-[10px] text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+        >
+          Clear
+        </button>
+      </div>
+      <p className="text-[11px] text-[var(--muted)] font-mono">
+        {plural(nBlocks, "block")} · {plural(nLots, "lot")} ·{" "}
+        {plural(nNodes, "node")} selected
+      </p>
+
+      <div className="grid grid-cols-2 gap-1">
+        <Toggle label="Reroll" on={false} onClick={onReroll} />
+        <button
+          type="button"
+          onClick={onDelete}
+          className="px-2 py-1.5 rounded text-[11px] bg-red-600/85 text-white hover:bg-red-600 transition-colors"
+        >
+          Delete selection
+        </button>
+      </div>
+
+      <Section title="Bulk restyle">
+        <div>
+          <span className="text-[10px] text-[var(--muted)] block mb-1">
+            Preset
+          </span>
+          <div className="grid grid-cols-3 gap-1">
+            {(Object.keys(FACADE_PRESETS) as PresetId[]).map((id) => (
+              <Toggle
+                key={id}
+                label={FACADE_PRESETS[id].label}
+                on={false}
+                onClick={() => applyPreset(id)}
+              />
+            ))}
+          </div>
+        </div>
+
+        <SliderRow
+          label="Storeys (apply to all)"
+          value={storeys}
+          display={`${storeys}`}
+          min={FACADE_LIMITS.storeys.min}
+          max={FACADE_LIMITS.storeys.max}
+          step={1}
+          onChange={(n) => {
+            setStoreys(n);
+            onApply((p) => ({
+              ...p,
+              storeys: n,
+              storeyHeights: classicalStoreyHeights(n, p.storeyHeight),
+            }));
+          }}
+        />
+
+        <div>
+          <span className="text-[10px] text-[var(--muted)] block mb-1">Roof</span>
+          <div className="grid grid-cols-3 gap-1">
+            {(["flat", "gable", "hip"] as const).map((t) => (
+              <Toggle
+                key={t}
+                label={t[0].toUpperCase() + t.slice(1)}
+                on={false}
+                onClick={() => onApply((p) => ({ ...p, roofType: t }))}
+              />
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-1 mt-1">
+            {(["slate", "red"] as const).map((c) => (
+              <Toggle
+                key={c}
+                label={c === "slate" ? "Slate" : "Red tile"}
+                on={false}
+                onClick={() => onApply((p) => ({ ...p, roofColor: c }))}
+              />
+            ))}
+          </div>
+        </div>
+
+        <Swatches
+          label="Wall color"
+          swatches={WALL_SWATCHES}
+          value=""
+          onPick={(hex) => onApply((p) => ({ ...p, wallColor: hex }))}
+        />
+        <Swatches
+          label="Trim color"
+          swatches={WALL_SWATCHES}
+          value=""
+          onPick={(hex) => onApply((p) => ({ ...p, trimColor: hex }))}
+        />
+      </Section>
+
+      <p className="text-[10px] text-[var(--muted)] leading-relaxed">
+        <kbd className="rounded bg-[var(--border)] px-1 font-mono">⌘/Ctrl</kbd>
+        <kbd className="ml-0.5 rounded bg-[var(--border)] px-1 font-mono">A</kbd>{" "}
+        selects every block. Selected nodes move with the selection; node-merge
+        (welding) isn&rsquo;t supported yet.
+      </p>
     </div>
   );
 }

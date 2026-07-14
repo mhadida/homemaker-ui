@@ -29,7 +29,7 @@ Four parts work together:
 | MCP server (dev only) | `uv run ../homemaker-blender/mcp_server.py` | Bridges agents to a running Blender; lives in the sibling repo |
 | Tests | `npm test` | vitest — src/lib/facade unit tests |
 
-**Tests:** vitest covers the pure facade modules — layout engine (incl. section strips), prompt parser, street generator (`refit`/`deleteLot`), node welding, corner detection/sync/miters, section edit helpers, and street-aware orientation (`src/lib/facade/*.test.ts`) — run `npm test`. No e2e/playwright; everything else is verified visually.
+**Tests:** vitest covers the pure facade modules — layout engine (incl. section strips), prompt parser, street generator (`refit`/`deleteLot`), node welding, corner detection/sync/miters, section edit helpers, street-aware orientation, and marquee hit-test/delete/translate (`src/lib/facade/*.test.ts`) — run `npm test`. No e2e/playwright; everything else is verified visually.
 
 ## Blender is NOT a runtime dependency of the web app
 
@@ -175,6 +175,23 @@ NOT involved; every edit is live (no Update button). Spec:
 - **AI prompt**: `/api/facade-prompt` (flat fully-required zod spec — OpenAI
   structured output rejects optionals) targets the selected lot, plus an
   instant local keyword parser.
+- **Marquee selection**: a Select tool (toggle beside Draw, mutually
+  exclusive) turns a plan-pane left-drag into a rubber-band rectangle that
+  grabs a **unified, mixed** set — blocks, lots, and nodes at once
+  (`src/lib/facade/marquee.ts` pure — `hitTest` holds the enclosure rule:
+  a block when BOTH endpoints are enclosed → whole-block op; else a lot when
+  its center is inside, and a node when it's inside and not an endpoint of a
+  fully-enclosed block, which subsumes its own lots/nodes). Dragging inside
+  the selection bbox translates it live (`translateMarquee` — rigid shift of
+  enclosed blocks + `moveNode` ripple for loose nodes); the Selection panel
+  (`MarqueeControls` in `FacadeControls.tsx`) deletes (`deleteMarquee`, split-
+  safe multi-lot removal), rerolls (`affectedBlockIds`), or bulk-restyles
+  every selected lot. `⌘/Ctrl+A` selects every block (whole-block marquee);
+  a single-lot click clears the marquee (the two selection models are mutually
+  exclusive both ways). Every mutation funnels through `syncCorners`; `marquee`
+  defaults null + the tool defaults off so the unused feature is byte-
+  identical. Node-merge (welding selected nodes) is deferred — nodes move
+  only. Spec: `docs/superpowers/specs/2026-07-14-marquee-selection-design.md`.
 
 ## Tailwind v4
 
