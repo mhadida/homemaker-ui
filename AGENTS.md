@@ -167,9 +167,10 @@ NOT involved; every edit is live (no Update button). Spec:
   as an occupied storey (Nyhavn). Pure `roofDormers(plan, count)` in `roof.ts`
   (front-slope placements, empty for flat/perpendicular/too-shallow);
   `layout.roofDormers`; `DormerMesh` in `FacadeMesh.tsx` (window + cheeks + a
-  little gable roof whose base buries in the opaque main roof). Slider under
-  Roof (parallel only). Absent/0 = byte-identical. Spec:
-  `docs/superpowers/specs/2026-07-14-corner-roof-design.md` (roof-storey work).
+  little gable roof + cheeks that die into the opaque main slope at the back —
+  watertight, no poke-through). `dormers` is a corner **shell** field (both
+  wings match). Slider under Roof (parallel only). Absent/0 = byte-identical.
+  Extends `docs/superpowers/specs/2026-07-14-roofs-design.md`.
 - **Pass-through arch**: a ground-floor treatment `"passage"` — a tall
   semicircular carriage arch at the door bay that pierces the massing box so
   you see through to behind (`src/lib/facade/layout.ts` — `resolveGrid` maps

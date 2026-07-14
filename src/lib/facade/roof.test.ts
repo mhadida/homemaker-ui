@@ -173,3 +173,22 @@ describe("roofDormers", () => {
     expect(roofDormers(shallow, 3)).toEqual([]);
   });
 });
+
+describe("roofDormers watertight anchoring", () => {
+  it("back edges lie on the main roof slope (no gap / poke-through)", () => {
+    const pl = resolveRoof(
+      p({ roofType: "gable", roofOrientation: "parallel", roofHeight: 3, massingDepth: 8 }),
+      WALLTOP,
+      DEPTH,
+    )!;
+    const zMid = (pl.zFront + pl.zBack) / 2;
+    const m = (pl.ridgeY - pl.eaveY) / (pl.zFront - zMid);
+    const slopeY = (z: number) => pl.eaveY + (pl.zFront - z) * m;
+    for (const d of roofDormers(pl, 3)) {
+      expect(slopeY(d.zEaveBack)).toBeCloseTo(d.headY, 6); // cheeks meet slope
+      expect(slopeY(d.zRidgeBack)).toBeCloseTo(d.peakY, 6); // ridge meets slope
+      expect(d.peakY).toBeLessThan(pl.ridgeY); // under the main ridge
+      expect(d.zRidgeBack).toBeGreaterThan(pl.zBack); // within the roof depth
+    }
+  });
+});

@@ -81,43 +81,76 @@ export function resolveRoof(
   return { type, axis, eaveY, ridgeY, x0, x1, zFront, zBack, ridge };
 }
 
-export const DORMER_WIDTH = 0.9; // window width
+export const DORMER_WIDTH = 0.9; // preferred window width
 export const DORMER_MAX = 9; // hard cap on dormer count
+const DORMER_EAVE_OVER = 0.1; // little-roof overhang beyond the cheeks
 
-/** A dormer window on the front (street) roof slope, facade-local. The mesh
- * builds a small gabled house-let whose lower part buries in the opaque roof;
- * the window face sits proud of the eave at `faceZ`. */
+/** A dormer window on the front (street) roof slope, facade-local, fully
+ * resolved so the mesh is a straight transcription. The little gable roof and
+ * cheeks die INTO the main slope at the back (their back edges lie on the
+ * slope: `mainSlopeY(zEaveBack) === headY`, `mainSlopeY(zRidgeBack) === peakY`),
+ * so the junction is watertight with no gap or poke-through. */
 export interface Dormer {
   /** center x */
   x: number;
-  /** window sill height */
-  sillY: number;
-  /** window head height */
-  headY: number;
-  /** z of the vertical window face (proud of the eave toward the street) */
-  faceZ: number;
   /** window width */
   w: number;
+  /** z of the vertical window/gable face (the roof's front eave line) */
+  faceZ: number;
+  /** main-roof eave height at the face (slope base the cheeks sit on) */
+  eaveY: number;
+  /** window sill / head heights */
+  sillY: number;
+  headY: number;
+  /** dormer ridge apex height */
+  peakY: number;
+  /** z where the cheeks (eave height) meet the main slope */
+  zEaveBack: number;
+  /** z where the ridge (peak height) meets the main slope */
+  zRidgeBack: number;
+  /** overhang of the little roof beyond the cheeks */
+  over: number;
 }
 
 /** Pure: dormer placements on a parallel pitched roof's front slope. Empty for
  * flat/perpendicular roofs or a too-shallow rise. `count` is clamped to
- * [0, DORMER_MAX]; dormers space evenly across the width (bay-center aligned
- * when count === bays). */
+ * [0, DORMER_MAX] and to whatever fits without overlap; dormers space evenly
+ * across the width (bay-center aligned when count === bays). */
 export function roofDormers(plan: RoofPlan | null, count: number): Dormer[] {
   if (!plan || plan.axis !== "x") return [];
   const n = Math.min(DORMER_MAX, Math.max(0, Math.floor(count)));
   if (n === 0) return [];
   const rise = plan.ridgeY - plan.eaveY;
-  const h = Math.min(1.05, rise * 0.5);
-  if (h < 0.5) return []; // too shallow to host a real dormer
-  const sillY = plan.eaveY + 0.3; // sit above the eave line
-  const faceZ = plan.zFront + 0.15; // proud of the eave toward the street
+  if (rise < 1.6) return []; // need room for a dormer under the main ridge
+  const zMid = (plan.zFront + plan.zBack) / 2;
+  const run = plan.zFront - zMid; // > 0
+  const m = rise / run; // front-slope gradient (y per −z)
+  // z where the main slope reaches height Y: mainSlopeY(z) = eaveY + (zFront−z)·m
+  const zAtHeight = (Y: number) => plan.zFront - (Y - plan.eaveY) / m;
+
   const span = plan.x1 - plan.x0;
+  // Shrink the width so `n` dormers never overlap or spill off the roof edge.
+  const w = Math.min(DORMER_WIDTH, (span / n) * 0.7);
+  if (w < 0.4) return []; // too cramped to host real dormers
+  const h = Math.min(1.0, rise * 0.5);
+  const sillY = plan.eaveY + 0.35;
+  const headY = sillY + h;
+  const peakY = headY + 0.3;
   const out: Dormer[] = [];
   for (let i = 0; i < n; i++) {
     const x = plan.x0 + (span * (i + 0.5)) / n;
-    out.push({ x, sillY, headY: sillY + h, faceZ, w: DORMER_WIDTH });
+    out.push({
+      x,
+      w,
+      faceZ: plan.zFront,
+      eaveY: plan.eaveY,
+      sillY,
+      headY,
+      peakY,
+      zEaveBack: zAtHeight(headY),
+      zRidgeBack: zAtHeight(peakY),
+      over: DORMER_EAVE_OVER,
+    });
   }
   return out;
 }

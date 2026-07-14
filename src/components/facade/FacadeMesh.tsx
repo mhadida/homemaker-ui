@@ -52,11 +52,18 @@ function buildRoofGeometry(plan: RoofPlan): THREE.BufferGeometry {
   return geo;
 }
 
-const DORMER_DEPTH = 0.75; // how far back a dormer buries into the roof
+type V3 = [number, number, number];
+function soupGeometry(t: number[]): THREE.BufferGeometry {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(t, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
 
-/** A gabled dormer window on the front roof slope: cheeks + framed glass + a
- * little gable roof. The back buries into the opaque main roof, so no
- * slope-conforming cut is needed. Facade-local; rendered in the roof group. */
+/** A gabled dormer on the front roof slope. The little gable roof and the two
+ * cheek walls die INTO the main slope at the back (their back edges lie on the
+ * slope, per `roofDormers`), so the junction is watertight — no gap or
+ * poke-through. Facade-local; rendered in the roof group. */
 function DormerMesh({
   d,
   wallColor,
@@ -70,57 +77,73 @@ function DormerMesh({
 }) {
   const h = d.headY - d.sillY;
   const cy = (d.sillY + d.headY) / 2;
-  const zb = d.faceZ - DORMER_DEPTH;
+  const xl = d.x - d.w / 2;
+  const xr = d.x + d.w / 2;
+  const oxl = xl - d.over;
+  const oxr = xr + d.over;
+
+  // Little gable roof: front gable at the face, two slopes running back to die
+  // into the main slope (ridge at zRidgeBack, eaves at zEaveBack).
   const roofGeo = useMemo(() => {
-    const over = 0.1;
-    const xl = -d.w / 2 - over;
-    const xr = d.w / 2 + over;
-    type V = [number, number, number];
-    const peakF: V = [0, d.headY + 0.34, d.faceZ];
-    const peakB: V = [0, d.headY + 0.18, zb];
-    const FL: V = [xl, d.headY, d.faceZ];
-    const FR: V = [xr, d.headY, d.faceZ];
-    const BL: V = [xl, d.headY - 0.16, zb];
-    const BR: V = [xr, d.headY - 0.16, zb];
+    const PF: V3 = [d.x, d.peakY, d.faceZ];
+    const PB: V3 = [d.x, d.peakY, d.zRidgeBack];
+    const EL: V3 = [oxl, d.headY, d.faceZ];
+    const ER: V3 = [oxr, d.headY, d.faceZ];
+    const BL: V3 = [oxl, d.headY, d.zEaveBack];
+    const BR: V3 = [oxr, d.headY, d.zEaveBack];
     const t: number[] = [];
-    const push = (...vs: V[]) => vs.forEach((v) => t.push(v[0], v[1], v[2]));
-    // left slope, right slope, front gable infill (double-sided material, so
-    // winding doesn't matter for these few small faces).
-    push(FL, peakF, peakB, FL, peakB, BL);
-    push(FR, BR, peakB, FR, peakB, peakF);
-    push(FL, FR, peakF);
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.Float32BufferAttribute(t, 3));
-    geo.computeVertexNormals();
-    return geo;
-  }, [d.w, d.headY, d.faceZ, zb]);
-  useEffect(() => () => roofGeo.dispose(), [roofGeo]);
+    const push = (...vs: V3[]) => vs.forEach((v) => t.push(v[0], v[1], v[2]));
+    push(EL, PF, PB, EL, PB, BL); // left slope
+    push(ER, BR, PB, ER, PB, PF); // right slope
+    return soupGeometry(t);
+  }, [d.x, d.peakY, d.faceZ, d.zRidgeBack, d.headY, oxl, oxr, d.zEaveBack]);
+
+  // Front gable infill (wall) + two cheek walls that meet the slope at the back.
+  const wallGeo = useMemo(() => {
+    const t: number[] = [];
+    const push = (...vs: V3[]) => vs.forEach((v) => t.push(v[0], v[1], v[2]));
+    // front gable triangle
+    push([oxl, d.headY, d.faceZ], [oxr, d.headY, d.faceZ], [d.x, d.peakY, d.faceZ]);
+    // left cheek: front-top (headY), front-bottom on slope (eaveY), back on
+    // slope at headY — a triangle riding the slope.
+    push([xl, d.headY, d.faceZ], [xl, d.eaveY, d.faceZ], [xl, d.headY, d.zEaveBack]);
+    // right cheek
+    push([xr, d.headY, d.faceZ], [xr, d.headY, d.zEaveBack], [xr, d.eaveY, d.faceZ]);
+    return soupGeometry(t);
+  }, [d.x, d.headY, d.peakY, d.faceZ, d.eaveY, d.zEaveBack, xl, xr, oxl, oxr]);
+
+  useEffect(
+    () => () => {
+      roofGeo.dispose();
+      wallGeo.dispose();
+    },
+    [roofGeo, wallGeo],
+  );
+
   return (
-    <group position={[d.x, 0, 0]}>
-      {[-1, 1].map((s) => (
-        <mesh
-          key={s}
-          position={[s * (d.w / 2 + 0.03), cy - 0.05, d.faceZ - DORMER_DEPTH / 2]}
-          castShadow
-        >
-          <boxGeometry args={[0.06, h + 0.1, DORMER_DEPTH]} />
-          <meshStandardMaterial color={wallColor} roughness={0.85} />
-        </mesh>
-      ))}
-      <mesh position={[0, cy, d.faceZ + 0.01]} castShadow>
-        <boxGeometry args={[d.w + 0.08, h + 0.08, 0.05]} />
-        <meshStandardMaterial color={trimColor} roughness={0.7} />
-      </mesh>
-      <mesh position={[0, cy, d.faceZ + 0.03]}>
-        <boxGeometry args={[d.w, h, 0.04]} />
-        <meshStandardMaterial color="#2a2e33" roughness={0.2} metalness={0.4} />
-      </mesh>
-      <mesh geometry={roofGeo} castShadow>
+    <group>
+      <mesh geometry={roofGeo} castShadow receiveShadow>
         <meshStandardMaterial
           color={roofColor}
           roughness={0.8}
           side={THREE.DoubleSide}
         />
+      </mesh>
+      <mesh geometry={wallGeo} castShadow receiveShadow>
+        <meshStandardMaterial
+          color={wallColor}
+          roughness={0.85}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      {/* window: trim frame + glass, on the vertical face */}
+      <mesh position={[d.x, cy, d.faceZ + 0.02]} castShadow>
+        <boxGeometry args={[d.w + 0.08, h + 0.08, 0.05]} />
+        <meshStandardMaterial color={trimColor} roughness={0.7} />
+      </mesh>
+      <mesh position={[d.x, cy, d.faceZ + 0.04]}>
+        <boxGeometry args={[d.w, h, 0.04]} />
+        <meshStandardMaterial color="#2a2e33" roughness={0.2} metalness={0.4} />
       </mesh>
     </group>
   );
