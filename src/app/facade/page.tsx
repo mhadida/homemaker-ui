@@ -24,11 +24,17 @@ import {
 import {
   syncLineToLots,
   nextBlockId,
+  reserveBlockIds,
   DEFAULT_GEN,
   type BlockGenSettings,
   type FacadeBlock,
   type Selection,
 } from "@/lib/facade/blocks";
+import {
+  toJSON,
+  fromJSON,
+  type SceneState,
+} from "@/lib/facade/document";
 import { rerollBlock, generateBlock, deleteLot } from "@/lib/facade/generate";
 import { moveNode } from "@/lib/facade/nodes";
 import { DEFAULT_GROUND, type Ground } from "@/lib/facade/terrain";
@@ -49,6 +55,10 @@ import PromptInput from "@/components/demo/PromptInput";
 const FacadeViewer = dynamic(() => import("@/components/facade/FacadeViewer"), {
   ssr: false,
 });
+
+/** localStorage key for the silent autosave (crash/refresh insurance; the
+ * explicit file Save/Load is the portable, shareable mechanism). */
+const AUTOSAVE_KEY = "facademaker:autosave";
 
 // AI spec <-> FacadeParams plumbing (mirrors the main page's BuildingSpec flow).
 interface FacadeSpec {
@@ -218,6 +228,8 @@ export default function FacadePage() {
   const [maxCornerAngle, setMaxCornerAngle] = useState(DEFAULT_MAX_CORNER_ANGLE);
   const [ground, setGround] = useState<Ground>(DEFAULT_GROUND);
   const [streetWidth, setStreetWidth] = useState(STREET_WIDTH_DEFAULT);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // The street is derived from the first (earliest surviving) block: its
   // facade normal defines which side the street is on. null in the blank
@@ -226,6 +238,84 @@ export default function FacadePage() {
     () => (blocks[0] ? streetRefOf(blocks[0]) : null),
     [blocks],
   );
+
+  // ── Save / Load ────────────────────────────────────────────────────────
+  /** Replace the whole scene from a loaded document. Re-syncs corners
+   * defensively (idempotent for clean saves; repairs hand-edited files) and
+   * bumps the block-id counter so newly-drawn blocks can't collide. */
+  const applyScene = useCallback((s: SceneState) => {
+    reserveBlockIds(s.blocks);
+    setBlocks(syncCorners(s.blocks, s.cornerChoices, s.maxCornerAngle));
+    setCornerChoices(s.cornerChoices);
+    setGround(s.ground);
+    setStreetWidth(s.streetWidth);
+    setMaxCornerAngle(s.maxCornerAngle);
+    setSelected(
+      s.blocks.length > 0
+        ? { blockId: s.blocks[0].id, lot: 0, level: "block" }
+        : null,
+    );
+  }, []);
+
+  const handleSave = useCallback(() => {
+    const text = toJSON({
+      blocks,
+      cornerChoices,
+      ground,
+      streetWidth,
+      maxCornerAngle,
+    });
+    const url = URL.createObjectURL(
+      new Blob([text], { type: "application/json" }),
+    );
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "facade-scene.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [blocks, cornerChoices, ground, streetWidth, maxCornerAngle]);
+
+  const handleLoadFile = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = ""; // let the same file be re-selected later
+      if (!file) return;
+      const res = fromJSON(await file.text());
+      if (!res.ok) {
+        setLoadError(res.error);
+        return;
+      }
+      setLoadError(null);
+      applyScene(res.scene);
+    },
+    [applyScene],
+  );
+
+  // Restore the autosave once on mount (survives refresh/crash). Guarded so
+  // Strict Mode's double-invoke can't apply it twice.
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    const saved = window.localStorage.getItem(AUTOSAVE_KEY);
+    if (!saved) return;
+    const res = fromJSON(saved);
+    if (res.ok && res.scene.blocks.length > 0) applyScene(res.scene);
+    else window.localStorage.removeItem(AUTOSAVE_KEY);
+  }, [applyScene]);
+
+  // Debounced autosave — one write 500 ms after the last change, so live
+  // node drags don't hammer localStorage every frame.
+  useEffect(() => {
+    if (blocks.length === 0) return;
+    const id = window.setTimeout(() => {
+      window.localStorage.setItem(
+        AUTOSAVE_KEY,
+        toJSON({ blocks, cornerChoices, ground, streetWidth, maxCornerAngle }),
+      );
+    }, 500);
+    return () => window.clearTimeout(id);
+  }, [blocks, cornerChoices, ground, streetWidth, maxCornerAngle]);
 
   const selectedBlock = selected
     ? (blocks.find((b) => b.id === selected.blockId) ?? null)
@@ -616,6 +706,33 @@ export default function FacadePage() {
           >
             ← building editor
           </Link>
+          <span className="mx-1 h-4 w-px bg-[var(--border)]" aria-hidden />
+          <button
+            type="button"
+            onClick={handleSave}
+            className="text-[11px] px-2 py-0.5 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30 transition-colors"
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="text-[11px] px-2 py-0.5 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30 transition-colors"
+          >
+            Load
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={handleLoadFile}
+          />
+          {loadError && (
+            <span className="text-[11px] text-red-400" role="alert">
+              {loadError}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-3 text-[11px] text-[var(--muted)] font-mono">
           {params && layout ? (
