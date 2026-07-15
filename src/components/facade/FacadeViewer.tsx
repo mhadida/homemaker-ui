@@ -40,7 +40,7 @@ import {
   streetAwareFlipped,
   type StreetRef,
 } from "@/lib/facade/street";
-import { smoothCentreline } from "@/lib/street/geometry";
+import { smoothCentreline, snapStreetPoint } from "@/lib/street/geometry";
 import type { StreetNetwork, StreetType, Vec2 } from "@/lib/street/types";
 
 interface FacadeViewerProps {
@@ -371,10 +371,12 @@ function StreetDrawSurface({
   active,
   activeType,
   onCommitStreet,
+  network,
 }: {
   active: boolean;
   activeType: StreetType;
   onCommitStreet: (type: StreetType, points: Vec2[]) => void;
+  network: StreetNetwork;
 }) {
   const [path, setPath] = useState<Vec2[]>([]);
   const [cursor, setCursor] = useState<Vec2 | null>(null);
@@ -425,7 +427,8 @@ function StreetDrawSurface({
         position={[0, 0.02, 0]}
         onPointerDown={(e) => {
           e.stopPropagation();
-          const p: Vec2 = [e.point.x, e.point.z];
+          const raw: Vec2 = [e.point.x, e.point.z];
+          const p = snapStreetPoint(raw, network, 1);
           if (path.length === 0) {
             setPath([p]);
             return;
@@ -440,7 +443,10 @@ function StreetDrawSurface({
           }
           setPath([...path, p]);
         }}
-        onPointerMove={(e) => setCursor([e.point.x, e.point.z])}
+        onPointerMove={(e) => {
+          const raw: Vec2 = [e.point.x, e.point.z];
+          setCursor(snapStreetPoint(raw, network, 1));
+        }}
       >
         <planeGeometry args={[600, 600]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
@@ -1121,6 +1127,7 @@ function PlanPane({
         active={streetDrawMode}
         activeType={activeStreetType}
         onCommitStreet={onCommitStreet}
+        network={streetNetwork}
       />
       <NodeHandles
         blocks={blocks}

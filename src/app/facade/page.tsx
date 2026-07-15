@@ -49,7 +49,7 @@ import {
   type StreetType,
   type Vec2,
 } from "@/lib/street/types";
-import { deriveIntersections } from "@/lib/street/intersections";
+import { deriveIntersections, pruneRoundabouts } from "@/lib/street/intersections";
 import { streetAdvisory } from "@/lib/street/geometry";
 import {
   syncCorners,
@@ -304,6 +304,8 @@ export default function FacadePage() {
         ? { blockId: s.blocks[0].id, lot: 0, level: "block" }
         : null,
     );
+    setSelectedStreet(null);
+    setSelectedIntersection(null);
   }, []);
 
   const handleSave = useCallback(() => {
@@ -855,10 +857,9 @@ export default function FacadePage() {
   }, []);
 
   const handleDeleteStreet = useCallback((id: string) => {
-    setStreetNetwork((n) => ({
-      ...n,
-      streets: n.streets.filter((s) => s.id !== id),
-    }));
+    setStreetNetwork((n) =>
+      pruneRoundabouts({ ...n, streets: n.streets.filter((s) => s.id !== id) }),
+    );
     setSelectedStreet(null);
   }, []);
 

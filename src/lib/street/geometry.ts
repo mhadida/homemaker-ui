@@ -1,4 +1,4 @@
-import type { Street, Vec2 } from "./types";
+import type { Street, StreetNetwork, Vec2 } from "./types";
 
 const RING_SEGMENTS = 32;
 
@@ -41,6 +41,30 @@ export function streetAdvisory(street: Street): string | null {
     }
   }
   return null;
+}
+
+/** Endpoint snapping for the street-draw tool (mirrors `snapPoint` in
+ * facade/blocks.ts): returns the nearest EXISTING vertex across every
+ * street's `points`, within `radius`, else `p` unchanged. Exact-value
+ * snapping (no rounding) so a snapped vertex matches `deriveIntersections`'
+ * exact-float weld. Pure — an empty network is a no-op. */
+export function snapStreetPoint(
+  p: Vec2,
+  network: StreetNetwork,
+  radius: number,
+): Vec2 {
+  let best = p;
+  let bestD = radius;
+  for (const s of network.streets) {
+    for (const v of s.points) {
+      const d = Math.hypot(p[0] - v[0], p[1] - v[1]);
+      if (d < bestD) {
+        bestD = d;
+        best = [v[0], v[1]];
+      }
+    }
+  }
+  return best;
 }
 
 /** Centripetal-ish Catmull-Rom through the vertices (uniform), sampling each

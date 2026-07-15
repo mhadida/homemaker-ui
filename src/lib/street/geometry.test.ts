@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { smoothCentreline, streetRibbon, roundaboutRing, streetAdvisory } from "./geometry";
+import {
+  smoothCentreline,
+  streetRibbon,
+  roundaboutRing,
+  streetAdvisory,
+  snapStreetPoint,
+} from "./geometry";
+import type { StreetNetwork } from "./types";
 
 describe("smoothCentreline", () => {
   it("passes a 2-point street through unchanged (straight)", () => {
@@ -65,6 +72,44 @@ describe("roundaboutRing", () => {
     expect(island).toHaveLength(32);
     for (const p of outer) expect(Math.hypot(p[0] - 5, p[1] - 5)).toBeCloseTo(10, 6);
     for (const p of island) expect(Math.hypot(p[0] - 5, p[1] - 5)).toBeCloseTo(3, 6);
+  });
+});
+
+describe("snapStreetPoint", () => {
+  const net: StreetNetwork = {
+    streets: [
+      { id: "a", type: "street", points: [[0, 0], [10, 0]] },
+      { id: "b", type: "street", points: [[20, 20], [30, 20]] },
+    ],
+    roundabouts: [],
+  };
+
+  it("snaps a point within radius of an existing street vertex to that exact vertex", () => {
+    const snapped = snapStreetPoint([10.3, 0.2], net, 1);
+    expect(snapped).toEqual([10, 0]);
+  });
+
+  it("leaves a point outside radius of every vertex unchanged", () => {
+    const p: [number, number] = [5, 5];
+    expect(snapStreetPoint(p, net, 1)).toEqual(p);
+  });
+
+  it("an empty network leaves the point unchanged (no-op)", () => {
+    const p: [number, number] = [3, 4];
+    const empty: StreetNetwork = { streets: [], roundabouts: [] };
+    expect(snapStreetPoint(p, empty, 1)).toEqual(p);
+  });
+
+  it("picks the nearest vertex when multiple are within radius", () => {
+    const close: StreetNetwork = {
+      streets: [
+        { id: "a", type: "street", points: [[0, 0]] },
+        { id: "b", type: "street", points: [[0.6, 0]] },
+      ],
+      roundabouts: [],
+    };
+    // point closer to [0.6,0] than [0,0], both within radius 1
+    expect(snapStreetPoint([0.7, 0], close, 1)).toEqual([0.6, 0]);
   });
 });
 

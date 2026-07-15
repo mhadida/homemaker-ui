@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deriveIntersections } from "./intersections";
+import { deriveIntersections, pruneRoundabouts } from "./intersections";
 import type { StreetNetwork } from "./types";
 
 const net = (streets: StreetNetwork["streets"]): StreetNetwork => ({ streets, roundabouts: [] });
@@ -38,5 +38,51 @@ describe("deriveIntersections", () => {
       { id: "a", type: "street", points: [[0, 0], [10, 0], [0, 0]] },
     ]));
     expect(is).toHaveLength(0);
+  });
+});
+
+describe("pruneRoundabouts", () => {
+  it("drops a roundabout whose intersection no longer exists after a street is removed", () => {
+    const before: StreetNetwork = {
+      streets: [
+        { id: "a", type: "street", points: [[0, 0], [10, 0]] },
+        { id: "b", type: "street", points: [[10, 0], [10, 10]] },
+      ],
+      roundabouts: [["10:0", { kind: "fountain" }]],
+    };
+    // Confirm the fixture's key actually matches the derived intersection key.
+    expect(deriveIntersections(before).map((i) => i.key)).toEqual(["10:0"]);
+
+    const after: StreetNetwork = { ...before, streets: [before.streets[0]] };
+    const pruned = pruneRoundabouts(after);
+    expect(pruned.roundabouts).toEqual([]);
+  });
+
+  it("keeps a roundabout whose intersection is still derived", () => {
+    const net: StreetNetwork = {
+      streets: [
+        { id: "a", type: "street", points: [[0, 0], [10, 0]] },
+        { id: "b", type: "street", points: [[10, 0], [10, 10]] },
+        { id: "c", type: "street", points: [[10, 10], [20, 10]] },
+        { id: "d", type: "street", points: [[10, 10], [10, 20]] },
+      ],
+      roundabouts: [
+        ["10:0", { kind: "fountain" }],
+        ["10:10", { kind: "obelisk" }],
+      ],
+    };
+    const pruned = pruneRoundabouts(net);
+    expect(pruned.roundabouts).toEqual([
+      ["10:0", { kind: "fountain" }],
+      ["10:10", { kind: "obelisk" }],
+    ]);
+  });
+
+  it("empty roundabouts list stays empty (no-op)", () => {
+    const net: StreetNetwork = {
+      streets: [{ id: "a", type: "street", points: [[0, 0], [10, 0]] }],
+      roundabouts: [],
+    };
+    expect(pruneRoundabouts(net).roundabouts).toEqual([]);
   });
 });

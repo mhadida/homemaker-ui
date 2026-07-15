@@ -32,3 +32,11 @@ export function deriveIntersections(net: StreetNetwork): Intersection[] {
   }
   return out;
 }
+
+/** Drops roundabout entries whose intersection key is no longer DERIVED
+ * (e.g. after deleting a street that made the junction). Keeps every entry
+ * still backed by a real intersection. Pure — no-op on an empty network. */
+export function pruneRoundabouts(net: StreetNetwork): StreetNetwork {
+  const valid = new Set(deriveIntersections(net).map((i) => i.key));
+  return { ...net, roundabouts: net.roundabouts.filter(([k]) => valid.has(k)) };
+}
