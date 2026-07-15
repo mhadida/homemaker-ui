@@ -59,9 +59,15 @@ export function streetRibbon(
     const next = i < n - 1 ? dir(centreline[i], centreline[i + 1]) : prev;
     let tx = prev[0] + next[0];
     let tz = prev[1] + next[1];
-    const tl = Math.hypot(tx, tz) || 1;
-    tx /= tl;
-    tz /= tl;
+    const tl = Math.hypot(tx, tz);
+    // If averaged tangent is degenerate (sharp reversal), fall back to next direction
+    if (tl < 1e-6) {
+      tx = next[0];
+      tz = next[1];
+    } else {
+      tx /= tl;
+      tz /= tl;
+    }
     // left-perpendicular of the tangent (plan coords)
     const nx = -tz;
     const nz = tx;

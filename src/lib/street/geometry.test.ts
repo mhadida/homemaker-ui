@@ -48,4 +48,12 @@ describe("streetRibbon", () => {
       expect(dr).toBeCloseTo(3, 4);
     }
   });
+
+  it("keeps a full-width offset at a sharp reversal (no collapse to zero)", () => {
+    const { left, right } = streetRibbon([[0, 0], [10, 0], [0.001, 0]], 8); // half = 4
+    const dL = Math.hypot(left[1][0] - 10, left[1][1] - 0);
+    const dR = Math.hypot(right[1][0] - 10, right[1][1] - 0);
+    expect(dL).toBeCloseTo(4, 6);
+    expect(dR).toBeCloseTo(4, 6);
+  });
 });
