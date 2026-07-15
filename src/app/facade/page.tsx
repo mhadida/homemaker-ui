@@ -340,22 +340,22 @@ export default function FacadePage() {
     const saved = window.localStorage.getItem(AUTOSAVE_KEY);
     if (!saved) return;
     const res = fromJSON(saved);
-    if (res.ok && res.scene.blocks.length > 0) applyScene(res.scene);
+    if (res.ok && (res.scene.blocks.length > 0 || res.scene.streetNetwork.streets.length > 0)) applyScene(res.scene);
     else window.localStorage.removeItem(AUTOSAVE_KEY);
   }, [applyScene]);
 
   // Debounced autosave — one write 500 ms after the last change, so live
   // node drags don't hammer localStorage every frame. Emptying a scene
   // clears the key so a refresh doesn't resurrect deleted buildings — but
-  // ONLY after the scene has actually held blocks this session, so the
+  // ONLY after the scene has actually held content (blocks or streets) this session, so the
   // mount-time empty pass can't wipe a good save before restore lands.
-  const everHadBlocksRef = useRef(false);
+  const everHadContentRef = useRef(false);
   useEffect(() => {
-    if (blocks.length === 0) {
-      if (everHadBlocksRef.current) window.localStorage.removeItem(AUTOSAVE_KEY);
+    if (blocks.length === 0 && streetNetwork.streets.length === 0) {
+      if (everHadContentRef.current) window.localStorage.removeItem(AUTOSAVE_KEY);
       return;
     }
-    everHadBlocksRef.current = true;
+    everHadContentRef.current = true;
     const id = window.setTimeout(() => {
       window.localStorage.setItem(
         AUTOSAVE_KEY,
