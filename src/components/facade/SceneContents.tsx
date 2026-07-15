@@ -4,6 +4,8 @@ import { useMemo } from "react";
 import { Environment, ContactShadows, Grid, Edges, Line } from "@react-three/drei";
 import * as THREE from "three";
 import FacadeMesh from "./FacadeMesh";
+import StreetNetworkView from "@/components/street/StreetNetworkView";
+import type { StreetNetwork } from "@/lib/street/types";
 import type { FacadeParams } from "@/lib/facade/types";
 import type { ViewSettings } from "@/lib/building/types";
 import {
@@ -224,6 +226,7 @@ export default function SceneContents({
   maxCornerAngle,
   ground,
   marquee = null,
+  streetNetwork,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -234,6 +237,9 @@ export default function SceneContents({
   /** Live marquee selection to highlight (blocks/lots via SelectionMarker,
    * nodes via a gold ring). null → no marquee (byte-identical). */
   marquee?: Marquee | null;
+  /** Drawn streets + roundabouts, world space. undefined → nothing rendered
+   * (byte-identical to before street support existed). */
+  streetNetwork?: StreetNetwork;
 }) {
   const groundGeo = useGroundGeometry();
   const groundQuat = useMemo(() => {
@@ -355,6 +361,7 @@ export default function SceneContents({
           />
         </mesh>
       ))}
+      {streetNetwork && <StreetNetworkView network={streetNetwork} />}
       {/* Ground plane + grid tilt to the slope so buildings sit on it at
        * their datums. polygonOffset keeps the sidewalk/road/grid winning
        * the depth test. */}

@@ -6,6 +6,8 @@ import { DEFAULT_GROUND } from "./terrain";
 import { STREET_WIDTH_DEFAULT } from "./street";
 import type { FacadeParams } from "./types";
 import { DEFAULT_FACADE } from "./types";
+import type { StreetNetwork } from "@/lib/street/types";
+import { EMPTY_NETWORK } from "@/lib/street/types";
 
 /** Bump when the on-disk shape changes incompatibly. Loaders reject unknown
  * versions rather than silently mis-reading (beta data-preservation rule). */
@@ -19,6 +21,7 @@ export interface SceneState {
   ground: Ground;
   streetWidth: number;
   maxCornerAngle: number;
+  streetNetwork: StreetNetwork;
 }
 
 /** JSON-native form. `cornerChoices` is a Map in memory → entries on disk
@@ -30,6 +33,7 @@ export interface FacadeDocument {
   ground: Ground;
   streetWidth: number;
   maxCornerAngle: number;
+  streetNetwork: StreetNetwork;
 }
 
 export type LoadResult =
@@ -45,6 +49,7 @@ export function serializeScene(s: SceneState): FacadeDocument {
     ground: s.ground,
     streetWidth: s.streetWidth,
     maxCornerAngle: s.maxCornerAngle,
+    streetNetwork: s.streetNetwork,
   };
 }
 
@@ -147,6 +152,21 @@ export function deserializeScene(raw: unknown): LoadResult {
       ? (doc.ground as Ground)
       : DEFAULT_GROUND;
 
+  // Additive (older saves have no field at all) — also tolerate a malformed
+  // `streets` (anything other than an array) rather than crash the loader.
+  const rawNet = doc.streetNetwork;
+  const streetNetwork: StreetNetwork =
+    isObject(rawNet) && Array.isArray((rawNet as { streets?: unknown }).streets)
+      ? {
+          streets: (rawNet as unknown as StreetNetwork).streets,
+          roundabouts: Array.isArray(
+            (rawNet as { roundabouts?: unknown }).roundabouts,
+          )
+            ? (rawNet as unknown as StreetNetwork).roundabouts
+            : [],
+        }
+      : EMPTY_NETWORK;
+
   return {
     ok: true,
     scene: {
@@ -159,6 +179,7 @@ export function deserializeScene(raw: unknown): LoadResult {
       maxCornerAngle: isFiniteNumber(doc.maxCornerAngle)
         ? doc.maxCornerAngle
         : DEFAULT_MAX_CORNER_ANGLE,
+      streetNetwork,
     },
   };
 }

@@ -12,6 +12,7 @@ import { DEFAULT_FACADE } from "./types";
 import { DEFAULT_GROUND } from "./terrain";
 import { STREET_WIDTH_DEFAULT } from "./street";
 import { DEFAULT_MAX_CORNER_ANGLE, type CornerChoice } from "./corners";
+import { EMPTY_NETWORK } from "../street/types";
 
 const mkBlock = (
   id: string,
@@ -42,6 +43,7 @@ const scene = (): SceneState => ({
   ground: { slope: 0.1, azimuth: 45 },
   streetWidth: 18,
   maxCornerAngle: 120,
+  streetNetwork: EMPTY_NETWORK,
 });
 
 describe("serializeScene / toJSON", () => {
@@ -184,6 +186,7 @@ describe("params normalization (partial lots render safe)", () => {
       ground: DEFAULT_GROUND,
       streetWidth: STREET_WIDTH_DEFAULT,
       maxCornerAngle: DEFAULT_MAX_CORNER_ANGLE,
+      streetNetwork: EMPTY_NETWORK,
     };
     const res = fromJSON(toJSON(s));
     expect(res.ok).toBe(true);
@@ -210,6 +213,22 @@ describe("forward-compatible defaults", () => {
     expect(res.scene.ground).toEqual(DEFAULT_GROUND);
     expect(res.scene.streetWidth).toBe(STREET_WIDTH_DEFAULT);
     expect(res.scene.maxCornerAngle).toBe(DEFAULT_MAX_CORNER_ANGLE);
+  });
+});
+
+describe("streetNetwork", () => {
+  it("round-trips a streetNetwork; absent → empty", () => {
+    const withNet = {
+      ...scene(),
+      streetNetwork: { streets: [{ id: "street-1", type: "street", points: [[0,0],[10,0]] }], roundabouts: [] },
+    };
+    const res = fromJSON(toJSON(withNet as never));
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.scene.streetNetwork.streets).toHaveLength(1);
+    // old doc with no streetNetwork → empty network, still ok
+    const old = deserializeScene({ version: 1, blocks: serializeScene(scene()).blocks });
+    expect(old.ok).toBe(true);
+    if (old.ok) expect(old.scene.streetNetwork.streets).toEqual([]);
   });
 });
 

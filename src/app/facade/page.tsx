@@ -40,6 +40,14 @@ import { moveNode, deriveNodes } from "@/lib/facade/nodes";
 import { DEFAULT_GROUND, type Ground } from "@/lib/facade/terrain";
 import { streetRefOf, STREET_WIDTH_DEFAULT } from "@/lib/facade/street";
 import {
+  EMPTY_NETWORK,
+  nextStreetId,
+  reserveStreetIds,
+  type StreetNetwork,
+  type StreetType,
+  type Vec2,
+} from "@/lib/street/types";
+import {
   syncCorners,
   detectCorners,
   cornerChoice,
@@ -239,6 +247,10 @@ export default function FacadePage() {
   const [maxCornerAngle, setMaxCornerAngle] = useState(DEFAULT_MAX_CORNER_ANGLE);
   const [ground, setGround] = useState<Ground>(DEFAULT_GROUND);
   const [streetWidth, setStreetWidth] = useState(STREET_WIDTH_DEFAULT);
+  // The standalone road network (independent of blocks/lots). Empty by
+  // default so every existing path is byte-identical.
+  const [streetNetwork, setStreetNetwork] =
+    useState<StreetNetwork>(EMPTY_NETWORK);
   const [loadError, setLoadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Marquee (rubber-band) multi-selection. Coexists with single `selected`:
@@ -266,11 +278,13 @@ export default function FacadePage() {
    * bumps the block-id counter so newly-drawn blocks can't collide. */
   const applyScene = useCallback((s: SceneState) => {
     reserveBlockIds(s.blocks);
+    reserveStreetIds(s.streetNetwork.streets);
     setBlocks(syncCorners(s.blocks, s.cornerChoices, s.maxCornerAngle));
     setCornerChoices(s.cornerChoices);
     setGround(s.ground);
     setStreetWidth(s.streetWidth);
     setMaxCornerAngle(s.maxCornerAngle);
+    setStreetNetwork(s.streetNetwork);
     setSelected(
       s.blocks.length > 0
         ? { blockId: s.blocks[0].id, lot: 0, level: "block" }
@@ -285,6 +299,7 @@ export default function FacadePage() {
       ground,
       streetWidth,
       maxCornerAngle,
+      streetNetwork,
     });
     const url = URL.createObjectURL(
       new Blob([text], { type: "application/json" }),
@@ -298,7 +313,7 @@ export default function FacadePage() {
     // Defer the revoke so the download has surely started (revoking on the
     // same tick is the fragile variant).
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
-  }, [blocks, cornerChoices, ground, streetWidth, maxCornerAngle]);
+  }, [blocks, cornerChoices, ground, streetWidth, maxCornerAngle, streetNetwork]);
 
   const handleLoadFile = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -344,11 +359,18 @@ export default function FacadePage() {
     const id = window.setTimeout(() => {
       window.localStorage.setItem(
         AUTOSAVE_KEY,
-        toJSON({ blocks, cornerChoices, ground, streetWidth, maxCornerAngle }),
+        toJSON({
+          blocks,
+          cornerChoices,
+          ground,
+          streetWidth,
+          maxCornerAngle,
+          streetNetwork,
+        }),
       );
     }, 500);
     return () => window.clearTimeout(id);
-  }, [blocks, cornerChoices, ground, streetWidth, maxCornerAngle]);
+  }, [blocks, cornerChoices, ground, streetWidth, maxCornerAngle, streetNetwork]);
 
   const selectedBlock = selected
     ? (blocks.find((b) => b.id === selected.blockId) ?? null)
@@ -751,6 +773,15 @@ export default function FacadePage() {
     [cornerChoices, maxCornerAngle],
   );
 
+  /** Commit one finished street polyline drawn with the street tool. Streets
+   * are independent of blocks — just appended to the network. */
+  const handleCommitStreet = useCallback((type: StreetType, points: Vec2[]) => {
+    setStreetNetwork((n) => ({
+      ...n,
+      streets: [...n.streets, { id: nextStreetId(), type, points }],
+    }));
+  }, []);
+
   const handleMoveNode = useCallback(
     (from: [number, number], to: [number, number]) => {
       // Computed OUTSIDE the updater so the boolean result is available
@@ -965,6 +996,8 @@ export default function FacadePage() {
             onMarqueeMoveStart={handleMarqueeMoveStart}
             onMarqueeMove={handleMarqueeMove}
             onMarqueeMoveEnd={handleMarqueeMoveEnd}
+            streetNetwork={streetNetwork}
+            onCommitStreet={handleCommitStreet}
           />
         </div>
 

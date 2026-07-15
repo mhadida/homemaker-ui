@@ -40,6 +40,8 @@ import {
   streetAwareFlipped,
   type StreetRef,
 } from "@/lib/facade/street";
+import { smoothCentreline } from "@/lib/street/geometry";
+import type { StreetNetwork, StreetType, Vec2 } from "@/lib/street/types";
 
 interface FacadeViewerProps {
   blocks: FacadeBlock[];
@@ -72,6 +74,11 @@ interface FacadeViewerProps {
   onMarqueeMoveStart: () => void;
   onMarqueeMove: (dx: number, dz: number) => void;
   onMarqueeMoveEnd: (dx: number, dz: number) => void;
+  /** Drawn streets + roundabouts (the standalone road network, independent
+   * of blocks/lots). Rendered in every pane's world space. */
+  streetNetwork: StreetNetwork;
+  /** Commit one finished street polyline drawn with the street tool. */
+  onCommitStreet: (type: StreetType, points: Vec2[]) => void;
 }
 
 type PaneId = "plan" | "perspective" | "overview" | "detail";
@@ -332,6 +339,123 @@ function PenSurface({
         >
           <ringGeometry args={[0.5, 0.7, 24]} />
           <meshBasicMaterial color="#3b82f6" transparent opacity={0.9} />
+        </mesh>
+      )}
+    </>
+  );
+}
+
+// ── Street tool (pen for the road network) ──────────────────────────────────
+
+/** In-progress polyline preview colour, per type — distinct from the pen's
+ * blue and the marquee's gold; not required to match StreetRibbonMesh's
+ * final paving material, just a legible type cue while drawing. */
+const STREET_PREVIEW_COLORS: Record<StreetType, string> = {
+  alley: "#c084fc",
+  street: "#facc15",
+  road: "#fb923c",
+  boulevard: "#f472b6",
+};
+
+/** Street tool: click chains polyline vertices; Escape or clicking near the
+ * first vertex ends the path and commits it as one Street. Unlike the block
+ * pen, a street is a single multi-point object (no per-segment commit, no
+ * facing) — mirrors PenSurface's invisible catcher + render-time reset. */
+function StreetDrawSurface({
+  active,
+  activeType,
+  onCommitStreet,
+}: {
+  active: boolean;
+  activeType: StreetType;
+  onCommitStreet: (type: StreetType, points: Vec2[]) => void;
+}) {
+  const [path, setPath] = useState<Vec2[]>([]);
+  const [cursor, setCursor] = useState<Vec2 | null>(null);
+
+  const resetPath = () => setPath([]);
+
+  // Reset the in-progress path when the tool is switched off (render-time
+  // reset, matching PenSurface).
+  const [wasActive, setWasActive] = useState(active);
+  if (active !== wasActive) {
+    setWasActive(active);
+    if (!active) {
+      setCursor(null);
+      resetPath();
+    }
+  }
+
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target;
+      if (
+        t instanceof HTMLElement &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.tagName === "SELECT" ||
+          t.isContentEditable)
+      )
+        return;
+      if (e.key === "Escape") {
+        if (path.length >= 2) onCommitStreet(activeType, path);
+        resetPath();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, path, activeType, onCommitStreet]);
+
+  if (!active) return null;
+  const first = path[0];
+  const color = STREET_PREVIEW_COLORS[activeType];
+  const preview = first && cursor ? [...path, cursor] : path;
+  const smooth = preview.length >= 2 ? smoothCentreline(preview) : null;
+  return (
+    <>
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, 0.02, 0]}
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          const p: Vec2 = [e.point.x, e.point.z];
+          if (path.length === 0) {
+            setPath([p]);
+            return;
+          }
+          const closing =
+            path.length >= 2 &&
+            Math.hypot(p[0] - first[0], p[1] - first[1]) <= 1;
+          if (closing) {
+            onCommitStreet(activeType, path);
+            resetPath();
+            return;
+          }
+          setPath([...path, p]);
+        }}
+        onPointerMove={(e) => setCursor([e.point.x, e.point.z])}
+      >
+        <planeGeometry args={[600, 600]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+      {smooth && (
+        <Line
+          points={smooth.map(([x, z]) => [x, 0.08, z] as [number, number, number])}
+          color={color}
+          lineWidth={3}
+          dashed
+          dashSize={0.6}
+          gapSize={0.35}
+        />
+      )}
+      {path.length >= 2 && (
+        <mesh
+          position={[first[0], 0.09, first[1]]}
+          rotation={[-Math.PI / 2, 0, 0]}
+        >
+          <ringGeometry args={[0.5, 0.7, 24]} />
+          <meshBasicMaterial color={color} transparent opacity={0.9} />
         </mesh>
       )}
     </>
@@ -828,6 +952,9 @@ function PlanPane({
   size,
   drawMode,
   selectMode,
+  streetDrawMode,
+  activeStreetType,
+  onCommitStreet,
   onCommitLine,
   onFlipChain,
   onMoveNode,
@@ -837,6 +964,7 @@ function PlanPane({
   ground,
   streetRef,
   streetWidth,
+  streetNetwork,
   marquee,
   onMarquee,
   onMarqueeClear,
@@ -851,6 +979,9 @@ function PlanPane({
   size: { w: number; h: number };
   drawMode: boolean;
   selectMode: boolean;
+  streetDrawMode: boolean;
+  activeStreetType: StreetType;
+  onCommitStreet: (type: StreetType, points: Vec2[]) => void;
   onCommitLine: (
     a: [number, number],
     b: [number, number],
@@ -864,6 +995,7 @@ function PlanPane({
   ground: Ground;
   streetRef: StreetRef | null;
   streetWidth: number;
+  streetNetwork: StreetNetwork;
   marquee: Marquee | null;
   onMarquee: (a: [number, number], b: [number, number]) => void;
   onMarqueeClear: () => void;
@@ -945,6 +1077,7 @@ function PlanPane({
         maxCornerAngle={maxCornerAngle}
         ground={ground}
         marquee={marquee}
+        streetNetwork={streetNetwork}
       />
       <StreetGuides streetRef={streetRef} streetWidth={streetWidth} />
       <PenSurface
@@ -966,9 +1099,14 @@ function PlanPane({
         onMoveEnd={onMarqueeMoveEnd}
         onInteractionEnd={suppressNextSelect}
       />
+      <StreetDrawSurface
+        active={streetDrawMode}
+        activeType={activeStreetType}
+        onCommitStreet={onCommitStreet}
+      />
       <NodeHandles
         blocks={blocks}
-        interactive={!drawMode && !selectMode}
+        interactive={!drawMode && !selectMode && !streetDrawMode}
         onMoveNode={onMoveNode}
         onDraggingChange={handleDraggingChange}
         corners={corners}
@@ -992,7 +1130,7 @@ function PlanPane({
       <MapControls
         makeDefault
         enableRotate={false}
-        enablePan={!drawMode && !nodeDrag && !selectMode}
+        enablePan={!drawMode && !nodeDrag && !selectMode && !streetDrawMode}
         target={target}
         zoomSpeed={1}
       />
@@ -1008,6 +1146,7 @@ function PerspectivePane({
   maxCornerAngle,
   ground,
   marquee,
+  streetNetwork,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -1016,6 +1155,7 @@ function PerspectivePane({
   maxCornerAngle: number;
   ground: Ground;
   marquee: Marquee | null;
+  streetNetwork: StreetNetwork;
 }) {
   return (
     <>
@@ -1027,6 +1167,7 @@ function PerspectivePane({
         maxCornerAngle={maxCornerAngle}
         ground={ground}
         marquee={marquee}
+        streetNetwork={streetNetwork}
       />
       <PerspectiveCamera
         makeDefault
@@ -1068,6 +1209,7 @@ function ElevationPane({
   maxCornerAngle,
   ground,
   marquee,
+  streetNetwork,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -1078,6 +1220,7 @@ function ElevationPane({
   maxCornerAngle: number;
   ground: Ground;
   marquee: Marquee | null;
+  streetNetwork: StreetNetwork;
 }) {
   // Zero-block world: `block` is undefined. Hooks below must still run
   // unconditionally (Rules of Hooks) — every derived value falls back to a
@@ -1172,6 +1315,7 @@ function ElevationPane({
         maxCornerAngle={maxCornerAngle}
         ground={ground}
         marquee={marquee}
+        streetNetwork={streetNetwork}
       />
       <OrthographicCamera
         ref={camRef}
@@ -1217,6 +1361,8 @@ export default function FacadeViewer({
   onMarqueeMoveStart,
   onMarqueeMove,
   onMarqueeMoveEnd,
+  streetNetwork,
+  onCommitStreet,
 }: FacadeViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null!);
   const planRef = useRef<HTMLDivElement>(null);
@@ -1237,6 +1383,11 @@ export default function FacadeViewer({
   // The Select tool (marquee). Mutually exclusive with draw mode; off by
   // default so every existing path is byte-identical.
   const [selectMode, setSelectMode] = useState(false);
+  // The street tool (draws the standalone road network). Mutually exclusive
+  // with the other two; off by default so every existing path is
+  // byte-identical.
+  const [streetDrawMode, setStreetDrawMode] = useState(false);
+  const [activeStreetType, setActiveStreetType] = useState<StreetType>("street");
   useEffect(() => {
     onDrawModeChange?.(drawMode);
   }, [drawMode, onDrawModeChange]);
@@ -1246,15 +1397,23 @@ export default function FacadeViewer({
     if (blocks.length === 0) {
       setDrawMode(true);
       setSelectMode(false);
+      setStreetDrawMode(false);
     }
   }, [blocks.length]);
   const toggleDraw = useCallback(() => {
     setDrawMode((d) => !d);
     setSelectMode(false);
+    setStreetDrawMode(false);
   }, []);
   const toggleSelect = useCallback(() => {
     setDrawMode(false);
     setSelectMode((s) => !s);
+    setStreetDrawMode(false);
+  }, []);
+  const toggleStreetDraw = useCallback(() => {
+    setDrawMode(false);
+    setSelectMode(false);
+    setStreetDrawMode((s) => !s);
   }, []);
   // Tool-off clears the selection (matches Escape). Fires on mount too, where
   // the marquee is already null (no-op).
@@ -1326,6 +1485,9 @@ export default function FacadeViewer({
             size={planSize}
             drawMode={drawMode}
             selectMode={selectMode}
+            streetDrawMode={streetDrawMode}
+            activeStreetType={activeStreetType}
+            onCommitStreet={onCommitStreet}
             onCommitLine={onCommitLine}
             onFlipChain={onFlipChain}
             onMoveNode={onMoveNode}
@@ -1335,6 +1497,7 @@ export default function FacadeViewer({
             ground={ground}
             streetRef={streetRef}
             streetWidth={streetWidth}
+            streetNetwork={streetNetwork}
             marquee={marquee}
             onMarquee={onMarquee}
             onMarqueeClear={onMarqueeClear}
@@ -1353,6 +1516,7 @@ export default function FacadeViewer({
             maxCornerAngle={maxCornerAngle}
             ground={ground}
             marquee={marquee}
+            streetNetwork={streetNetwork}
           />
         );
       case "overview":
@@ -1367,6 +1531,7 @@ export default function FacadeViewer({
             maxCornerAngle={maxCornerAngle}
             ground={ground}
             marquee={marquee}
+            streetNetwork={streetNetwork}
           />
         );
       case "detail":
@@ -1381,6 +1546,7 @@ export default function FacadeViewer({
             maxCornerAngle={maxCornerAngle}
             ground={ground}
             marquee={marquee}
+            streetNetwork={streetNetwork}
           />
         );
     }
@@ -1418,19 +1584,24 @@ export default function FacadeViewer({
             <div className="absolute top-1.5 left-2 text-[10px] font-mono text-white/70 bg-black/40 rounded px-1.5 py-0.5 pointer-events-none">
               {p.label}
             </div>
-            {p.id === "plan" && (drawMode || selectMode) && (
+            {p.id === "plan" && (drawMode || selectMode || streetDrawMode) && (
               /* Uniform mode frame: the plan pane is the live drawing surface
-               * while the pen is armed, or the marquee surface while the
-               * Select tool is active (gold to distinguish). */
+               * while the pen is armed, the marquee surface while the Select
+               * tool is active (gold), or the road-network surface while the
+               * street tool is active (green) — one colour per tool. */
               <div
                 aria-hidden
                 className={`absolute inset-0 pointer-events-none border-[3px] z-10 ${
-                  drawMode ? "border-[var(--accent)]" : "border-[#d4a017]"
+                  drawMode
+                    ? "border-[var(--accent)]"
+                    : selectMode
+                      ? "border-[#d4a017]"
+                      : "border-[#2f855a]"
                 }`}
               />
             )}
             {p.id === "plan" && (
-              <div className="absolute top-1.5 left-16 z-20 flex gap-1.5">
+              <div className="absolute top-1.5 left-16 z-20 flex flex-wrap gap-1.5">
                 <button
                   type="button"
                   onClick={toggleDraw}
@@ -1456,6 +1627,35 @@ export default function FacadeViewer({
                   >
                     {selectMode ? "⬚ Selecting — Esc" : "⬚ Select"}
                   </button>
+                )}
+                <button
+                  type="button"
+                  onClick={toggleStreetDraw}
+                  aria-label={
+                    streetDrawMode ? "Exit road tool" : "Draw road network"
+                  }
+                  className={`flex h-7 items-center gap-1.5 rounded-full px-3 text-[11px] font-medium shadow-lg transition-colors ${
+                    streetDrawMode
+                      ? "bg-[#2f855a] text-white hover:brightness-110"
+                      : "bg-white/90 text-zinc-900 hover:bg-white"
+                  }`}
+                >
+                  {streetDrawMode ? "🛣 Drawing — Esc to end" : "🛣 Roads"}
+                </button>
+                {streetDrawMode && (
+                  <select
+                    value={activeStreetType}
+                    onChange={(e) =>
+                      setActiveStreetType(e.target.value as StreetType)
+                    }
+                    aria-label="Road type"
+                    className="h-7 rounded-full bg-white/90 text-zinc-900 text-[11px] font-medium px-2 shadow-lg"
+                  >
+                    <option value="alley">Alley</option>
+                    <option value="street">Street</option>
+                    <option value="road">Road</option>
+                    <option value="boulevard">Boulevard</option>
+                  </select>
                 )}
               </div>
             )}
