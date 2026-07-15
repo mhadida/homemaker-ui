@@ -79,6 +79,12 @@ interface FacadeViewerProps {
   streetNetwork: StreetNetwork;
   /** Commit one finished street polyline drawn with the street tool. */
   onCommitStreet: (type: StreetType, points: Vec2[]) => void;
+  /** Selected street id (inspector target) — highlighted in every pane. */
+  selectedStreet: string | null;
+  onSelectStreet: (id: string) => void;
+  /** Selected derived-intersection key (inspector target). */
+  selectedIntersection: string | null;
+  onSelectIntersection: (key: string) => void;
 }
 
 type PaneId = "plan" | "perspective" | "overview" | "detail";
@@ -971,6 +977,10 @@ function PlanPane({
   onMarqueeMoveStart,
   onMarqueeMove,
   onMarqueeMoveEnd,
+  selectedStreet,
+  onSelectStreet,
+  selectedIntersection,
+  onSelectIntersection,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -1002,6 +1012,10 @@ function PlanPane({
   onMarqueeMoveStart: () => void;
   onMarqueeMove: (dx: number, dz: number) => void;
   onMarqueeMoveEnd: (dx: number, dz: number) => void;
+  selectedStreet: string | null;
+  onSelectStreet: (id: string) => void;
+  selectedIntersection: string | null;
+  onSelectIntersection: (key: string) => void;
 }) {
   const [nodeDrag, setNodeDrag] = useState(false);
   const dragEndAt = useRef(0);
@@ -1078,6 +1092,10 @@ function PlanPane({
         ground={ground}
         marquee={marquee}
         streetNetwork={streetNetwork}
+        selectedStreet={selectedStreet}
+        onSelectStreet={onSelectStreet}
+        selectedIntersection={selectedIntersection}
+        onSelectIntersection={onSelectIntersection}
       />
       <StreetGuides streetRef={streetRef} streetWidth={streetWidth} />
       <PenSurface
@@ -1147,6 +1165,10 @@ function PerspectivePane({
   ground,
   marquee,
   streetNetwork,
+  selectedStreet,
+  onSelectStreet,
+  selectedIntersection,
+  onSelectIntersection,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -1156,6 +1178,10 @@ function PerspectivePane({
   ground: Ground;
   marquee: Marquee | null;
   streetNetwork: StreetNetwork;
+  selectedStreet: string | null;
+  onSelectStreet: (id: string) => void;
+  selectedIntersection: string | null;
+  onSelectIntersection: (key: string) => void;
 }) {
   return (
     <>
@@ -1168,6 +1194,10 @@ function PerspectivePane({
         ground={ground}
         marquee={marquee}
         streetNetwork={streetNetwork}
+        selectedStreet={selectedStreet}
+        onSelectStreet={onSelectStreet}
+        selectedIntersection={selectedIntersection}
+        onSelectIntersection={onSelectIntersection}
       />
       <PerspectiveCamera
         makeDefault
@@ -1210,6 +1240,10 @@ function ElevationPane({
   ground,
   marquee,
   streetNetwork,
+  selectedStreet,
+  onSelectStreet,
+  selectedIntersection,
+  onSelectIntersection,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -1221,6 +1255,10 @@ function ElevationPane({
   ground: Ground;
   marquee: Marquee | null;
   streetNetwork: StreetNetwork;
+  selectedStreet: string | null;
+  onSelectStreet: (id: string) => void;
+  selectedIntersection: string | null;
+  onSelectIntersection: (key: string) => void;
 }) {
   // Zero-block world: `block` is undefined. Hooks below must still run
   // unconditionally (Rules of Hooks) — every derived value falls back to a
@@ -1316,6 +1354,10 @@ function ElevationPane({
         ground={ground}
         marquee={marquee}
         streetNetwork={streetNetwork}
+        selectedStreet={selectedStreet}
+        onSelectStreet={onSelectStreet}
+        selectedIntersection={selectedIntersection}
+        onSelectIntersection={onSelectIntersection}
       />
       <OrthographicCamera
         ref={camRef}
@@ -1363,6 +1405,10 @@ export default function FacadeViewer({
   onMarqueeMoveEnd,
   streetNetwork,
   onCommitStreet,
+  selectedStreet,
+  onSelectStreet,
+  selectedIntersection,
+  onSelectIntersection,
 }: FacadeViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null!);
   const planRef = useRef<HTMLDivElement>(null);
@@ -1504,6 +1550,10 @@ export default function FacadeViewer({
             onMarqueeMoveStart={onMarqueeMoveStart}
             onMarqueeMove={onMarqueeMove}
             onMarqueeMoveEnd={onMarqueeMoveEnd}
+            selectedStreet={selectedStreet}
+            onSelectStreet={onSelectStreet}
+            selectedIntersection={selectedIntersection}
+            onSelectIntersection={onSelectIntersection}
           />
         );
       case "perspective":
@@ -1517,6 +1567,10 @@ export default function FacadeViewer({
             ground={ground}
             marquee={marquee}
             streetNetwork={streetNetwork}
+            selectedStreet={selectedStreet}
+            onSelectStreet={onSelectStreet}
+            selectedIntersection={selectedIntersection}
+            onSelectIntersection={onSelectIntersection}
           />
         );
       case "overview":
@@ -1532,6 +1586,10 @@ export default function FacadeViewer({
             ground={ground}
             marquee={marquee}
             streetNetwork={streetNetwork}
+            selectedStreet={selectedStreet}
+            onSelectStreet={onSelectStreet}
+            selectedIntersection={selectedIntersection}
+            onSelectIntersection={onSelectIntersection}
           />
         );
       case "detail":
@@ -1547,6 +1605,10 @@ export default function FacadeViewer({
             ground={ground}
             marquee={marquee}
             streetNetwork={streetNetwork}
+            selectedStreet={selectedStreet}
+            onSelectStreet={onSelectStreet}
+            selectedIntersection={selectedIntersection}
+            onSelectIntersection={onSelectIntersection}
           />
         );
     }

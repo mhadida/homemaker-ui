@@ -43,6 +43,8 @@ import {
   withSectionBays,
   withSectionsSymmetry,
 } from "@/lib/facade/sections";
+import type { Street, StreetType, Monument } from "@/lib/street/types";
+import { STREET_SPECS, effectiveWidth } from "@/lib/street/types";
 import BayGrid from "./BayGrid";
 
 interface FacadeControlsProps {
@@ -1112,6 +1114,168 @@ export function MarqueeControls({
         selects every block. Selected nodes move with the selection; node-merge
         (welding) isn&rsquo;t supported yet.
       </p>
+    </div>
+  );
+}
+
+const STREET_TYPES: { id: StreetType; label: string }[] = [
+  { id: "alley", label: "Alley" },
+  { id: "street", label: "Street" },
+  { id: "road", label: "Road" },
+  { id: "boulevard", label: "Boulevard" },
+];
+
+/** ± band around a street type's default width — proportional (not a fixed
+ * delta) so it scales sensibly from an alley (3.5 m default) through a
+ * boulevard (24 m default). */
+function widthOverrideRange(type: StreetType): { min: number; max: number } {
+  const base = STREET_SPECS[type].width;
+  return {
+    min: Math.max(1.5, Math.round(base * 0.5 * 2) / 2),
+    max: Math.round(base * 1.75 * 2) / 2,
+  };
+}
+
+/** The Street inspector (Task 8): change type, override width (around the
+ * type default), delete, and show the Krier/Alexander advisory as subtle
+ * muted text (never blocking). Rendered INSTEAD of the lot/block/corner
+ * inspector when a drawn street is selected — the road network is
+ * independent of blocks/lots. */
+export function StreetInspector({
+  street,
+  advisory,
+  onChange,
+  onDelete,
+}: {
+  street: Street;
+  /** streetAdvisory(street) — computed by the caller so this stays a plain
+   * presentational component. */
+  advisory: string | null;
+  onChange: (next: Street) => void;
+  onDelete: () => void;
+}) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const confirmTimer = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (confirmTimer.current !== null) window.clearTimeout(confirmTimer.current);
+    },
+    [],
+  );
+  const width = effectiveWidth(street);
+  const range = widthOverrideRange(street.type);
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-[var(--foreground)]">
+          Street
+        </span>
+      </div>
+
+      <Section title="Type">
+        <div className="grid grid-cols-2 gap-1">
+          {STREET_TYPES.map((t) => (
+            <Toggle
+              key={t.id}
+              label={t.label}
+              on={street.type === t.id}
+              onClick={() =>
+                // A new type resets any width override — an old override
+                // sized for the previous type (e.g. an alley's 5 m) reads as
+                // nonsensical carried onto a boulevard.
+                onChange({ ...street, type: t.id, width: undefined })
+              }
+            />
+          ))}
+        </div>
+        <SliderRow
+          label="Width override"
+          value={width}
+          display={`${width.toFixed(1)}m`}
+          min={range.min}
+          max={range.max}
+          step={0.5}
+          onChange={(w) => onChange({ ...street, width: w })}
+        />
+        {advisory && (
+          <p className="text-[10px] leading-snug text-[var(--muted)]">
+            {advisory}
+          </p>
+        )}
+      </Section>
+
+      <Section title="Actions">
+        <button
+          type="button"
+          onClick={() => {
+            if (confirmDelete) {
+              onDelete();
+              setConfirmDelete(false);
+            } else {
+              setConfirmDelete(true);
+              confirmTimer.current = window.setTimeout(
+                () => setConfirmDelete(false),
+                3000,
+              );
+            }
+          }}
+          className={`w-full px-2 py-1.5 rounded text-[11px] transition-colors ${
+            confirmDelete
+              ? "bg-red-600 text-white"
+              : "bg-[var(--border)] text-zinc-500 hover:text-zinc-300"
+          }`}
+        >
+          {confirmDelete ? "Confirm delete?" : "Delete street"}
+        </button>
+      </Section>
+    </div>
+  );
+}
+
+const MONUMENTS: { id: Monument["kind"]; label: string }[] = [
+  { id: "obelisk", label: "Obelisk" },
+  { id: "fountain", label: "Fountain" },
+];
+
+/** The Intersection inspector (Task 8): toggle a roundabout on/off at a
+ * derived street junction and pick its monument. Writes go through
+ * `onSetRoundabout(monument | null)` — null removes the entry from
+ * `network.roundabouts`, turning the roundabout off. */
+export function IntersectionInspector({
+  monument,
+  onSetRoundabout,
+}: {
+  /** null → no roundabout at this junction yet. */
+  monument: Monument | null;
+  onSetRoundabout: (monument: Monument | null) => void;
+}) {
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-[var(--foreground)]">
+          Intersection
+        </span>
+      </div>
+
+      <Section title="Roundabout">
+        <Toggle
+          label={monument ? "Roundabout: on" : "Roundabout: off"}
+          on={!!monument}
+          onClick={() => onSetRoundabout(monument ? null : { kind: "obelisk" })}
+        />
+        {monument && (
+          <div className="grid grid-cols-2 gap-1">
+            {MONUMENTS.map((m) => (
+              <Toggle
+                key={m.id}
+                label={m.label}
+                on={monument.kind === m.id}
+                onClick={() => onSetRoundabout({ kind: m.id })}
+              />
+            ))}
+          </div>
+        )}
+      </Section>
     </div>
   );
 }

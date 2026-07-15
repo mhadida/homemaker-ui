@@ -27,9 +27,9 @@ Four parts work together:
 | Lint | `npm run lint` | ESLint 9 flat config (`eslint.config.mjs`) |
 | Typecheck | `npx tsc --noEmit` | No npm script exists — run manually |
 | MCP server (dev only) | `uv run ../homemaker-blender/mcp_server.py` | Bridges agents to a running Blender; lives in the sibling repo |
-| Tests | `npm test` | vitest — src/lib/facade unit tests |
+| Tests | `npm test` | vitest — src/lib/facade + src/lib/street unit tests |
 
-**Tests:** vitest covers the pure facade modules — layout engine (incl. section strips), prompt parser, street generator (`refit`/`deleteLot`), node welding, corner detection/sync/miters, section edit helpers, street-aware orientation, and marquee hit-test/delete/translate (`src/lib/facade/*.test.ts`) — run `npm test`. No e2e/playwright; everything else is verified visually.
+**Tests:** vitest covers the pure facade modules — layout engine (incl. section strips), prompt parser, street generator (`refit`/`deleteLot`), node welding, corner detection/sync/miters, section edit helpers, street-aware orientation, and marquee hit-test/delete/translate (`src/lib/facade/*.test.ts`) — plus the standalone street-network module: centreline smoothing, ribbon offsets, roundabout rings, derived intersections, and the Krier/Alexander advisory (`src/lib/street/*.test.ts`) — run `npm test`. No e2e/playwright; everything else is verified visually.
 
 ## Blender is NOT a runtime dependency of the web app
 
@@ -223,6 +223,30 @@ NOT involved; every edit is live (no Update button). Spec:
   defaults null + the tool defaults off so the unused feature is byte-
   identical. Node-merge (welding selected nodes) is deferred — nodes move
   only. Spec: `docs/superpowers/specs/2026-07-14-marquee-selection-design.md`.
+- **Street Network**: a standalone, drawable, typed road network —
+  `alley`/`street`/`road`/`boulevard` (`src/lib/street/types.ts` — `Street`,
+  `StreetType`, `STREET_SPECS` widths/car flags, `Monument`,
+  `StreetNetwork`). Polylines render as smooth Catmull-Rom paved ribbons
+  (`src/lib/street/geometry.ts` — `smoothCentreline`, `streetRibbon`;
+  `StreetRibbonMesh` in `src/components/street/`); shared-endpoint junctions
+  are derived, not stored (`intersections.ts` — `deriveIntersections`) and
+  any junction can become a roundabout + monument (obelisk/fountain), written
+  sparsely into `network.roundabouts` (`roundaboutRing` in `geometry.ts`;
+  `RoundaboutMesh`/`MonumentMesh` in `src/components/street/`). A **Roads**
+  draw tool (mutually exclusive with
+  the block pen and Select) places polyline vertices with a type selector;
+  clicking a ribbon or an intersection marker opens the **Street** /
+  **Intersection** inspector in `FacadeControls.tsx` (type, width override,
+  delete; roundabout on/off + monument pick) — page state `streetNetwork`,
+  `selectedStreet`, `selectedIntersection`. A pure, non-blocking Krier/
+  Alexander advisory (`geometry.ts` — `streetAdvisory`) hints at an
+  uninterrupted straight alley/street run or an overlong boulevard; it never
+  blocks the layout. The network **coexists** with the existing block/lot/
+  corner system — additive, no shared state (Save/Load extends the document;
+  an empty network is byte-identical). Block/plot/building derivation from
+  the network, mid-span crossings, and open-square plazas are deferred to
+  later sub-projects. Spec:
+  `docs/superpowers/specs/2026-07-15-street-network-design.md`.
 
 ## Tailwind v4
 

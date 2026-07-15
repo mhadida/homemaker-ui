@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { smoothCentreline, streetRibbon, roundaboutRing } from "./geometry";
+import { smoothCentreline, streetRibbon, roundaboutRing, streetAdvisory } from "./geometry";
 
 describe("smoothCentreline", () => {
   it("passes a 2-point street through unchanged (straight)", () => {
@@ -65,5 +65,27 @@ describe("roundaboutRing", () => {
     expect(island).toHaveLength(32);
     for (const p of outer) expect(Math.hypot(p[0] - 5, p[1] - 5)).toBeCloseTo(10, 6);
     for (const p of island) expect(Math.hypot(p[0] - 5, p[1] - 5)).toBeCloseTo(3, 6);
+  });
+});
+
+describe("streetAdvisory", () => {
+  it("flags a long straight street and a long uninterrupted boulevard", () => {
+    expect(streetAdvisory({ id: "a", type: "street", points: [[0,0],[100,0]] })).toMatch(/curve|long/i);
+    expect(streetAdvisory({ id: "b", type: "alley", points: [[0,0],[5,1],[10,0]] })).toBeNull();
+  });
+
+  it("flags a boulevard over the length threshold even when gently bent", () => {
+    expect(
+      streetAdvisory({
+        id: "c",
+        type: "boulevard",
+        points: [[0, 0], [60, 5], [140, 0]],
+      }),
+    ).toMatch(/curve|long/i);
+  });
+
+  it("does not flag a road (no advisory for that type) or a short street", () => {
+    expect(streetAdvisory({ id: "d", type: "road", points: [[0, 0], [100, 0]] })).toBeNull();
+    expect(streetAdvisory({ id: "e", type: "street", points: [[0, 0], [10, 0]] })).toBeNull();
   });
 });

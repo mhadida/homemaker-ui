@@ -227,6 +227,10 @@ export default function SceneContents({
   ground,
   marquee = null,
   streetNetwork,
+  selectedStreet = null,
+  onSelectStreet,
+  selectedIntersection = null,
+  onSelectIntersection,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -240,6 +244,14 @@ export default function SceneContents({
   /** Drawn streets + roundabouts, world space. undefined → nothing rendered
    * (byte-identical to before street support existed). */
   streetNetwork?: StreetNetwork;
+  /** Selected street id — highlights its ribbon. */
+  selectedStreet?: string | null;
+  /** Undefined → street ribbons aren't selectable. */
+  onSelectStreet?: (id: string) => void;
+  /** Selected intersection key — highlights its marker. */
+  selectedIntersection?: string | null;
+  /** Undefined → intersections aren't selectable. */
+  onSelectIntersection?: (key: string) => void;
 }) {
   const groundGeo = useGroundGeometry();
   const groundQuat = useMemo(() => {
@@ -361,7 +373,15 @@ export default function SceneContents({
           />
         </mesh>
       ))}
-      {streetNetwork && <StreetNetworkView network={streetNetwork} />}
+      {streetNetwork && (
+        <StreetNetworkView
+          network={streetNetwork}
+          selectedStreet={selectedStreet}
+          onSelectStreet={onSelectStreet}
+          selectedIntersection={selectedIntersection}
+          onSelectIntersection={onSelectIntersection}
+        />
+      )}
       {/* Ground plane + grid tilt to the slope so buildings sit on it at
        * their datums. polygonOffset keeps the sidewalk/road/grid winning
        * the depth test. */}

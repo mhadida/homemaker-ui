@@ -43,10 +43,14 @@ import {
   EMPTY_NETWORK,
   nextStreetId,
   reserveStreetIds,
+  type Monument,
+  type Street,
   type StreetNetwork,
   type StreetType,
   type Vec2,
 } from "@/lib/street/types";
+import { deriveIntersections } from "@/lib/street/intersections";
+import { streetAdvisory } from "@/lib/street/geometry";
 import {
   syncCorners,
   detectCorners,
@@ -68,6 +72,8 @@ import type { ViewSettings } from "@/lib/building/types";
 import { WALL_SWATCHES } from "@/lib/building/types";
 import FacadeControls, {
   MarqueeControls,
+  StreetInspector,
+  IntersectionInspector,
 } from "@/components/facade/FacadeControls";
 import PromptInput from "@/components/demo/PromptInput";
 
@@ -251,6 +257,14 @@ export default function FacadePage() {
   // default so every existing path is byte-identical.
   const [streetNetwork, setStreetNetwork] =
     useState<StreetNetwork>(EMPTY_NETWORK);
+  // Street-network selection: a clicked ribbon or a clicked derived
+  // intersection opens its own inspector, mutually exclusive with the
+  // block/lot/corner selection and the marquee. null by default so every
+  // existing path is byte-identical.
+  const [selectedStreet, setSelectedStreet] = useState<string | null>(null);
+  const [selectedIntersection, setSelectedIntersection] = useState<
+    string | null
+  >(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Marquee (rubber-band) multi-selection. Coexists with single `selected`:
@@ -380,6 +394,32 @@ export default function FacadePage() {
     : null;
   const params = selectedLot ? selectedLot.params : null;
 
+  // The street inspector's data: null when nothing (or a since-deleted
+  // street) is selected.
+  const selectedStreetObj = useMemo(
+    () =>
+      selectedStreet
+        ? (streetNetwork.streets.find((s) => s.id === selectedStreet) ?? null)
+        : null,
+    [selectedStreet, streetNetwork.streets],
+  );
+
+  // The intersection inspector's data: the derived junction + its current
+  // roundabout choice (null → no roundabout there yet). Falls back to null
+  // when the selected key no longer derives (e.g. a node move split it up).
+  const intersections = useMemo(
+    () => deriveIntersections(streetNetwork),
+    [streetNetwork],
+  );
+  const selectedIntersectionData = useMemo(() => {
+    if (!selectedIntersection) return null;
+    const it = intersections.find((i) => i.key === selectedIntersection);
+    if (!it) return null;
+    const monument =
+      streetNetwork.roundabouts.find(([k]) => k === it.key)?.[1] ?? null;
+    return { intersection: it, monument };
+  }, [selectedIntersection, intersections, streetNetwork.roundabouts]);
+
   // Every existing consumer (controls, prompt, AI, header) edits the
   // SELECTED lot; hand edits pin it against reroll and keep the block
   // line in sync with the new widths.
@@ -441,6 +481,10 @@ export default function FacadePage() {
       // handleMarquee clearing `selected`), so clicking a building in any pane
       // can't leave a hidden marquee underneath the single selection.
       setMarquee(null);
+      // ...and any street/intersection selection, so the inspector panel
+      // can't show a stale Street/Intersection view under a fresh lot pick.
+      setSelectedStreet(null);
+      setSelectedIntersection(null);
       // A single-lot chamfer block can bridge two corners (both ends of its
       // one lot). One facade mesh can't disambiguate which the user meant, so
       // we take the first — the plan-pane node handles reach either corner
@@ -522,6 +566,8 @@ export default function FacadePage() {
       }
       setMarquee(m);
       setSelected(null); // a marquee supersedes the single selection
+      setSelectedStreet(null);
+      setSelectedIntersection(null);
     },
     [blocks],
   );
@@ -668,6 +714,8 @@ export default function FacadePage() {
         if (typing || drawActive || blocks.length === 0) return;
         e.preventDefault();
         setSelected(null);
+        setSelectedStreet(null);
+        setSelectedIntersection(null);
         setMarquee({ blocks: blocks.map((b) => b.id), lots: [], nodes: [] });
         return;
       }
@@ -748,6 +796,8 @@ export default function FacadePage() {
         syncCorners([...bs, newBlock], cornerChoices, maxCornerAngle),
       );
       setSelected({ blockId: id, lot: 0, level: "block" });
+      setSelectedStreet(null);
+      setSelectedIntersection(null);
       return id;
     },
     [cornerChoices, maxCornerAngle],
@@ -781,6 +831,51 @@ export default function FacadePage() {
       streets: [...n.streets, { id: nextStreetId(), type, points }],
     }));
   }, []);
+
+  // ── Street network selection + inspector edits ───────────────────────────
+  const handleSelectStreet = useCallback((id: string) => {
+    setSelected(null);
+    setMarquee(null);
+    setSelectedIntersection(null);
+    setSelectedStreet(id);
+  }, []);
+
+  const handleSelectIntersection = useCallback((key: string) => {
+    setSelected(null);
+    setMarquee(null);
+    setSelectedStreet(null);
+    setSelectedIntersection(key);
+  }, []);
+
+  const handleStreetChange = useCallback((next: Street) => {
+    setStreetNetwork((n) => ({
+      ...n,
+      streets: n.streets.map((s) => (s.id === next.id ? next : s)),
+    }));
+  }, []);
+
+  const handleDeleteStreet = useCallback((id: string) => {
+    setStreetNetwork((n) => ({
+      ...n,
+      streets: n.streets.filter((s) => s.id !== id),
+    }));
+    setSelectedStreet(null);
+  }, []);
+
+  /** Upsert or remove the roundabout at one derived-intersection key. A null
+   * monument removes the entry (roundabout off); a Monument sets/replaces it
+   * (turning the roundabout on, or swapping the monument kind). */
+  const handleSetRoundabout = useCallback(
+    (key: string, monument: Monument | null) => {
+      setStreetNetwork((n) => ({
+        ...n,
+        roundabouts: monument
+          ? [...n.roundabouts.filter(([k]) => k !== key), [key, monument]]
+          : n.roundabouts.filter(([k]) => k !== key),
+      }));
+    },
+    [],
+  );
 
   const handleMoveNode = useCallback(
     (from: [number, number], to: [number, number]) => {
@@ -820,6 +915,8 @@ export default function FacadePage() {
         level: "corner",
         cornerKey,
       });
+      setSelectedStreet(null);
+      setSelectedIntersection(null);
     },
     [corners],
   );
@@ -998,6 +1095,10 @@ export default function FacadePage() {
             onMarqueeMoveEnd={handleMarqueeMoveEnd}
             streetNetwork={streetNetwork}
             onCommitStreet={handleCommitStreet}
+            selectedStreet={selectedStreet}
+            onSelectStreet={handleSelectStreet}
+            selectedIntersection={selectedIntersection}
+            onSelectIntersection={handleSelectIntersection}
           />
         </div>
 
@@ -1010,6 +1111,23 @@ export default function FacadePage() {
                 onReroll={handleMarqueeReroll}
                 onApply={handleMarqueeApply}
                 onClear={handleMarqueeClear}
+              />
+            ) : selectedStreetObj ? (
+              <StreetInspector
+                street={selectedStreetObj}
+                advisory={streetAdvisory(selectedStreetObj)}
+                onChange={handleStreetChange}
+                onDelete={() => handleDeleteStreet(selectedStreetObj.id)}
+              />
+            ) : selectedIntersectionData ? (
+              <IntersectionInspector
+                monument={selectedIntersectionData.monument}
+                onSetRoundabout={(m) =>
+                  handleSetRoundabout(
+                    selectedIntersectionData.intersection.key,
+                    m,
+                  )
+                }
               />
             ) : selected && selectedBlock && params ? (
               <>

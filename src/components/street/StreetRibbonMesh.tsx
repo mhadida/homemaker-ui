@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useEffect } from "react";
+import { useMemo, useEffect, useState } from "react";
 import * as THREE from "three";
 import type { Street } from "@/lib/street/types";
 import { effectiveWidth } from "@/lib/street/types";
@@ -12,7 +12,21 @@ const PAVING: Record<Street["type"], string> = {
   boulevard: "#3a3a40",
 };
 
-export default function StreetRibbonMesh({ street }: { street: Street }) {
+const SELECTED_COLOR = "#3b82f6"; // matches the app-wide accent used for other 3D selection highlights
+
+export default function StreetRibbonMesh({
+  street,
+  selected = false,
+  onSelect,
+}: {
+  street: Street;
+  /** Selection highlight — tints the paving toward the accent color. */
+  selected?: boolean;
+  /** Clicking the ribbon selects this street. Undefined → not selectable
+   * (byte-identical to before selection existed). */
+  onSelect?: () => void;
+}) {
+  const [hover, setHover] = useState(false);
   const geo = useMemo(() => {
     const cl = smoothCentreline(street.points);
     if (cl.length < 2) return null;
@@ -32,9 +46,29 @@ export default function StreetRibbonMesh({ street }: { street: Street }) {
   useEffect(() => () => geo?.dispose(), [geo]);
   if (!geo) return null;
   return (
-    <mesh geometry={geo} receiveShadow>
+    <mesh
+      geometry={geo}
+      receiveShadow
+      onClick={
+        onSelect
+          ? (e) => {
+              e.stopPropagation();
+              onSelect();
+            }
+          : undefined
+      }
+      onPointerOver={
+        onSelect
+          ? (e) => {
+              e.stopPropagation();
+              setHover(true);
+            }
+          : undefined
+      }
+      onPointerOut={onSelect ? () => setHover(false) : undefined}
+    >
       <meshStandardMaterial
-        color={PAVING[street.type]}
+        color={selected ? SELECTED_COLOR : hover ? "#7c8a9c" : PAVING[street.type]}
         roughness={0.95}
         side={THREE.DoubleSide}
         polygonOffset

@@ -1,6 +1,47 @@
-import type { Vec2 } from "./types";
+import type { Street, Vec2 } from "./types";
 
 const RING_SEGMENTS = 32;
+
+/** Krier/Alexander thresholds (m) — traditional urbanism prefers streets
+ * that bend rather than run dead-straight for long stretches, and grand
+ * boulevards to be punctuated (a terminating monument, a roundabout) rather
+ * than running featureless. Advisory only. */
+const STRAIGHT_RUN_MAX = 40;
+const BOULEVARD_LENGTH_MAX = 120;
+
+function dist(a: Vec2, b: Vec2): number {
+  return Math.hypot(b[0] - a[0], b[1] - a[1]);
+}
+
+function polylineLength(points: Vec2[]): number {
+  let total = 0;
+  for (let i = 0; i < points.length - 1; i++) total += dist(points[i], points[i + 1]);
+  return total;
+}
+
+/** Pure Krier/Alexander advisory hint, or null. Never blocks the layout —
+ * `alley`/`street` flags a single straight run (any consecutive vertex
+ * pair) longer than STRAIGHT_RUN_MAX with no bend relieving it;
+ * `boulevard` flags total length over BOULEVARD_LENGTH_MAX (a grand avenue
+ * wants a terminating monument or a roundabout along its length). `road`
+ * carries no advisory — it's a cars-first type, not a pedestrian
+ * streetscape concern. */
+export function streetAdvisory(street: Street): string | null {
+  const { type, points } = street;
+  if (type === "boulevard") {
+    return polylineLength(points) > BOULEVARD_LENGTH_MAX
+      ? "Long boulevard — consider a terminating monument or a roundabout along its length."
+      : null;
+  }
+  if (type === "alley" || type === "street") {
+    for (let i = 0; i < points.length - 1; i++) {
+      if (dist(points[i], points[i + 1]) > STRAIGHT_RUN_MAX) {
+        return "Long straight run — a gentle curve or bend reads as more traditional streetscape.";
+      }
+    }
+  }
+  return null;
+}
 
 /** Centripetal-ish Catmull-Rom through the vertices (uniform), sampling each
  * segment. Endpoints are duplicated so the curve passes through the first and
