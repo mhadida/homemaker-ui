@@ -230,6 +230,83 @@ describe("streetNetwork", () => {
     expect(old.ok).toBe(true);
     if (old.ok) expect(old.scene.streetNetwork.streets).toEqual([]);
   });
+
+  it("drops a malformed street entry (bad points) but keeps the valid one — no throw", () => {
+    const doc = {
+      ...serializeScene(scene()),
+      streetNetwork: {
+        streets: [
+          { id: "street-1", type: "street", points: [[0, 0], [10, 0]] },
+          { id: "street-2", type: "street", points: "x" }, // malformed: points not an array
+        ],
+        roundabouts: [],
+      },
+    };
+    let res: ReturnType<typeof deserializeScene>;
+    expect(() => {
+      res = deserializeScene(doc);
+    }).not.toThrow();
+    expect(res!.ok).toBe(true);
+    if (!res!.ok) return;
+    expect(res!.scene.streetNetwork.streets).toHaveLength(1);
+    expect(res!.scene.streetNetwork.streets[0].id).toBe("street-1");
+  });
+
+  it("drops a null street entry", () => {
+    const doc = {
+      ...serializeScene(scene()),
+      streetNetwork: {
+        streets: [
+          null,
+          { id: "street-1", type: "street", points: [[0, 0], [10, 0]] },
+        ],
+        roundabouts: [],
+      },
+    };
+    const res = deserializeScene(doc);
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.scene.streetNetwork.streets).toHaveLength(1);
+  });
+
+  it("drops a street with a missing points field, an unknown type, or a bad id", () => {
+    const doc = {
+      ...serializeScene(scene()),
+      streetNetwork: {
+        streets: [
+          { id: "street-1", type: "street" }, // no points at all
+          { id: "street-2", type: "not-a-type", points: [[0, 0], [1, 1]] },
+          { id: 42, type: "street", points: [[0, 0], [1, 1]] },
+          { id: "street-3", type: "road", points: [[0, 0], [1, 1]] }, // valid
+        ],
+        roundabouts: [],
+      },
+    };
+    const res = deserializeScene(doc);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.scene.streetNetwork.streets).toHaveLength(1);
+    expect(res.scene.streetNetwork.streets[0].id).toBe("street-3");
+  });
+
+  it("drops malformed roundabout entries, keeping well-shaped ones", () => {
+    const doc = {
+      ...serializeScene(scene()),
+      streetNetwork: {
+        streets: [{ id: "street-1", type: "street", points: [[0, 0], [10, 0]] }],
+        roundabouts: [
+          ["node-a|node-b", { kind: "obelisk" }],
+          ["bad-entry"], // wrong shape
+          "not-a-pair",
+        ],
+      },
+    };
+    const res = deserializeScene(doc);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.scene.streetNetwork.roundabouts).toEqual([
+      ["node-a|node-b", { kind: "obelisk" }],
+    ]);
+  });
 });
 
 describe("reserveBlockIds", () => {

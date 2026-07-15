@@ -67,9 +67,9 @@ export function snapStreetPoint(
   return best;
 }
 
-/** Centripetal-ish Catmull-Rom through the vertices (uniform), sampling each
- * segment. Endpoints are duplicated so the curve passes through the first and
- * last vertex. ≤ 2 points → straight (returned unchanged). */
+/** Uniform Catmull-Rom through the vertices, sampling each segment.
+ * Endpoints are duplicated so the curve passes through the first and last
+ * vertex. ≤ 2 points → straight (returned unchanged). */
 export function smoothCentreline(points: Vec2[], samplesPerSegment = 10): Vec2[] {
   if (points.length <= 2) return points.map((p) => [p[0], p[1]] as Vec2);
   const out: Vec2[] = [];
@@ -80,7 +80,7 @@ export function smoothCentreline(points: Vec2[], samplesPerSegment = 10): Vec2[]
     const p1 = at(i);
     const p2 = at(i + 1);
     const p3 = at(i + 2);
-    const steps = i === p.length - 2 ? samplesPerSegment : samplesPerSegment; // include last endpoint below
+    const steps = samplesPerSegment;
     for (let s = 0; s < steps; s++) {
       const t = s / samplesPerSegment;
       const t2 = t * t;

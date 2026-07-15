@@ -1674,14 +1674,14 @@ export default function FacadeViewer({
                 <button
                   type="button"
                   onClick={toggleDraw}
-                  aria-label={drawMode ? "Exit draw mode" : "Draw a street"}
+                  aria-label={drawMode ? "Exit draw mode" : "Draw buildings"}
                   className={`flex h-7 items-center gap-1.5 rounded-full px-3 text-[11px] font-medium shadow-lg transition-colors ${
                     drawMode
                       ? "bg-[var(--accent)] text-white hover:brightness-110"
                       : "bg-white/90 text-zinc-900 hover:bg-white"
                   }`}
                 >
-                  {drawMode ? "✏ Drawing — Esc to end" : "✏ Draw street"}
+                  {drawMode ? "✏ Drawing — Esc to end" : "✏ Buildings"}
                 </button>
                 {blocks.length > 0 && (
                   <button

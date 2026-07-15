@@ -6,7 +6,7 @@ import { DEFAULT_GROUND } from "./terrain";
 import { STREET_WIDTH_DEFAULT } from "./street";
 import type { FacadeParams } from "./types";
 import { DEFAULT_FACADE } from "./types";
-import type { StreetNetwork } from "@/lib/street/types";
+import type { Monument, Street, StreetNetwork, StreetType } from "@/lib/street/types";
 import { EMPTY_NETWORK } from "@/lib/street/types";
 
 /** Bump when the on-disk shape changes incompatibly. Loaders reject unknown
@@ -105,6 +105,43 @@ function normalizeParams(raw: Record<string, unknown>): FacadeParams {
   } as FacadeParams;
 }
 
+const STREET_TYPES: ReadonlySet<string> = new Set<StreetType>([
+  "alley",
+  "street",
+  "road",
+  "boulevard",
+]);
+
+/** A drawn street: id, a known type, and a non-empty points array of
+ * [finite, finite] pairs. Mirrors validLine/validBlock's shape-check style,
+ * but malformed streets are DROPPED rather than failing the whole document
+ * (consistent with "malformed → empty" — one corrupted street shouldn't
+ * take down an otherwise-good save). */
+function validStreet(s: unknown): s is Street {
+  if (!isObject(s)) return false;
+  if (typeof s.id !== "string") return false;
+  if (typeof s.type !== "string" || !STREET_TYPES.has(s.type)) return false;
+  const pts = s.points;
+  return (
+    Array.isArray(pts) &&
+    pts.length >= 1 &&
+    pts.every(
+      (p) => Array.isArray(p) && p.length === 2 && isFiniteNumber(p[0]) && isFiniteNumber(p[1]),
+    )
+  );
+}
+
+/** A roundabout entry: [derived intersection key, {kind}]. */
+function validRoundabout(r: unknown): r is [string, Monument] {
+  return (
+    Array.isArray(r) &&
+    r.length === 2 &&
+    typeof r[0] === "string" &&
+    isObject(r[1]) &&
+    typeof (r[1] as { kind?: unknown }).kind === "string"
+  );
+}
+
 /** Normalize every lot's params so the loaded blocks are render-safe. */
 function normalizeBlocks(blocks: Record<string, unknown>[]): FacadeBlock[] {
   return blocks.map((b) => ({
@@ -154,15 +191,21 @@ export function deserializeScene(raw: unknown): LoadResult {
 
   // Additive (older saves have no field at all) — also tolerate a malformed
   // `streets` (anything other than an array) rather than crash the loader.
+  // Individual malformed street/roundabout entries are DROPPED (not
+  // rejected) so one corrupted entry doesn't white-screen an otherwise-good
+  // save — mirrors the block validation above, applied per-entry instead of
+  // whole-document.
   const rawNet = doc.streetNetwork;
   const streetNetwork: StreetNetwork =
     isObject(rawNet) && Array.isArray((rawNet as { streets?: unknown }).streets)
       ? {
-          streets: (rawNet as unknown as StreetNetwork).streets,
+          streets: ((rawNet as { streets: unknown[] }).streets).filter(validStreet),
           roundabouts: Array.isArray(
             (rawNet as { roundabouts?: unknown }).roundabouts,
           )
-            ? (rawNet as unknown as StreetNetwork).roundabouts
+            ? ((rawNet as { roundabouts: unknown[] }).roundabouts).filter(
+                validRoundabout,
+              )
             : [],
         }
       : EMPTY_NETWORK;
