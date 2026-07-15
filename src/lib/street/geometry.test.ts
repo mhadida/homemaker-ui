@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { smoothCentreline, streetRibbon } from "./geometry";
+import { smoothCentreline, streetRibbon, roundaboutRing } from "./geometry";
 
 describe("smoothCentreline", () => {
   it("passes a 2-point street through unchanged (straight)", () => {
@@ -55,5 +55,15 @@ describe("streetRibbon", () => {
     const dR = Math.hypot(right[1][0] - 10, right[1][1] - 0);
     expect(dL).toBeCloseTo(4, 6);
     expect(dR).toBeCloseTo(4, 6);
+  });
+});
+
+describe("roundaboutRing", () => {
+  it("returns two centred closed loops of the given radii", () => {
+    const { outer, island } = roundaboutRing([5, 5], 10, 3);
+    expect(outer).toHaveLength(32);
+    expect(island).toHaveLength(32);
+    for (const p of outer) expect(Math.hypot(p[0] - 5, p[1] - 5)).toBeCloseTo(10, 6);
+    for (const p of island) expect(Math.hypot(p[0] - 5, p[1] - 5)).toBeCloseTo(3, 6);
   });
 });

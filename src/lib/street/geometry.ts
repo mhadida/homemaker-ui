@@ -1,5 +1,7 @@
 import type { Vec2 } from "./types";
 
+const RING_SEGMENTS = 32;
+
 /** Centripetal-ish Catmull-Rom through the vertices (uniform), sampling each
  * segment. Endpoints are duplicated so the curve passes through the first and
  * last vertex. ≤ 2 points → straight (returned unchanged). */
@@ -76,4 +78,19 @@ export function streetRibbon(
     right.push([c[0] - nx * h, c[1] - nz * h]);
   }
   return { left, right };
+}
+
+/** Two centred 32-gon loops: the paved ring's outer edge and the central
+ * island. The monument sits at `centre`. Note: uses no Math.random/Date. */
+export function roundaboutRing(
+  centre: Vec2,
+  outerR: number,
+  islandR: number,
+): { outer: Vec2[]; island: Vec2[] } {
+  const loop = (r: number): Vec2[] =>
+    Array.from({ length: RING_SEGMENTS }, (_, i): Vec2 => {
+      const a = (i / RING_SEGMENTS) * Math.PI * 2;
+      return [centre[0] + Math.cos(a) * r, centre[1] + Math.sin(a) * r];
+    });
+  return { outer: loop(outerR), island: loop(islandR) };
 }
