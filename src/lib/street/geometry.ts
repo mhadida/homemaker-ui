@@ -36,3 +36,38 @@ export function smoothCentreline(points: Vec2[], samplesPerSegment = 10): Vec2[]
   out.push([p[p.length - 1][0], p[p.length - 1][1]]); // exact last vertex
   return out;
 }
+
+/** Per-vertex offset of a sampled centreline by ±half the width. The normal at
+ * each vertex is the left-perpendicular of the averaged direction of the
+ * adjacent segments, so joints stay smooth. Left = +normal, right = −normal. */
+export function streetRibbon(
+  centreline: Vec2[],
+  width: number,
+): { left: Vec2[]; right: Vec2[] } {
+  const h = width / 2;
+  const n = centreline.length;
+  const left: Vec2[] = [];
+  const right: Vec2[] = [];
+  const dir = (a: Vec2, b: Vec2): Vec2 => {
+    const dx = b[0] - a[0];
+    const dz = b[1] - a[1];
+    const len = Math.hypot(dx, dz) || 1;
+    return [dx / len, dz / len];
+  };
+  for (let i = 0; i < n; i++) {
+    const prev = i > 0 ? dir(centreline[i - 1], centreline[i]) : dir(centreline[i], centreline[i + 1]);
+    const next = i < n - 1 ? dir(centreline[i], centreline[i + 1]) : prev;
+    let tx = prev[0] + next[0];
+    let tz = prev[1] + next[1];
+    const tl = Math.hypot(tx, tz) || 1;
+    tx /= tl;
+    tz /= tl;
+    // left-perpendicular of the tangent (plan coords)
+    const nx = -tz;
+    const nz = tx;
+    const c = centreline[i];
+    left.push([c[0] + nx * h, c[1] + nz * h]);
+    right.push([c[0] - nx * h, c[1] - nz * h]);
+  }
+  return { left, right };
+}
