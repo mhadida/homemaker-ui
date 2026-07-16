@@ -1,5 +1,12 @@
-import type { OpeningRect } from "./layout";
+import { computeLayout, MASSING_DEPTH_DEFAULT, type OpeningRect } from "./layout";
+import { lotPlacements, type FacadeBlock } from "./blocks";
+import { levelingFor, type Ground } from "./terrain";
 import type { WindowStyleId } from "./types";
+
+/** Feature flag: when on, windows render as scene-wide `InstancedMesh`
+ * (glass + frames) instead of per-window meshes in FacadeMesh. Default on;
+ * flip to false to fall back to the byte-identical per-mesh path. */
+export const USE_INSTANCING = true;
 
 // Constants MIRRORED from FacadeMesh (must stay in sync with WindowFill /
 // MullionBars). Instancing reproduces those meshes as data.
@@ -72,5 +79,75 @@ export function windowInstances(
   // glazing bars — pane-centre-relative → offset into the window group frame
   for (const b of mullionInstances(o.w, o.h, style))
     out.push({ ...b, pos: [cx + b.pos[0], cy + b.pos[1], gz + b.pos[2]] });
+  return out;
+}
+
+/** One window box in WORLD space, ready for an `InstancedMesh`: a position +
+ * a Y-yaw + box dimensions (a plane for glass) compose the instance Matrix4.
+ * `color` carries the building's trim colour (trim only; glass is constant). */
+export interface WorldInstance {
+  worldPos: [number, number, number];
+  yaw: number;
+  size: [number, number, number];
+  material: "glass" | "trim";
+  color?: string;
+  plane?: boolean;
+}
+
+/** Every WINDOW's glass + frame across every lot of every block, in world
+ * space. Mirrors SceneContents' BlockGroup placement EXACTLY: each lot sits at
+ * (position.x, datum, position.z) rotated by rotationY, where datum is the
+ * ground-levelled floor height (`levelingFor`). Only `kind === "window"`
+ * openings become instances here — doors/shopfronts/garages/passages keep
+ * their bespoke per-lot meshes.
+ *
+ * KNOWN LIMITATION: section-relief z-offsets are ignored (assumes flush
+ * strips, the common case). A window inside an offset section strip would be
+ * shifted by `strip.offset` in local z; that offset is not applied here. */
+export function sceneWindowInstances(
+  blocks: FacadeBlock[],
+  ground: Ground,
+): WorldInstance[] {
+  const out: WorldInstance[] = [];
+  for (const block of blocks) {
+    const placements = lotPlacements(block);
+    block.lots.forEach((lot, i) => {
+      const { position, rotationY } = placements[i];
+      const yaw = rotationY;
+      const depth = lot.params.massingDepth ?? MASSING_DEPTH_DEFAULT;
+      const { datum } = levelingFor(
+        position[0],
+        position[2],
+        lot.params.width,
+        depth,
+        yaw,
+        ground,
+      );
+      const ox = position[0];
+      const oy = datum;
+      const oz = position[2];
+      const cos = Math.cos(yaw);
+      const sin = Math.sin(yaw);
+      const layout = computeLayout(lot.params);
+      const { trimColor, windowStyle } = lot.params;
+      for (const o of layout.openings) {
+        if (o.kind !== "window") continue;
+        for (const b of windowInstances(o, windowStyle)) {
+          const [lx, ly, lz] = b.pos;
+          // Rotate the facade-local point by yaw about Y, then translate to the
+          // lot origin (matches the three.js Y-rotation used in levelingFor /
+          // BlockGroup: wx = lx·cos + lz·sin, wz = −lx·sin + lz·cos).
+          out.push({
+            worldPos: [ox + lx * cos + lz * sin, oy + ly, oz - lx * sin + lz * cos],
+            yaw,
+            size: b.size,
+            material: b.material,
+            color: b.material === "trim" ? trimColor : undefined,
+            plane: b.plane,
+          });
+        }
+      }
+    });
+  }
   return out;
 }

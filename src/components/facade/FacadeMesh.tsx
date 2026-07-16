@@ -16,6 +16,7 @@ import {
 import type { FacadeParams, WindowStyleId } from "@/lib/facade/types";
 import type { LotMiter } from "@/lib/facade/corners";
 import { roofTriangles, type RoofPlan, type Dormer } from "@/lib/facade/roof";
+import { USE_INSTANCING } from "@/lib/facade/instancing";
 
 const ROOF_COLORS = { slate: "#4a4e57", red: "#8a3b2e" } as const;
 
@@ -760,7 +761,10 @@ export default function FacadeMesh({
                 const key = `${o.storey}-${o.bay}`;
                 switch (o.kind) {
                   case "window":
-                    return (
+                    // Under instancing the glass/frame/bars are drawn by the
+                    // scene-wide InstancedFacadeBoxes; the wall's punched hole
+                    // (buildStripGeometry), sills and surrounds stay here.
+                    return USE_INSTANCING ? null : (
                       <WindowFill
                         key={key}
                         o={o}

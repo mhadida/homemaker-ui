@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { Environment, ContactShadows, Grid, Edges, Line } from "@react-three/drei";
 import * as THREE from "three";
 import FacadeMesh from "./FacadeMesh";
+import InstancedFacadeBoxes from "./InstancedFacadeBoxes";
 import StreetNetworkView from "@/components/street/StreetNetworkView";
 import type { StreetNetwork } from "@/lib/street/types";
 import type { FacadeParams } from "@/lib/facade/types";
@@ -358,6 +359,9 @@ export default function SceneContents({
           marqueeLots={marqueeLotsByBlock?.get(block.id) ?? null}
         />
       ))}
+      {/* Scene-wide window glass + frames as two InstancedMeshes (perf). The
+       * per-block FacadeMesh skips WindowFill under USE_INSTANCING. */}
+      <InstancedFacadeBoxes blocks={blocks} ground={ground} />
       {marquee?.nodes.map(([x, z]) => (
         <mesh
           key={`marquee-node-${x}:${z}`}
