@@ -1088,7 +1088,16 @@ function PlanPane({
       cz: (minZ + maxZ) / 2,
     };
   }, [blocks]);
-  const zoom = fitOrthoZoom(size.w, size.h, bounds.w, bounds.d);
+  // Auto-fit the plan camera ONLY when content first appears and when the
+  // viewport resizes — never on later edits. Adding/deleting a building must
+  // not re-zoom or recenter the view (that jump reads as confusing); after the
+  // first fit the user controls the camera via MapControls. `bounds` stays
+  // live for the marquee move-pad; the camera snapshots it here. `bounds` is
+  // deliberately excluded from the deps so content edits don't re-snapshot.
+  const hasContent = blocks.length > 0;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const fit = useMemo(() => bounds, [hasContent, size.w, size.h]);
+  const zoom = fitOrthoZoom(size.w, size.h, fit.w, fit.d);
   const camRef = useRef<THREE.OrthographicCamera>(null);
   useEffect(() => {
     const cam = camRef.current;
@@ -1100,12 +1109,12 @@ function PlanPane({
   // an in-progress pan when they receive a freshly-built array on every
   // render; memoize on the underlying scalars instead.
   const target = useMemo<[number, number, number]>(
-    () => [bounds.cx, 0, bounds.cz - 2],
-    [bounds.cx, bounds.cz],
+    () => [fit.cx, 0, fit.cz - 2],
+    [fit.cx, fit.cz],
   );
   const camPosition = useMemo<[number, number, number]>(
-    () => [bounds.cx, 60, bounds.cz - 2],
-    [bounds.cx, bounds.cz],
+    () => [fit.cx, 60, fit.cz - 2],
+    [fit.cx, fit.cz],
   );
   return (
     <>
