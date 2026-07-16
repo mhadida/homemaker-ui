@@ -49,3 +49,23 @@ describe("streetFrontages", () => {
     expect(streetFrontages(net([]), 3)).toEqual([]);
   });
 });
+
+describe("streetFrontages — mid-span junction split", () => {
+  it("splits a frontage around a mid-span X crossing (gap on both sides, both parts kept)", () => {
+    const streets = [
+      { id: "h", type: "street" as const, points: [[0, 0], [30, 0]] as Vec2[] },
+      { id: "v", type: "street" as const, points: [[15, -10], [15, 10]] as Vec2[] },
+    ];
+    const fr = streetFrontages(net(streets), 3);
+    const hLeft = fr.filter((f) => f.streetId === "h" && f.side === "left");
+    expect(hLeft.length).toBe(2); // split into two parts around the X at x=15
+    for (const f of hLeft) {
+      const xmin = Math.min(f.a[0], f.b[0]);
+      const xmax = Math.max(f.a[0], f.b[0]);
+      // no part spans the crossing gap [12,18]
+      expect(xmin < 12 - 1e-6 && xmax > 18 + 1e-6).toBe(false);
+    }
+    // parts carry distinct `part` indices
+    expect(new Set(hLeft.map((f) => f.part)).size).toBe(2);
+  });
+});
