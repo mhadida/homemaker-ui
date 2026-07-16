@@ -220,7 +220,7 @@ describe("syncStreetBlocks", () => {
 ```ts
   /** Set on blocks auto-derived from a street edge (SP-2c). Absent on
    * hand-drawn blocks. Drives street-driven regeneration/refit. */
-  source?: { streetId: string; segment: number; side: "left" | "right" };
+  source?: { streetId: string; segment: number; part: number; side: "left" | "right" };
 ```
 
 Create `src/lib/facade/streetBlocks.ts`:
@@ -233,10 +233,12 @@ import { syncCorners } from "./corners";
 import type { CornerChoice } from "./corners";
 import type { BlockGenSettings, FacadeBlock } from "./blocks";
 
-const frontageKey = (f: { streetId: string; segment: number; side: string }) =>
-  `${f.streetId}#${f.segment}#${f.side}`;
+const frontageKey = (f: { streetId: string; segment: number; part: number; side: string }) =>
+  `${f.streetId}#${f.segment}#${f.part}#${f.side}`;
 const blockKey = (b: FacadeBlock) =>
-  b.source ? `${b.source.streetId}#${b.source.segment}#${b.source.side}` : null;
+  b.source
+    ? `${b.source.streetId}#${b.source.segment}#${b.source.part}#${b.source.side}`
+    : null;
 
 // Deterministic per-frontage seed so redraws are stable.
 function frontageSeed(f: Frontage): number {
@@ -284,7 +286,7 @@ export function syncStreetBlocks(
       gen: opts.gen,
       seed,
       lots: generateBlock(line, f.facingFlipped, opts.gen, seed),
-      source: { streetId: f.streetId, segment: f.segment, side: f.side },
+      source: { streetId: f.streetId, segment: f.segment, part: f.part, side: f.side },
     };
   });
 
@@ -331,15 +333,15 @@ Call it from `handleCommitStreet`, `handleDeleteStreet`, `handleStreetChange` (t
 ```ts
 it("round-trips a street-derived block's source link", () => {
   const s: SceneState = {
-    blocks: [{ ...mkBlock("street:s1#0#left", [0, 0], [8, 0], [8]),
-               source: { streetId: "s1", segment: 0, side: "left" } }],
+    blocks: [{ ...mkBlock("street:s1#0#0#left", [0, 0], [8, 0], [8]),
+               source: { streetId: "s1", segment: 0, part: 0, side: "left" } }],
     cornerChoices: new Map(), ground: DEFAULT_GROUND,
     streetWidth: STREET_WIDTH_DEFAULT, maxCornerAngle: DEFAULT_MAX_CORNER_ANGLE,
     streetNetwork: EMPTY_NETWORK,
   };
   const res = fromJSON(toJSON(s));
   expect(res.ok).toBe(true);
-  if (res.ok) expect(res.scene.blocks[0].source).toEqual({ streetId: "s1", segment: 0, side: "left" });
+  if (res.ok) expect(res.scene.blocks[0].source).toEqual({ streetId: "s1", segment: 0, part: 0, side: "left" });
 });
 ```
 
