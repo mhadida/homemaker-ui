@@ -226,9 +226,16 @@ NOT involved; every edit is live (no Update button). Spec:
 - **Street Network**: a standalone, drawable, typed road network —
   `alley`/`street`/`road`/`boulevard` (`src/lib/street/types.ts` — `Street`,
   `StreetType`, `STREET_SPECS` widths/car flags, `Monument`,
-  `StreetNetwork`). Polylines render as smooth Catmull-Rom paved ribbons
-  (`src/lib/street/geometry.ts` — `smoothCentreline`, `streetRibbon`;
-  `StreetRibbonMesh` in `src/components/street/`); shared-endpoint junctions
+  `StreetNetwork`). Polylines render as paved ribbons whose corners round to a
+  per-type minimum curve radius (`STREET_SPECS[type].minRadius` — boulevards
+  sweep wide, alleys turn tight) via `filletCentreline`/`cornerFit` (real
+  tangent+arc road alignment, endpoints pinned so junctions are unaffected) +
+  `streetRibbon` in `src/lib/street/geometry.ts`; `StreetRibbonMesh` in
+  `src/components/street/`. The whole network **drapes on the tilted ground**
+  (`groundHeightAt` per ribbon vertex; the roundabout disc tilts to the ground
+  plane; monuments stand plumb) — flat ground is byte-identical.
+  (`smoothCentreline` is retained but superseded by the fillet.)
+  Shared-endpoint junctions
   are derived, not stored (`intersections.ts` — `deriveIntersections`) and
   any junction can become a roundabout + monument (obelisk/fountain), written
   sparsely into `network.roundabouts` (`roundaboutRing` in `geometry.ts`;
@@ -240,13 +247,15 @@ NOT involved; every edit is live (no Update button). Spec:
   delete; roundabout on/off + monument pick) — page state `streetNetwork`,
   `selectedStreet`, `selectedIntersection`. A pure, non-blocking Krier/
   Alexander advisory (`geometry.ts` — `streetAdvisory`) hints at an
-  uninterrupted straight alley/street run or an overlong boulevard; it never
-  blocks the layout. The network **coexists** with the existing block/lot/
+  uninterrupted straight alley/street run, an overlong boulevard, or a corner
+  drawn tighter than the type's minimum radius; it never blocks the layout. The network **coexists** with the existing block/lot/
   corner system — additive, no shared state (Save/Load extends the document;
   an empty network is byte-identical). Block/plot/building derivation from
   the network, mid-span crossings, and open-square plazas are deferred to
-  later sub-projects. Spec:
-  `docs/superpowers/specs/2026-07-15-street-network-design.md`.
+  later sub-projects. Specs:
+  `docs/superpowers/specs/2026-07-15-street-network-design.md` (network) +
+  `docs/superpowers/specs/2026-07-16-street-realism-design.md` (SP-2a:
+  radius-limited fillet + topography draping).
 
 ## Tailwind v4
 
