@@ -1434,9 +1434,11 @@ export default function FacadeViewer({
   };
 
   const [maximized, setMaximized] = useState<PaneId | null>(null);
-  // A blank world starts with the pen armed — the empty-state copy on the
-  // right panel promises the pen is ready immediately.
-  const [drawMode, setDrawMode] = useState(blocks.length === 0);
+  // Tool starts idle; the effect below arms the pen only on a TRULY empty
+  // world (no blocks AND no streets). A streets-only scene must stay idle so
+  // its ribbons are clickable — the armed pen's full-screen click-catcher
+  // would otherwise swallow every attempt to select/delete a street.
+  const [drawMode, setDrawMode] = useState(false);
   // The Select tool (marquee). Mutually exclusive with draw mode; off by
   // default so every existing path is byte-identical.
   const [selectMode, setSelectMode] = useState(false);
@@ -1448,15 +1450,18 @@ export default function FacadeViewer({
   useEffect(() => {
     onDrawModeChange?.(drawMode);
   }, [drawMode, onDrawModeChange]);
-  // Re-arm the pen whenever the world returns to blank (e.g. the last block
-  // was deleted) — the blank-canvas copy promises an armed pen.
+  // Arm the pen only when the world is TRULY empty — no blocks AND no streets
+  // (e.g. a fresh session, or the last block deleted with no roads drawn). A
+  // streets-only scene is a valid, common state (streets are the primary
+  // interface), so it must NOT force the pen: the armed pen's click-catcher
+  // would block selecting/deleting streets.
   useEffect(() => {
-    if (blocks.length === 0) {
+    if (blocks.length === 0 && streetNetwork.streets.length === 0) {
       setDrawMode(true);
       setSelectMode(false);
       setStreetDrawMode(false);
     }
-  }, [blocks.length]);
+  }, [blocks.length, streetNetwork.streets.length]);
   const toggleDraw = useCallback(() => {
     setDrawMode((d) => !d);
     setSelectMode(false);

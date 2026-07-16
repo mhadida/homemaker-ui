@@ -239,8 +239,9 @@ const FACADE_SUGGESTIONS = [
 export default function FacadePage() {
   // Everything is live — no draft/committed split. Client-side geometry
   // rebuilds are trivially fast, so every slider tick renders immediately.
-  // The scene starts BLANK: no buildings until the user draws a street with
-  // the pen tool (auto-armed in FacadeViewer when blocks is empty).
+  // The scene starts BLANK: no buildings until the user draws. The pen is
+  // auto-armed in FacadeViewer only when the world is TRULY empty (no blocks
+  // and no streets); a streets-only scene stays idle so streets are clickable.
   const [blocks, setBlocks] = useState<FacadeBlock[]>([]);
   const [selected, setSelected] = useState<Selection | null>(null);
   const [view, setView] = useState<ViewSettings>(FACADE_DEFAULT_VIEW);
@@ -698,9 +699,17 @@ export default function FacadePage() {
     [cornerChoices, maxCornerAngle],
   );
 
+  const handleDeleteStreet = useCallback((id: string) => {
+    setStreetNetwork((n) =>
+      pruneRoundabouts({ ...n, streets: n.streets.filter((s) => s.id !== id) }),
+    );
+    setSelectedStreet(null);
+  }, []);
+
   // Delete/Backspace removes the selection: the selected lot (street refits,
-  // length preserved) or the whole block at block level / last lot. Direct —
-  // no two-step confirm for keyboard deletion. Skipped while typing.
+  // length preserved) or the whole block at block level / last lot, or a
+  // selected road-network street. Direct — no two-step confirm for keyboard
+  // deletion. Skipped while typing.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target;
@@ -728,6 +737,13 @@ export default function FacadePage() {
       if (marquee) {
         e.preventDefault();
         handleMarqueeDelete();
+        return;
+      }
+      // A selected road-network street deletes too (parity with lots/blocks;
+      // roundabouts on the removed street's junctions are pruned).
+      if (selectedStreet) {
+        e.preventDefault();
+        handleDeleteStreet(selectedStreet);
         return;
       }
       // Backspace muscle-memory from pen tools must not nuke the selection
@@ -769,6 +785,8 @@ export default function FacadePage() {
     maxCornerAngle,
     marquee,
     handleMarqueeDelete,
+    selectedStreet,
+    handleDeleteStreet,
   ]);
 
   const handleSelectionLevel = useCallback(
@@ -854,13 +872,6 @@ export default function FacadePage() {
       ...n,
       streets: n.streets.map((s) => (s.id === next.id ? next : s)),
     }));
-  }, []);
-
-  const handleDeleteStreet = useCallback((id: string) => {
-    setStreetNetwork((n) =>
-      pruneRoundabouts({ ...n, streets: n.streets.filter((s) => s.id !== id) }),
-    );
-    setSelectedStreet(null);
   }, []);
 
   /** Upsert or remove the roundabout at one derived-intersection key. A null
@@ -1171,12 +1182,13 @@ export default function FacadePage() {
             ) : (
               <div className="text-sm text-[var(--muted)] leading-relaxed space-y-2 p-1">
                 <div className="font-medium text-[var(--foreground)]">
-                  Blank canvas
+                  Draw a street
                 </div>
                 <p>
-                  Sketch your first street: the pen tool in the Plan pane is
-                  armed — click to place nodes, Escape to finish, click the
-                  first node to close a loop.
+                  Pick the 🛣 Roads tool in the Plan pane and click to place
+                  vertices, Escape to finish, click the first vertex to close a
+                  loop. Click any street to edit or delete it (or select it and
+                  press Delete).
                 </p>
               </div>
             )}
