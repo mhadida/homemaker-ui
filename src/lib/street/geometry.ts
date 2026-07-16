@@ -160,7 +160,7 @@ export function roundaboutRing(
   return { outer: loop(outerR), island: loop(islandR) };
 }
 
-/** Unit vector from `from` toward `to` (plan coords); zero-length → [1,0]. */
+/** Unit vector from `from` toward `to` (plan coords); coincident points → [0,0]. */
 function unit(to: Vec2, from: Vec2): Vec2 {
   const dx = to[0] - from[0];
   const dz = to[1] - from[1];
@@ -177,6 +177,10 @@ export function cornerFit(
   V: Vec2,
   B: Vec2,
 ): { deflection: number; maxRadius: number } {
+  // Compute segment lengths first and guard against degenerate segments
+  const segA = Math.hypot(A[0] - V[0], A[1] - V[1]);
+  const segB = Math.hypot(B[0] - V[0], B[1] - V[1]);
+  if (segA < 1e-9 || segB < 1e-9) return { deflection: 0, maxRadius: 0 };
   const u = unit(A, V);
   const w = unit(B, V);
   let dot = u[0] * w[0] + u[1] * w[1];
@@ -184,8 +188,6 @@ export function cornerFit(
   const phi = Math.acos(dot); // interior angle between the two segments
   const delta = Math.PI - phi; // deflection
   if (delta < 1e-4) return { deflection: 0, maxRadius: 0 };
-  const segA = Math.hypot(A[0] - V[0], A[1] - V[1]);
-  const segB = Math.hypot(B[0] - V[0], B[1] - V[1]);
   const tCap = Math.min(segA, segB) * 0.5;
   const maxRadius = tCap / Math.tan(delta / 2);
   return { deflection: delta, maxRadius };

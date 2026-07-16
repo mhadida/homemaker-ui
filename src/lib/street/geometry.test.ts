@@ -150,6 +150,17 @@ describe("cornerFit", () => {
     expect(f.deflection).toBeCloseTo(Math.PI / 2, 5);
     expect(f.maxRadius).toBeCloseTo(5, 5); // tCap = 5, tan(45°)=1
   });
+  it("degenerate (duplicated) adjacent point → no fillet, not a phantom 90° corner", () => {
+    expect(cornerFit([0, 0], [0, 0], [0, 50])).toEqual({ deflection: 0, maxRadius: 0 });
+    expect(cornerFit([-50, 0], [0, 0], [0, 0])).toEqual({ deflection: 0, maxRadius: 0 });
+  });
+  it("near-180° hairpin does not throw or produce non-finite output", () => {
+    const out = filletCentreline([[-1000, 0], [0, 0], [-1000, 5]], 120, 8);
+    for (const [x, z] of out) {
+      expect(Number.isFinite(x)).toBe(true);
+      expect(Number.isFinite(z)).toBe(true);
+    }
+  });
 });
 
 describe("filletCentreline", () => {
