@@ -159,3 +159,84 @@ export function roundaboutRing(
     });
   return { outer: loop(outerR), island: loop(islandR) };
 }
+
+/** Unit vector from `from` toward `to` (plan coords); zero-length → [1,0]. */
+function unit(to: Vec2, from: Vec2): Vec2 {
+  const dx = to[0] - from[0];
+  const dz = to[1] - from[1];
+  const len = Math.hypot(dx, dz) || 1;
+  return [dx / len, dz / len];
+}
+
+/** Geometry of one interior corner A–V–B: the deflection angle Δ (heading
+ * change; 0 = collinear) and the largest fillet radius that seats within the
+ * adjacent segments (tangent length capped at half the shorter neighbour, so a
+ * fillet at the far end of each segment still fits). Pure. */
+export function cornerFit(
+  A: Vec2,
+  V: Vec2,
+  B: Vec2,
+): { deflection: number; maxRadius: number } {
+  const u = unit(A, V);
+  const w = unit(B, V);
+  let dot = u[0] * w[0] + u[1] * w[1];
+  dot = Math.max(-1, Math.min(1, dot));
+  const phi = Math.acos(dot); // interior angle between the two segments
+  const delta = Math.PI - phi; // deflection
+  if (delta < 1e-4) return { deflection: 0, maxRadius: 0 };
+  const segA = Math.hypot(A[0] - V[0], A[1] - V[1]);
+  const segB = Math.hypot(B[0] - V[0], B[1] - V[1]);
+  const tCap = Math.min(segA, segB) * 0.5;
+  const maxRadius = tCap / Math.tan(delta / 2);
+  return { deflection: delta, maxRadius };
+}
+
+/** Real road alignment through the vertices: straight tangents joined by
+ * circular arcs of radius min(minRadius, what fits). First and last vertices
+ * are emitted exactly (shared junction points). Collinear corners pass
+ * through. ≤ 2 points → straight passthrough copy. Pure. */
+export function filletCentreline(
+  points: Vec2[],
+  minRadius: number,
+  samplesPerArc = 8,
+): Vec2[] {
+  if (points.length <= 2) return points.map((p): Vec2 => [p[0], p[1]]);
+  const out: Vec2[] = [[points[0][0], points[0][1]]];
+  for (let i = 1; i < points.length - 1; i++) {
+    const A = points[i - 1];
+    const V = points[i];
+    const B = points[i + 1];
+    const { deflection, maxRadius } = cornerFit(A, V, B);
+    if (deflection === 0 || maxRadius <= 0) {
+      out.push([V[0], V[1]]);
+      continue;
+    }
+    const r = Math.min(minRadius, maxRadius);
+    const u = unit(A, V);
+    const w = unit(B, V);
+    const T = r * Math.tan(deflection / 2);
+    const Ta: Vec2 = [V[0] + u[0] * T, V[1] + u[1] * T];
+    const Tb: Vec2 = [V[0] + w[0] * T, V[1] + w[1] * T];
+    let bx = u[0] + w[0];
+    let bz = u[1] + w[1];
+    const bl = Math.hypot(bx, bz) || 1;
+    bx /= bl;
+    bz /= bl;
+    const dO = r / Math.cos(deflection / 2);
+    const O: Vec2 = [V[0] + bx * dO, V[1] + bz * dO];
+    const a0 = Math.atan2(Ta[1] - O[1], Ta[0] - O[0]);
+    const a1 = Math.atan2(Tb[1] - O[1], Tb[0] - O[0]);
+    let d = a1 - a0;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    out.push(Ta);
+    for (let s = 1; s < samplesPerArc; s++) {
+      const a = a0 + (d * s) / samplesPerArc;
+      out.push([O[0] + Math.cos(a) * r, O[1] + Math.sin(a) * r]);
+    }
+    out.push(Tb);
+  }
+  const last = points[points.length - 1];
+  out.push([last[0], last[1]]);
+  return out;
+}

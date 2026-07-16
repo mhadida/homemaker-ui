@@ -5,8 +5,10 @@ import {
   roundaboutRing,
   streetAdvisory,
   snapStreetPoint,
+  cornerFit,
+  filletCentreline,
 } from "./geometry";
-import type { StreetNetwork } from "./types";
+import type { StreetNetwork, Vec2 } from "./types";
 
 describe("smoothCentreline", () => {
   it("passes a 2-point street through unchanged (straight)", () => {
@@ -132,5 +134,58 @@ describe("streetAdvisory", () => {
   it("does not flag a road (no advisory for that type) or a short street", () => {
     expect(streetAdvisory({ id: "d", type: "road", points: [[0, 0], [100, 0]] })).toBeNull();
     expect(streetAdvisory({ id: "e", type: "street", points: [[0, 0], [10, 0]] })).toBeNull();
+  });
+});
+
+const distTo = (p: Vec2, o: Vec2) => Math.hypot(p[0] - o[0], p[1] - o[1]);
+
+describe("cornerFit", () => {
+  it("collinear points → zero deflection and radius", () => {
+    const f = cornerFit([0, 0], [5, 0], [10, 0]);
+    expect(f.deflection).toBeCloseTo(0, 6);
+    expect(f.maxRadius).toBe(0);
+  });
+  it("right-angle corner → deflection π/2, maxRadius = half-shorter-seg / tan(45°)", () => {
+    const f = cornerFit([-10, 0], [0, 0], [0, 10]); // 90° turn, equal 10 m segments
+    expect(f.deflection).toBeCloseTo(Math.PI / 2, 5);
+    expect(f.maxRadius).toBeCloseTo(5, 5); // tCap = 5, tan(45°)=1
+  });
+});
+
+describe("filletCentreline", () => {
+  it("≤ 2 points → passthrough copy", () => {
+    expect(filletCentreline([[0, 0], [10, 0]], 20)).toEqual([[0, 0], [10, 0]]);
+  });
+  it("keeps the first and last vertex exact (junctions pinned)", () => {
+    const pts: Vec2[] = [[0, 0], [10, 0], [10, 10]];
+    const out = filletCentreline(pts, 3);
+    expect(out[0]).toEqual([0, 0]);
+    expect(out[out.length - 1]).toEqual([10, 10]);
+  });
+  it("collinear interior vertex passes through unchanged", () => {
+    const out = filletCentreline([[0, 0], [5, 0], [10, 0]], 20);
+    expect(out).toEqual([[0, 0], [5, 0], [10, 0]]);
+  });
+  it("right-angle corner: every arc sample lies on a circle of the applied radius", () => {
+    // long segments so the fillet uses the full minRadius = 2 (maxRadius = 25)
+    const pts: Vec2[] = [[-50, 0], [0, 0], [0, 50]];
+    const out = filletCentreline(pts, 2, 8);
+    // arc centre for a 90° corner turning left: equidistant (2) from both axes → (−2, 2)
+    const O: Vec2 = [-2, 2];
+    // the samples strictly between the tangent points are the arc
+    const arc = out.slice(1, out.length - 1);
+    for (const p of arc) expect(distTo(p, O)).toBeCloseTo(2, 4);
+  });
+  it("too-tight corner clamps below minRadius without throwing", () => {
+    const pts: Vec2[] = [[-2, 0], [0, 0], [0, 2]]; // 2 m segments, boulevard-scale minRadius
+    expect(() => filletCentreline(pts, 120, 8)).not.toThrow();
+    const out = filletCentreline(pts, 120, 8);
+    // applied radius ≤ maxRadius (=1) ⇒ arc stays within ~1 m of the corner
+    for (const p of out) expect(distTo(p, [0, 0])).toBeLessThan(2.5);
+  });
+  it("bigger minRadius pushes the arc farther from the corner (wide sweep)", () => {
+    const pts: Vec2[] = [[-100, 0], [0, 0], [0, 100]];
+    const near = (r: number) => Math.min(...filletCentreline(pts, r, 8).map((p) => distTo(p, [0, 0])));
+    expect(near(40)).toBeGreaterThan(near(5)); // boulevard bows out more than an alley
   });
 });
