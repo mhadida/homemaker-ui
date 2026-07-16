@@ -2,8 +2,8 @@
 import { useMemo, useEffect, useState } from "react";
 import * as THREE from "three";
 import type { Street } from "@/lib/street/types";
-import { effectiveWidth } from "@/lib/street/types";
-import { smoothCentreline, streetRibbon } from "@/lib/street/geometry";
+import { effectiveWidth, minRadiusOf } from "@/lib/street/types";
+import { filletCentreline, streetRibbon } from "@/lib/street/geometry";
 
 const PAVING: Record<Street["type"], string> = {
   alley: "#6f6a63",
@@ -28,7 +28,7 @@ export default function StreetRibbonMesh({
 }) {
   const [hover, setHover] = useState(false);
   const geo = useMemo(() => {
-    const cl = smoothCentreline(street.points);
+    const cl = filletCentreline(street.points, minRadiusOf(street));
     if (cl.length < 2) return null;
     const { left, right } = streetRibbon(cl, effectiveWidth(street));
     const pos: number[] = [];

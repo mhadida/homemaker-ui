@@ -40,7 +40,8 @@ import {
   streetAwareFlipped,
   type StreetRef,
 } from "@/lib/facade/street";
-import { smoothCentreline, snapStreetPoint } from "@/lib/street/geometry";
+import { filletCentreline, snapStreetPoint } from "@/lib/street/geometry";
+import { STREET_SPECS } from "@/lib/street/types";
 import type { StreetNetwork, StreetType, Vec2 } from "@/lib/street/types";
 
 interface FacadeViewerProps {
@@ -419,7 +420,10 @@ function StreetDrawSurface({
   const first = path[0];
   const color = STREET_PREVIEW_COLORS[activeType];
   const preview = first && cursor ? [...path, cursor] : path;
-  const smooth = preview.length >= 2 ? smoothCentreline(preview) : null;
+  const smooth =
+    preview.length >= 2
+      ? filletCentreline(preview, STREET_SPECS[activeType].minRadius)
+      : null;
   return (
     <>
       <mesh
