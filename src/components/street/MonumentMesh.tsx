@@ -7,14 +7,18 @@ const WATER = "#5f7d86";
 export default function MonumentMesh({
   centre,
   kind,
+  baseY = 0,
 }: {
   centre: [number, number];
   kind: Monument["kind"];
+  /** Ground height at the centre — the group's y, so the monument stands
+   * plumb (vertical) at the correct elevation even on tilted ground. */
+  baseY?: number;
 }) {
   const [x, z] = centre;
   if (kind === "obelisk") {
     return (
-      <group position={[x, 0, z]}>
+      <group position={[x, baseY, z]}>
         <mesh position={[0, 0.3, 0]} castShadow>
           <boxGeometry args={[1.4, 0.6, 1.4]} />
           <meshStandardMaterial color={STONE} roughness={0.9} />
@@ -31,7 +35,7 @@ export default function MonumentMesh({
     );
   }
   return (
-    <group position={[x, 0, z]}>
+    <group position={[x, baseY, z]}>
       <mesh position={[0, 0.25, 0]} castShadow receiveShadow>
         <cylinderGeometry args={[2.2, 2.4, 0.5, 24]} />
         <meshStandardMaterial color={STONE} roughness={0.9} />

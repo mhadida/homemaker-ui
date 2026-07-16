@@ -380,6 +380,7 @@ export default function SceneContents({
           onSelectStreet={onSelectStreet}
           selectedIntersection={selectedIntersection}
           onSelectIntersection={onSelectIntersection}
+          ground={ground}
         />
       )}
       {/* Ground plane + grid tilt to the slope so buildings sit on it at

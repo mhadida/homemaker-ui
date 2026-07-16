@@ -5,6 +5,7 @@ import { deriveIntersections } from "@/lib/street/intersections";
 import StreetRibbonMesh from "./StreetRibbonMesh";
 import RoundaboutMesh from "./RoundaboutMesh";
 import IntersectionMarker from "./IntersectionMarker";
+import type { Ground } from "@/lib/facade/terrain";
 
 const ROUNDABOUT_OUTER_R = 9;
 const ROUNDABOUT_ISLAND_R = 3;
@@ -18,6 +19,7 @@ export default function StreetNetworkView({
   onSelectStreet,
   selectedIntersection = null,
   onSelectIntersection,
+  ground,
 }: {
   network: StreetNetwork;
   /** Selected street id — tints its ribbon. */
@@ -29,6 +31,8 @@ export default function StreetNetworkView({
   selectedIntersection?: string | null;
   /** Undefined → intersections aren't selectable. */
   onSelectIntersection?: (key: string) => void;
+  /** Tilted ground plane — drapes ribbons/roundabouts/markers onto it. */
+  ground: Ground;
 }) {
   const roundabouts = useMemo(() => new Map(network.roundabouts), [network.roundabouts]);
   const intersections = useMemo(() => deriveIntersections(network), [network]);
@@ -40,6 +44,7 @@ export default function StreetNetworkView({
           street={s}
           selected={selectedStreet === s.id}
           onSelect={onSelectStreet ? () => onSelectStreet(s.id) : undefined}
+          ground={ground}
         />
       ))}
       {intersections.map((it) => {
@@ -52,6 +57,7 @@ export default function StreetNetworkView({
                 outerR={ROUNDABOUT_OUTER_R}
                 islandR={ROUNDABOUT_ISLAND_R}
                 monument={m}
+                ground={ground}
               />
             )}
             {onSelectIntersection && (
@@ -60,6 +66,7 @@ export default function StreetNetworkView({
                 radius={m ? ROUNDABOUT_OUTER_R : JUNCTION_MARKER_R}
                 selected={selectedIntersection === it.key}
                 onSelect={() => onSelectIntersection(it.key)}
+                ground={ground}
               />
             )}
           </group>

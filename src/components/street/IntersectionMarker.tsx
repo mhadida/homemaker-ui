@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import type { Vec2 } from "@/lib/street/types";
+import { groundHeightAt, type Ground } from "@/lib/facade/terrain";
 
 /** Invisible-until-hovered clickable disc marking a derived street
  * intersection — clicking it opens the intersection inspector (roundabout
@@ -13,16 +14,19 @@ export default function IntersectionMarker({
   radius,
   selected,
   onSelect,
+  ground,
 }: {
   pos: Vec2;
   radius: number;
   selected: boolean;
   onSelect: () => void;
+  /** Tilted ground plane — lifts the marker onto the surface. */
+  ground: Ground;
 }) {
   const [hover, setHover] = useState(false);
   return (
     <mesh
-      position={[pos[0], 0.025, pos[1]]}
+      position={[pos[0], groundHeightAt(pos[0], pos[1], ground) + 0.025, pos[1]]}
       rotation={[-Math.PI / 2, 0, 0]}
       onClick={(e) => {
         e.stopPropagation();
