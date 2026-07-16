@@ -149,6 +149,7 @@ export function smoothCentreline(points: Vec2[], samplesPerSegment = 10): Vec2[]
 export function streetRibbon(
   centreline: Vec2[],
   width: number,
+  closed = false,
 ): { left: Vec2[]; right: Vec2[] } {
   const h = width / 2;
   const n = centreline.length;
@@ -161,8 +162,17 @@ export function streetRibbon(
     return [dx / len, dz / len];
   };
   for (let i = 0; i < n; i++) {
-    const prev = i > 0 ? dir(centreline[i - 1], centreline[i]) : dir(centreline[i], centreline[i + 1]);
-    const next = i < n - 1 ? dir(centreline[i], centreline[i + 1]) : prev;
+    let prev: Vec2, next: Vec2;
+    if (closed && (i === 0 || i === n - 1)) {
+      // Ring seam: centreline[n-1] coincides with centreline[0], so both
+      // seam points use the SAME wrap-around tangents → identical offset →
+      // the ribbon closes with no gap.
+      prev = dir(centreline[n - 2], centreline[0]);
+      next = dir(centreline[0], centreline[1]);
+    } else {
+      prev = i > 0 ? dir(centreline[i - 1], centreline[i]) : dir(centreline[i], centreline[i + 1]);
+      next = i < n - 1 ? dir(centreline[i], centreline[i + 1]) : prev;
+    }
     let tx = prev[0] + next[0];
     let tz = prev[1] + next[1];
     const tl = Math.hypot(tx, tz);
@@ -240,13 +250,21 @@ export function filletCentreline(
   points: Vec2[],
   minRadius: number,
   samplesPerArc = 8,
+  closed = false,
 ): Vec2[] {
   if (points.length <= 2) return points.map((p): Vec2 => [p[0], p[1]]);
-  const out: Vec2[] = [[points[0][0], points[0][1]]];
-  for (let i = 1; i < points.length - 1; i++) {
-    const A = points[i - 1];
-    const V = points[i];
-    const B = points[i + 1];
+  const n = points.length;
+  const out: Vec2[] = [];
+  // Open: pin the first vertex, fillet interior corners 1..n-2, pin the last.
+  // Closed: NO pinned endpoints — every vertex is a corner (cyclic neighbours),
+  // and the ring is closed by repeating the first sample at the end.
+  if (!closed) out.push([points[0][0], points[0][1]]);
+  const lo = closed ? 0 : 1;
+  const hi = closed ? n : n - 1; // exclusive
+  for (let i = lo; i < hi; i++) {
+    const A = points[(i - 1 + n) % n];
+    const V = points[i % n];
+    const B = points[(i + 1) % n];
     const { deflection, maxRadius } = cornerFit(A, V, B);
     if (deflection === 0 || maxRadius <= 0) {
       out.push([V[0], V[1]]);
@@ -277,7 +295,7 @@ export function filletCentreline(
     }
     out.push(Tb);
   }
-  const last = points[points.length - 1];
-  out.push([last[0], last[1]]);
+  if (closed) out.push([out[0][0], out[0][1]]); // close the ring
+  else out.push([points[n - 1][0], points[n - 1][1]]); // exact last vertex
   return out;
 }

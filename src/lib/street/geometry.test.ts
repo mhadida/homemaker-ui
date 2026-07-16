@@ -253,3 +253,34 @@ describe("snapStreetPoint — segment snapping", () => {
     expect(snapStreetPoint([10, 5], net, 1)).toEqual([10, 5]);
   });
 });
+
+describe("filletCentreline / streetRibbon — closed loops", () => {
+  it("open behaviour is unchanged when closed is omitted/false", () => {
+    const pts: Vec2[] = [[0, 0], [10, 0], [10, 10]];
+    expect(filletCentreline(pts, 3)).toEqual(filletCentreline(pts, 3, 8, false));
+    const out = filletCentreline(pts, 3);
+    expect(out[0]).toEqual([0, 0]); // first pinned
+    expect(out[out.length - 1]).toEqual([10, 10]); // last pinned
+  });
+
+  it("closed: fillets EVERY corner (incl. the seam) and closes the ring", () => {
+    const sq: Vec2[] = [[0, 0], [20, 0], [20, 20], [0, 20]];
+    const out = filletCentreline(sq, 3, 8, true);
+    // ring closed: first sample repeated at the end
+    expect(out[0][0]).toBeCloseTo(out[out.length - 1][0], 6);
+    expect(out[0][1]).toBeCloseTo(out[out.length - 1][1], 6);
+    // no raw corner survives (all filleted, including [0,0] at the seam)
+    for (const c of sq)
+      expect(out.some((p) => p[0] === c[0] && p[1] === c[1])).toBe(false);
+  });
+
+  it("closed ribbon closes with no seam gap", () => {
+    const sq: Vec2[] = [[0, 0], [20, 0], [20, 20], [0, 20]];
+    const cl = filletCentreline(sq, 3, 8, true);
+    const { left, right } = streetRibbon(cl, 6, true);
+    expect(left[0][0]).toBeCloseTo(left[left.length - 1][0], 6);
+    expect(left[0][1]).toBeCloseTo(left[left.length - 1][1], 6);
+    expect(right[0][0]).toBeCloseTo(right[right.length - 1][0], 6);
+    expect(right[0][1]).toBeCloseTo(right[right.length - 1][1], 6);
+  });
+})
