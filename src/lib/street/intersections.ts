@@ -5,6 +5,11 @@ export interface Intersection {
   key: string;
   pos: Vec2;
   kind: "node" | "t" | "x";
+  /** `vertex` meaning depends on `kind`: for `"node"` and the branch side of a
+   * `"t"` it is a real vertex index (`points[vertex] === pos`); for the
+   * through side of a `"t"` and BOTH sides of an `"x"` it is a SEGMENT-start
+   * index (the junction is mid-segment, so `points[vertex] !== pos`). Locate a
+   * junction on a street via `pos`, not `points[vertex]`. */
   incident: { streetId: string; vertex: number }[];
 }
 
