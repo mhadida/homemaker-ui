@@ -86,9 +86,6 @@ const FacadeViewer = dynamic(() => import("@/components/facade/FacadeViewer"), {
  * explicit file Save/Load is the portable, shareable mechanism). */
 const AUTOSAVE_KEY = "facademaker:autosave";
 
-/** Metres pulled back from a junction when deriving frontage blocks from the
- * street network (SP-2c auto-buildings). */
-const STREET_SETBACK = 4;
 
 // AI spec <-> FacadeParams plumbing (mirrors the main page's BuildingSpec flow).
 interface FacadeSpec {
@@ -934,7 +931,6 @@ export default function FacadePage() {
         return cur;
       return syncStreetBlocks(streetNetwork, cur, {
         gen: DEFAULT_GEN,
-        setback: STREET_SETBACK,
         maxCornerAngle,
         cornerChoices,
       });

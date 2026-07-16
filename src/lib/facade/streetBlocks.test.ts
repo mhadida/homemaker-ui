@@ -6,7 +6,7 @@ import type { StreetNetwork, Vec2 } from "../street/types";
 
 const net = (streets: StreetNetwork["streets"]): StreetNetwork => ({ streets, roundabouts: [] });
 const S = (id: string, pts: Vec2[]) => ({ id, type: "street" as const, points: pts });
-const OPTS = { gen: DEFAULT_GEN, setback: 3, maxCornerAngle: 150, cornerChoices: new Map() };
+const OPTS = { gen: DEFAULT_GEN, maxCornerAngle: 150, cornerChoices: new Map() };
 
 describe("syncStreetBlocks", () => {
   it("generates source-tagged frontage blocks for a new street (both sides)", () => {

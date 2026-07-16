@@ -21,7 +21,6 @@ function frontageSeed(f: Frontage): number {
 
 export interface SyncOpts {
   gen: BlockGenSettings;
-  setback: number;
   maxCornerAngle: number;
   cornerChoices: Map<string, CornerChoice>;
 }
@@ -36,7 +35,7 @@ export function syncStreetBlocks(
   existing: FacadeBlock[],
   opts: SyncOpts,
 ): FacadeBlock[] {
-  const frontages = streetFrontages(net, opts.setback);
+  const frontages = streetFrontages(net);
   const byKey = new Map(
     existing.filter((b) => b.source).map((b) => [blockKey(b)!, b]),
   );
