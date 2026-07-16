@@ -25,6 +25,24 @@ export interface SyncOpts {
   cornerChoices: Map<string, CornerChoice>;
 }
 
+/** Buildings on a block share a rear building line, so street-derived blocks
+ * use ONE depth (the generator's per-lot random 6–12 m would otherwise expose
+ * blank return walls at every corner, where mismatched-depth wings meet). */
+const STREET_BUILDING_DEPTH = 10;
+
+/** Force a uniform massingDepth on every non-hand-edited lot (a `customized`
+ * lot keeps the depth the user chose). */
+function uniformDepth(b: FacadeBlock): FacadeBlock {
+  return {
+    ...b,
+    lots: b.lots.map((l) =>
+      l.customized
+        ? l
+        : { ...l, params: { ...l.params, massingDepth: STREET_BUILDING_DEPTH } },
+    ),
+  };
+}
+
 /** Reconcile the derived frontage blocks against `existing`, preserving hand
  * edits: hand-drawn (source-less) blocks pass through untouched; a frontage
  * that still exists keeps its block id + gen + seed and REFITS its line
@@ -53,10 +71,10 @@ export function syncStreetBlocks(
       const relined: FacadeBlock = { ...prev, line, flipped: f.facingFlipped };
       const aMoved = Math.hypot(line.a[0] - prev.line.a[0], line.a[1] - prev.line.a[1]);
       const bMoved = Math.hypot(line.b[0] - prev.line.b[0], line.b[1] - prev.line.b[1]);
-      return refit(relined, aMoved > bMoved ? "a" : "b") ?? relined;
+      return uniformDepth(refit(relined, aMoved > bMoved ? "a" : "b") ?? relined);
     }
     const seed = frontageSeed(f);
-    return {
+    return uniformDepth({
       id: `street:${frontageKey(f)}`,
       line,
       flipped: f.facingFlipped,
@@ -64,7 +82,7 @@ export function syncStreetBlocks(
       seed,
       lots: generateBlock(line, f.facingFlipped, opts.gen, seed),
       source: { streetId: f.streetId, segment: f.segment, part: f.part, side: f.side },
-    };
+    });
   });
 
   return syncCorners([...hand, ...derived], opts.cornerChoices, opts.maxCornerAngle);

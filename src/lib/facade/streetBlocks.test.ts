@@ -63,3 +63,17 @@ describe("syncStreetBlocks — refits from the moved end", () => {
     expect(sum).toBeCloseTo(len, 4); // refit converged to the new length
   });
 });
+
+describe("syncStreetBlocks — uniform depth (no exposed corner return walls)", () => {
+  it("gives every non-customized street lot the same massingDepth", () => {
+    const out = syncStreetBlocks(
+      net([S("h", [[-40, 0], [40, 0]]), S("v", [[0, -32], [0, 32]])]),
+      [],
+      OPTS,
+    );
+    const depths = new Set(
+      out.flatMap((b) => b.lots.filter((l) => !l.customized).map((l) => l.params.massingDepth)),
+    );
+    expect(depths.size).toBe(1); // one uniform depth across all street buildings
+  });
+});
