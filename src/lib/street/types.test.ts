@@ -30,9 +30,13 @@ describe("minRadius", () => {
     expect(alley.minRadius).toBeLessThan(street.minRadius);
     expect(street.minRadius).toBeLessThan(road.minRadius);
     expect(road.minRadius).toBeLessThan(boulevard.minRadius);
+    expect(STREET_SPECS.alley.minRadius).toBe(6);
+    expect(STREET_SPECS.street.minRadius).toBe(20);
+    expect(STREET_SPECS.road.minRadius).toBe(45);
+    expect(STREET_SPECS.boulevard.minRadius).toBe(120);
   });
   it("minRadiusOf returns the type default", () => {
-    const s = { id: "street-1", type: "road", points: [[0, 0], [10, 0]] };
+    const s: Street = { id: "street-1", type: "road", points: [[0, 0], [10, 0]] };
     expect(minRadiusOf(s)).toBe(STREET_SPECS.road.minRadius);
   });
 });
