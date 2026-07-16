@@ -46,9 +46,15 @@ export function syncStreetBlocks(
     const line = { a: [f.a[0], f.a[1]] as [number, number], b: [f.b[0], f.b[1]] as [number, number] };
     const prev = byKey.get(frontageKey(f));
     if (prev) {
-      // keep id/gen/seed/lots; update line; refit to the new length (pins survive)
+      // keep id/gen/seed/lots; update line; refit to the new length (pins
+      // survive). refit absorbs the delta at the end that actually MOVED — a
+      // street-vertex drag (or a miter recompute) can shift either raw
+      // endpoint, so pick whichever moved more (rigid translate → both equal →
+      // length unchanged → refit no-ops).
       const relined: FacadeBlock = { ...prev, line, flipped: f.facingFlipped };
-      return refit(relined, "b") ?? relined;
+      const aMoved = Math.hypot(line.a[0] - prev.line.a[0], line.a[1] - prev.line.a[1]);
+      const bMoved = Math.hypot(line.b[0] - prev.line.b[0], line.b[1] - prev.line.b[1]);
+      return refit(relined, aMoved > bMoved ? "a" : "b") ?? relined;
     }
     const seed = frontageSeed(f);
     return {
