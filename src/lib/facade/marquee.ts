@@ -5,6 +5,7 @@ import {
 } from "./blocks";
 import { deriveNodes, moveNode } from "./nodes";
 import { deleteLot } from "./generate";
+import type { Street } from "../street/types";
 
 /** Axis-aligned plan-coord rectangle, min/max normalized. */
 export interface Rect {
@@ -24,6 +25,9 @@ export interface Marquee {
   lots: string[];
   /** Enclosed node positions (partial-block welds / endpoints). */
   nodes: [number, number][];
+  /** Selected road-network street ids. Optional (absent = none) so every
+   * pre-street marquee literal stays valid and byte-identical. */
+  streets?: string[];
 }
 
 export function normalizeRect(
@@ -42,7 +46,12 @@ const inside = (rect: Rect, x: number, z: number) =>
   x >= rect.x0 && x <= rect.x1 && z >= rect.z0 && z <= rect.z1;
 
 export function marqueeEmpty(m: Marquee): boolean {
-  return m.blocks.length === 0 && m.lots.length === 0 && m.nodes.length === 0;
+  return (
+    m.blocks.length === 0 &&
+    m.lots.length === 0 &&
+    m.nodes.length === 0 &&
+    (m.streets?.length ?? 0) === 0
+  );
 }
 
 /** The enclosure rule (see the marquee design spec):
@@ -52,7 +61,11 @@ export function marqueeEmpty(m: Marquee): boolean {
  *             enclosed block (a fully-enclosed block subsumes its welds).
  * A box over a whole street yields whole-block ops; a box over part of it
  * yields per-lot / per-node ops — no mode toggle. */
-export function hitTest(blocks: FacadeBlock[], rect: Rect): Marquee {
+export function hitTest(
+  blocks: FacadeBlock[],
+  rect: Rect,
+  streets: Street[] = [],
+): Marquee {
   const enclosed = new Set<string>();
   for (const b of blocks) {
     if (
@@ -79,7 +92,19 @@ export function hitTest(blocks: FacadeBlock[], rect: Rect): Marquee {
     nodes.push([node.pos[0], node.pos[1]]);
   }
 
-  return { blocks: [...enclosed], lots, nodes };
+  // A street is selected when EVERY vertex is enclosed (whole-street op,
+  // consistent with the block "both endpoints inside" rule).
+  const selStreets: string[] = [];
+  for (const s of streets) {
+    if (
+      s.points.length > 0 &&
+      s.points.every((p) => inside(rect, p[0], p[1]))
+    ) {
+      selStreets.push(s.id);
+    }
+  }
+
+  return { blocks: [...enclosed], lots, nodes, streets: selStreets };
 }
 
 /** Split a `${blockId}:${index}` lot key. Block ids contain no ':'. */
@@ -182,6 +207,15 @@ export function deleteMarquee(blocks: FacadeBlock[], m: Marquee): FacadeBlock[] 
     out.push(cur);
   }
   return out;
+}
+
+/** Remove the marquee's selected road-network streets. Pure; the caller
+ * prunes roundabouts whose junctions the removed streets defined. A no-op when
+ * no street is selected (returns the same array reference untouched). */
+export function deleteMarqueeStreets(streets: Street[], m: Marquee): Street[] {
+  if (!m.streets || m.streets.length === 0) return streets;
+  const sel = new Set(m.streets);
+  return streets.filter((s) => !sel.has(s.id));
 }
 
 /** Move: translate every fully-enclosed block rigidly by (dx,dz) — both

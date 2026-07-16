@@ -5,9 +5,11 @@ import {
   marqueeEmpty,
   affectedBlockIds,
   deleteMarquee,
+  deleteMarqueeStreets,
   translateMarquee,
   type Marquee,
 } from "./marquee";
+import type { Street } from "../street/types";
 import {
   totalLotsWidth,
   DEFAULT_GEN,
@@ -209,5 +211,53 @@ describe("translateMarquee", () => {
     );
     expect(out[0].line.b).toEqual([12, 0]);
     expect(out[1].line.a).toEqual([12, 0]);
+  });
+});
+
+const mkStreet = (id: string, points: [number, number][]): Street => ({
+  id,
+  type: "street",
+  points,
+});
+
+describe("marquee — streets", () => {
+  it("hitTest selects a street only when EVERY vertex is enclosed", () => {
+    const inRect = mkStreet("street-1", [[0, 0], [5, 0], [10, 0]]);
+    const spillsOut = mkStreet("street-2", [[0, 0], [100, 0]]);
+    const m = hitTest([], normalizeRect([-1, -1], [11, 1]), [inRect, spillsOut]);
+    expect(m.streets).toEqual(["street-1"]);
+  });
+
+  it("hitTest without the streets arg stays byte-identical (no streets field)", () => {
+    const b = mkBlock("b", [0, 0], [15, 0], [5, 5, 5]);
+    const m = hitTest([b], normalizeRect([-1, -1], [16, 1]));
+    expect(m.streets ?? []).toEqual([]);
+    expect(m.blocks).toEqual(["b"]);
+  });
+
+  it("marqueeEmpty is false when only a street is selected", () => {
+    expect(
+      marqueeEmpty({ blocks: [], lots: [], nodes: [], streets: ["street-1"] }),
+    ).toBe(false);
+    expect(marqueeEmpty({ blocks: [], lots: [], nodes: [], streets: [] })).toBe(
+      true,
+    );
+  });
+
+  it("deleteMarqueeStreets removes exactly the selected streets", () => {
+    const s1 = mkStreet("street-1", [[0, 0], [10, 0]]);
+    const s2 = mkStreet("street-2", [[0, 5], [10, 5]]);
+    const out = deleteMarqueeStreets([s1, s2], {
+      blocks: [],
+      lots: [],
+      nodes: [],
+      streets: ["street-1"],
+    });
+    expect(out.map((s) => s.id)).toEqual(["street-2"]);
+  });
+
+  it("deleteMarqueeStreets is a no-op when no street is selected", () => {
+    const s1 = mkStreet("street-1", [[0, 0], [10, 0]]);
+    expect(deleteMarqueeStreets([s1], { blocks: [], lots: [], nodes: [] })).toEqual([s1]);
   });
 });
