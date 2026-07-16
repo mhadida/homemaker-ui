@@ -43,6 +43,9 @@ export interface FacadeBlock {
   seed: number;
   /** In order along the (effective) line. */
   lots: LotState[];
+  /** Set on blocks auto-derived from a street edge (SP-2c). Absent on
+   * hand-drawn blocks. Drives street-driven regeneration/refit. */
+  source?: { streetId: string; segment: number; part: number; side: "left" | "right" };
 }
 
 export interface Selection {
