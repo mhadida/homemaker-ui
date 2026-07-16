@@ -8,7 +8,7 @@ import {
   cornerFit,
   filletCentreline,
 } from "./geometry";
-import type { StreetNetwork, Vec2 } from "./types";
+import type { Street, StreetNetwork, Vec2 } from "./types";
 
 describe("smoothCentreline", () => {
   it("passes a 2-point street through unchanged (straight)", () => {
@@ -198,5 +198,22 @@ describe("filletCentreline", () => {
     const pts: Vec2[] = [[-100, 0], [0, 0], [0, 100]];
     const near = (r: number) => Math.min(...filletCentreline(pts, r, 8).map((p) => distTo(p, [0, 0])));
     expect(near(40)).toBeGreaterThan(near(5)); // boulevard bows out more than an alley
+  });
+});
+
+describe("streetAdvisory radius hint", () => {
+  it("flags a boulevard corner tighter than its minimum radius", () => {
+    const s: Street = { id: "s1", type: "boulevard", points: [[-5, 0], [0, 0], [0, 5]] };
+    expect(streetAdvisory(s)).toMatch(/minimum radius/i);
+  });
+  it("no radius hint for a gentle corner within the type minimum", () => {
+    // alley minRadius 6; long shallow bend seats easily
+    const s: Street = { id: "s2", type: "alley", points: [[-30, 0], [0, 0], [30, 2]] };
+    const msg = streetAdvisory(s);
+    expect(msg === null || !/minimum radius/i.test(msg)).toBe(true);
+  });
+  it("still fires the existing long-straight-run hint when no radius issue", () => {
+    const s: Street = { id: "s3", type: "street", points: [[0, 0], [100, 0]] };
+    expect(streetAdvisory(s)).toMatch(/straight run/i);
   });
 });

@@ -1,4 +1,5 @@
 import type { Street, StreetNetwork, Vec2 } from "./types";
+import { STREET_SPECS } from "./types";
 
 const RING_SEGMENTS = 32;
 
@@ -28,6 +29,13 @@ function polylineLength(points: Vec2[]): number {
  * streetscape concern. */
 export function streetAdvisory(street: Street): string | null {
   const { type, points } = street;
+  const minR = STREET_SPECS[type].minRadius;
+  for (let i = 1; i < points.length - 1; i++) {
+    const { deflection, maxRadius } = cornerFit(points[i - 1], points[i], points[i + 1]);
+    if (deflection > 0 && maxRadius < minR) {
+      return `This ${STREET_SPECS[type].label.toLowerCase()} corner is tighter than its ${minR} m minimum radius — it was rounded as much as the segments allow; lengthen them or add a vertex for a gentle sweep.`;
+    }
+  }
   if (type === "boulevard") {
     return polylineLength(points) > BOULEVARD_LENGTH_MAX
       ? "Long boulevard — consider a terminating monument or a roundabout along its length."
