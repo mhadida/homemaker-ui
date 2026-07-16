@@ -79,7 +79,7 @@ interface FacadeViewerProps {
    * of blocks/lots). Rendered in every pane's world space. */
   streetNetwork: StreetNetwork;
   /** Commit one finished street polyline drawn with the street tool. */
-  onCommitStreet: (type: StreetType, points: Vec2[]) => void;
+  onCommitStreet: (type: StreetType, points: Vec2[], closed?: boolean) => void;
   /** Selected street id (inspector target) — highlighted in every pane. */
   selectedStreet: string | null;
   onSelectStreet: (id: string) => void;
@@ -376,7 +376,7 @@ function StreetDrawSurface({
 }: {
   active: boolean;
   activeType: StreetType;
-  onCommitStreet: (type: StreetType, points: Vec2[]) => void;
+  onCommitStreet: (type: StreetType, points: Vec2[], closed?: boolean) => void;
   network: StreetNetwork;
 }) {
   const [path, setPath] = useState<Vec2[]>([]);
@@ -442,11 +442,13 @@ function StreetDrawSurface({
             setPath([p]);
             return;
           }
+          // Clicking the first vertex closes the street into a LOOP (needs ≥ 3
+          // vertices for a real ring). Escape still commits an open polyline.
           const closing =
-            path.length >= 2 &&
+            path.length >= 3 &&
             Math.hypot(p[0] - first[0], p[1] - first[1]) <= 1;
           if (closing) {
-            onCommitStreet(activeType, path);
+            onCommitStreet(activeType, path, true);
             resetPath();
             return;
           }
@@ -1017,7 +1019,7 @@ function PlanPane({
   selectMode: boolean;
   streetDrawMode: boolean;
   activeStreetType: StreetType;
-  onCommitStreet: (type: StreetType, points: Vec2[]) => void;
+  onCommitStreet: (type: StreetType, points: Vec2[], closed?: boolean) => void;
   onCommitLine: (
     a: [number, number],
     b: [number, number],

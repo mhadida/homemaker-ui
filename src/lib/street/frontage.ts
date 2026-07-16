@@ -58,11 +58,18 @@ export function streetFrontages(net: StreetNetwork): Frontage[] {
     .filter((s) => s.points.length >= 2)
     .map((s) => {
       const half = effectiveWidth(s) / 2 + PAVEMENT_GAP;
+      // A closed loop rings buildings the whole way round: append the seam
+      // point so the offset polyline includes the closing segment, and pass
+      // `closed` so the ribbon wraps with no seam gap.
+      const pts: Vec2[] = s.closed
+        ? [...s.points, s.points[0]]
+        : (s.points as Vec2[]);
       const { left, right } = streetRibbon(
-        s.points,
+        pts,
         effectiveWidth(s) + 2 * PAVEMENT_GAP,
+        s.closed,
       );
-      return { id: s.id, half, pts: s.points as Vec2[], left, right };
+      return { id: s.id, half, pts, left, right };
     });
 
   // Is p inside some OTHER street's carriageway+gap (i.e. across a road)?

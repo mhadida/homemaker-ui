@@ -32,9 +32,9 @@ export default function StreetRibbonMesh({
 }) {
   const [hover, setHover] = useState(false);
   const geo = useMemo(() => {
-    const cl = filletCentreline(street.points, minRadiusOf(street));
+    const cl = filletCentreline(street.points, minRadiusOf(street), 8, street.closed);
     if (cl.length < 2) return null;
-    const { left, right } = streetRibbon(cl, effectiveWidth(street));
+    const { left, right } = streetRibbon(cl, effectiveWidth(street), street.closed);
     const pos: number[] = [];
     const yAt = (x: number, z: number) => groundHeightAt(x, z, ground) + 0.02;
     for (let i = 0; i < cl.length - 1; i++) {

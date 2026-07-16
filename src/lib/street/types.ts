@@ -24,6 +24,9 @@ export interface Street {
   points: Vec2[];
   /** optional per-street override of the type default width */
   width?: number;
+  /** closed loop: an implicit closing segment joins points[n-1] → points[0]
+   * (a ring road). Absent = open polyline. `points` never repeats the first. */
+  closed?: boolean;
 }
 
 export interface Monument {

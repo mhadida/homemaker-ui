@@ -851,12 +851,18 @@ export default function FacadePage() {
 
   /** Commit one finished street polyline drawn with the street tool. Streets
    * are independent of blocks — just appended to the network. */
-  const handleCommitStreet = useCallback((type: StreetType, points: Vec2[]) => {
-    setStreetNetwork((n) => ({
-      ...n,
-      streets: [...n.streets, { id: nextStreetId(), type, points }],
-    }));
-  }, []);
+  const handleCommitStreet = useCallback(
+    (type: StreetType, points: Vec2[], closed?: boolean) => {
+      setStreetNetwork((n) => ({
+        ...n,
+        streets: [
+          ...n.streets,
+          { id: nextStreetId(), type, points, ...(closed ? { closed: true } : {}) },
+        ],
+      }));
+    },
+    [],
+  );
 
   // ── Street network selection + inspector edits ───────────────────────────
   const handleSelectStreet = useCallback((id: string) => {
