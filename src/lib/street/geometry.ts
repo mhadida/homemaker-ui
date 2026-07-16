@@ -51,16 +51,35 @@ export function streetAdvisory(street: Street): string | null {
   return null;
 }
 
-/** Endpoint snapping for the street-draw tool (mirrors `snapPoint` in
- * facade/blocks.ts): returns the nearest EXISTING vertex across every
- * street's `points`, within `radius`, else `p` unchanged. Exact-value
- * snapping (no rounding) so a snapped vertex matches `deriveIntersections`'
- * exact-float weld. Pure — an empty network is a no-op. */
+/** Closest point on segment a→b to p, with the clamped parameter t∈[0,1] and
+ * the distance. Zero-length segment → a (t=0). Pure. */
+export function closestPointOnSegment(
+  p: Vec2,
+  a: Vec2,
+  b: Vec2,
+): { point: Vec2; t: number; dist: number } {
+  const abx = b[0] - a[0];
+  const abz = b[1] - a[1];
+  const denom = abx * abx + abz * abz;
+  let t = denom === 0 ? 0 : ((p[0] - a[0]) * abx + (p[1] - a[1]) * abz) / denom;
+  t = Math.max(0, Math.min(1, t));
+  const point: Vec2 = [a[0] + abx * t, a[1] + abz * t];
+  return { point, t, dist: Math.hypot(p[0] - point[0], p[1] - point[1]) };
+}
+
+/** Endpoint + segment snapping for the street-draw tool (mirrors `snapPoint`
+ * in facade/blocks.ts): a two-stage snap — 1) nearest EXISTING vertex across
+ * every street's `points`, within `radius` (exact reuse wins), else 2) the
+ * nearest point on any segment within `radius` (lands ON the line, enabling
+ * T-junctions). Exact-value vertex snapping (no rounding) so a snapped vertex
+ * matches `deriveIntersections`' exact-float weld. Pure — an empty network is
+ * a no-op. */
 export function snapStreetPoint(
   p: Vec2,
   network: StreetNetwork,
   radius: number,
 ): Vec2 {
+  // 1) nearest EXISTING vertex within radius (exact reuse wins).
   let best = p;
   let bestD = radius;
   for (const s of network.streets) {
@@ -69,6 +88,18 @@ export function snapStreetPoint(
       if (d < bestD) {
         bestD = d;
         best = [v[0], v[1]];
+      }
+    }
+  }
+  if (best !== p) return best; // snapped to a vertex
+  // 2) else nearest point on any segment within radius (lands ON the line → T).
+  let segD = radius;
+  for (const s of network.streets) {
+    for (let i = 0; i < s.points.length - 1; i++) {
+      const c = closestPointOnSegment(p, s.points[i], s.points[i + 1]);
+      if (c.dist < segD) {
+        segD = c.dist;
+        best = c.point;
       }
     }
   }

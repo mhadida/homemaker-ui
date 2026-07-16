@@ -7,6 +7,7 @@ import {
   snapStreetPoint,
   cornerFit,
   filletCentreline,
+  closestPointOnSegment,
 } from "./geometry";
 import type { Street, StreetNetwork, Vec2 } from "./types";
 
@@ -215,5 +216,40 @@ describe("streetAdvisory radius hint", () => {
   it("still fires the existing long-straight-run hint when no radius issue", () => {
     const s: Street = { id: "s3", type: "street", points: [[0, 0], [100, 0]] };
     expect(streetAdvisory(s)).toMatch(/straight run/i);
+  });
+});
+
+describe("closestPointOnSegment", () => {
+  it("projects onto the segment interior", () => {
+    const r = closestPointOnSegment([5, 3], [0, 0], [10, 0]);
+    expect(r.point).toEqual([5, 0]);
+    expect(r.t).toBeCloseTo(0.5, 6);
+    expect(r.dist).toBeCloseTo(3, 6);
+  });
+  it("clamps beyond an endpoint", () => {
+    const r = closestPointOnSegment([-4, 0], [0, 0], [10, 0]);
+    expect(r.point).toEqual([0, 0]);
+    expect(r.t).toBe(0);
+  });
+  it("handles a zero-length segment", () => {
+    const r = closestPointOnSegment([3, 4], [1, 1], [1, 1]);
+    expect(r.point).toEqual([1, 1]);
+    expect(Number.isFinite(r.dist)).toBe(true);
+  });
+});
+
+describe("snapStreetPoint — segment snapping", () => {
+  const net: StreetNetwork = {
+    streets: [{ id: "street-1", type: "street", points: [[0, 0], [20, 0]] }],
+    roundabouts: [],
+  };
+  it("snaps a near-segment point onto the segment (T formation)", () => {
+    expect(snapStreetPoint([10, 0.5], net, 1)).toEqual([10, 0]);
+  });
+  it("prefers an existing vertex over a segment when both are in range", () => {
+    expect(snapStreetPoint([0.3, 0.3], net, 1)).toEqual([0, 0]); // the vertex, not [0.3,0]
+  });
+  it("leaves a far point unchanged", () => {
+    expect(snapStreetPoint([10, 5], net, 1)).toEqual([10, 5]);
   });
 });
