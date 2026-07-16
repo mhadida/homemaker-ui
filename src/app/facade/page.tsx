@@ -35,6 +35,7 @@ import {
   fromJSON,
   type SceneState,
 } from "@/lib/facade/document";
+import { syncStreetBlocks } from "@/lib/facade/streetBlocks";
 import { rerollBlock, generateBlock, deleteLot } from "@/lib/facade/generate";
 import { moveNode, deriveNodes } from "@/lib/facade/nodes";
 import { DEFAULT_GROUND, type Ground } from "@/lib/facade/terrain";
@@ -84,6 +85,10 @@ const FacadeViewer = dynamic(() => import("@/components/facade/FacadeViewer"), {
 /** localStorage key for the silent autosave (crash/refresh insurance; the
  * explicit file Save/Load is the portable, shareable mechanism). */
 const AUTOSAVE_KEY = "facademaker:autosave";
+
+/** Metres pulled back from a junction when deriving frontage blocks from the
+ * street network (SP-2c auto-buildings). */
+const STREET_SETBACK = 4;
 
 // AI spec <-> FacadeParams plumbing (mirrors the main page's BuildingSpec flow).
 interface FacadeSpec {
@@ -254,6 +259,10 @@ export default function FacadePage() {
   const [maxCornerAngle, setMaxCornerAngle] = useState(DEFAULT_MAX_CORNER_ANGLE);
   const [ground, setGround] = useState<Ground>(DEFAULT_GROUND);
   const [streetWidth, setStreetWidth] = useState(STREET_WIDTH_DEFAULT);
+  // Auto-populate editable buildings along street frontages (SP-2c). Default
+  // on; transient UI state (like drawActive/marquee) — not part of the saved
+  // document, since the derived blocks it produces already are.
+  const [buildingsFromStreets, setBuildingsFromStreets] = useState(true);
   // The standalone road network (independent of blocks/lots). Empty by
   // default so every existing path is byte-identical.
   const [streetNetwork, setStreetNetwork] =
@@ -911,6 +920,35 @@ export default function FacadePage() {
     setBlocks((bs) => syncCorners(bs, cornerChoices, maxCornerAngle));
   }, [maxCornerAngle, cornerChoices]);
 
+  // Derive frontage blocks from the street network whenever it (or the
+  // corner settings that its miters depend on) changes — covers drawing,
+  // moving, retyping, and deleting streets without per-handler plumbing.
+  // The functional setBlocks reads `blocks` fresh each call, so `blocks`
+  // itself is deliberately NOT a dependency (that would loop). The guard
+  // keeps a pure hand-drawn / empty scene byte-identical (same reference in
+  // → same reference out → React bails the re-render).
+  useEffect(() => {
+    if (!buildingsFromStreets) return;
+    setBlocks((cur) => {
+      if (streetNetwork.streets.length === 0 && !cur.some((b) => b.source))
+        return cur;
+      return syncStreetBlocks(streetNetwork, cur, {
+        gen: DEFAULT_GEN,
+        setback: STREET_SETBACK,
+        maxCornerAngle,
+        cornerChoices,
+      });
+    });
+  }, [streetNetwork, buildingsFromStreets, maxCornerAngle, cornerChoices]);
+
+  // Turning auto-buildings off strips every derived block, leaving
+  // hand-drawn ones untouched; turning it back on is handled by the effect
+  // above (streetNetwork/buildingsFromStreets both fire it).
+  useEffect(() => {
+    if (buildingsFromStreets) return;
+    setBlocks((bs) => bs.filter((b) => !b.source));
+  }, [buildingsFromStreets]);
+
   const corners = useMemo(
     () => detectCorners(blocks, maxCornerAngle),
     [blocks, maxCornerAngle],
@@ -1064,6 +1102,20 @@ export default function FacadePage() {
               {loadError}
             </span>
           )}
+          <span className="mx-1 h-4 w-px bg-[var(--border)]" aria-hidden />
+          <button
+            type="button"
+            onClick={() => setBuildingsFromStreets((v) => !v)}
+            aria-pressed={buildingsFromStreets}
+            title="Auto-populate editable buildings along drawn streets"
+            className={`text-[11px] px-2 py-0.5 rounded border transition-colors ${
+              buildingsFromStreets
+                ? "border-[var(--accent)] text-[var(--accent)]"
+                : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30"
+            }`}
+          >
+            Auto-buildings
+          </button>
         </div>
         <div className="flex items-center gap-3 text-[11px] text-[var(--muted)] font-mono">
           {params && layout ? (

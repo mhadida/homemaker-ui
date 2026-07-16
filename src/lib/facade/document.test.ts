@@ -84,6 +84,30 @@ describe("round-trip", () => {
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.scene.blocks).toHaveLength(2);
   });
+  it("round-trips a street-derived block's source link", () => {
+    const s: SceneState = {
+      blocks: [
+        {
+          ...mkBlock("street:s1#0#0#left", [0, 0], [8, 0], [8]),
+          source: { streetId: "s1", segment: 0, part: 0, side: "left" },
+        },
+      ],
+      cornerChoices: new Map(),
+      ground: DEFAULT_GROUND,
+      streetWidth: STREET_WIDTH_DEFAULT,
+      maxCornerAngle: DEFAULT_MAX_CORNER_ANGLE,
+      streetNetwork: EMPTY_NETWORK,
+    };
+    const res = fromJSON(toJSON(s));
+    expect(res.ok).toBe(true);
+    if (res.ok)
+      expect(res.scene.blocks[0].source).toEqual({
+        streetId: "s1",
+        segment: 0,
+        part: 0,
+        side: "left",
+      });
+  });
 });
 
 describe("deserialize validation", () => {
