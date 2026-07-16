@@ -152,3 +152,23 @@ describe("deriveIntersections — T and X", () => {
     expect(out.filter((i) => i.pos[0] === 10 && i.pos[1] === 0)).toHaveLength(1);
   });
 });
+
+describe("deriveIntersections — no duplicate junction at a shared point", () => {
+  it("a T vertex and an X crossing at the SAME sub-grid point yield one junction, not two", () => {
+    // branch ends on main at x=10.00005 (a T, keyed exactly); cross also passes
+    // through that exact point (an X, keyed ROUNDED). The rounded X key differs
+    // from the exact T key, so without position-dedup two markers would appear.
+    const out = deriveIntersections({
+      streets: [
+        { id: "main", type: "street", points: [[0, 0], [20, 0]] },
+        { id: "branch", type: "street", points: [[10.00005, 0], [10.00005, 8]] },
+        { id: "cross", type: "street", points: [[8, -2], [12.0001, 2]] },
+      ],
+      roundabouts: [],
+    });
+    const here = out.filter(
+      (i) => Math.abs(i.pos[0] - 10.00005) < 1e-3 && Math.abs(i.pos[1]) < 1e-3,
+    );
+    expect(here).toHaveLength(1);
+  });
+});

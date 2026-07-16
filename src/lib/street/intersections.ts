@@ -58,6 +58,15 @@ export function deriveIntersections(net: StreetNetwork): Intersection[] {
     }
     return e;
   };
+  // Position-based "already a junction here?" — robust to the exact-vs-rounded
+  // key mismatch (a T keys exact, an X keys rounded, so a shared point could
+  // otherwise slip past a key-only check and double-mark).
+  const nearExisting = (p: Vec2) =>
+    [...byKey.values()].some(
+      (e) =>
+        Math.abs(e.pos[0] - p[0]) < ON_SEG_EPS &&
+        Math.abs(e.pos[1] - p[1]) < ON_SEG_EPS,
+    );
 
   // Pass 1 — shared vertices (exact). Same as SP-1.
   const vByKey = new Map<string, { pos: Vec2; inc: { streetId: string; vertex: number }[] }>();
@@ -109,7 +118,7 @@ export function deriveIntersections(net: StreetNetwork): Intersection[] {
           const p = segCross(a.points[i], a.points[i + 1], b.points[j], b.points[j + 1]);
           if (!p) continue;
           const k = roundKey(p);
-          if (byKey.has(k)) continue;
+          if (byKey.has(k) || nearExisting(p)) continue;
           add(k, p, "x", { streetId: a.id, vertex: i });
           add(k, p, "x", { streetId: b.id, vertex: j });
         }
