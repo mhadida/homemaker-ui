@@ -26,9 +26,9 @@ describe("streetFrontages", () => {
       const L = Math.hypot(dx, dz);
       let nx = -dz / L, nz = dx / L;
       if (f.facingFlipped) { nx = -nx; nz = -nz; }
-      const cx = (f.a[0] + f.b[0]) / 2, cz = (f.a[1] + f.b[1]) / 2;
-      // centreline point nearest the frontage centre is (cx, 0) for this street
-      const toCentre = [0 - 0, 0 - cz]; // centre is z=0
+      const cz = (f.a[1] + f.b[1]) / 2;
+      // centreline point nearest the frontage centre is (·, 0) for this street
+      const toCentre = [0, 0 - cz]; // centre is z=0
       expect(nx * toCentre[0] + nz * toCentre[1]).toBeGreaterThan(0);
     }
   });
