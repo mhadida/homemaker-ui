@@ -86,3 +86,69 @@ describe("pruneRoundabouts", () => {
     expect(pruneRoundabouts(net).roundabouts).toEqual([]);
   });
 });
+
+describe("deriveIntersections — T and X", () => {
+  it("still derives a shared-endpoint junction as kind 'node'", () => {
+    const out = deriveIntersections(
+      net([
+        { id: "a", type: "street", points: [[0, 0], [10, 0]] },
+        { id: "b", type: "street", points: [[10, 0], [10, 10]] },
+      ]),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].pos).toEqual([10, 0]);
+    expect(out[0].kind).toBe("node");
+  });
+
+  it("derives a T where one street's endpoint lands on another's segment", () => {
+    const out = deriveIntersections(
+      net([
+        { id: "main", type: "street", points: [[0, 0], [20, 0]] },
+        { id: "branch", type: "street", points: [[10, 0], [10, 10]] }, // ends ON main mid-span
+      ]),
+    );
+    const t = out.find((i) => i.kind === "t");
+    expect(t).toBeTruthy();
+    expect(t!.pos).toEqual([10, 0]);
+  });
+
+  it("derives an X where two segments cross mid-span", () => {
+    const out = deriveIntersections(
+      net([
+        { id: "h", type: "street", points: [[0, 0], [20, 0]] },
+        { id: "v", type: "street", points: [[10, -10], [10, 10]] },
+      ]),
+    );
+    const x = out.find((i) => i.kind === "x");
+    expect(x).toBeTruthy();
+    expect(x!.pos[0]).toBeCloseTo(10, 6);
+    expect(x!.pos[1]).toBeCloseTo(0, 6);
+  });
+
+  it("does NOT derive an X for endpoint-touch (that's a node/T, not a cross)", () => {
+    const out = deriveIntersections(
+      net([
+        { id: "a", type: "street", points: [[0, 0], [10, 0]] },
+        { id: "b", type: "street", points: [[10, 0], [20, 0]] },
+      ]),
+    );
+    expect(out.some((i) => i.kind === "x")).toBe(false);
+  });
+
+  it("ignores a vertex lying on its OWN street's segment", () => {
+    const out = deriveIntersections(
+      net([{ id: "a", type: "street", points: [[0, 0], [10, 0], [20, 0]] }]),
+    );
+    expect(out).toHaveLength(0);
+  });
+
+  it("does not double-count a shared vertex as a T", () => {
+    const out = deriveIntersections(
+      net([
+        { id: "a", type: "street", points: [[0, 0], [10, 0]] },
+        { id: "b", type: "street", points: [[10, 0], [10, 10]] },
+      ]),
+    );
+    expect(out.filter((i) => i.pos[0] === 10 && i.pos[1] === 0)).toHaveLength(1);
+  });
+});
