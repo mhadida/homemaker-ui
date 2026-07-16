@@ -941,13 +941,19 @@ export default function FacadePage() {
     });
   }, [streetNetwork, buildingsFromStreets, maxCornerAngle, cornerChoices]);
 
-  // Turning auto-buildings off strips every derived block, leaving
-  // hand-drawn ones untouched; turning it back on is handled by the effect
-  // above (streetNetwork/buildingsFromStreets both fire it).
+  // While auto-buildings are OFF, keep derived blocks stripped — not just at
+  // the moment of toggling off, but whenever a source-tagged block could
+  // appear (e.g. Loading a file that contains a street network + its derived
+  // blocks). Reacting to streetNetwork too closes the "toggle says off but a
+  // loaded file's auto-buildings still show" desync. The same-ref guard keeps
+  // it loop-free (nothing to strip → same array → no re-render).
+  // NOTE: toggling off is destructive — a hand-customized auto-building is
+  // removed and re-toggling on regenerates a fresh one. The toggle is an
+  // "auto-buildings on/off" switch, not a hide/show of edited state.
   useEffect(() => {
     if (buildingsFromStreets) return;
-    setBlocks((bs) => bs.filter((b) => !b.source));
-  }, [buildingsFromStreets]);
+    setBlocks((bs) => (bs.some((b) => b.source) ? bs.filter((b) => !b.source) : bs));
+  }, [buildingsFromStreets, streetNetwork]);
 
   const corners = useMemo(
     () => detectCorners(blocks, maxCornerAngle),
