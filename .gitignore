@@ -50,6 +50,8 @@ python/.venv/
 .opencode/
 opencode.jsonc
 .playwright-mcp/
+.claude/
+.superpowers/
 
 # ephemera + screenshots
 .tmp-screenshots/
