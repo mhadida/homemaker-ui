@@ -381,6 +381,10 @@ function StreetDrawSurface({
 }) {
   const [path, setPath] = useState<Vec2[]>([]);
   const [cursor, setCursor] = useState<Vec2 | null>(null);
+  // Whether the current cursor landed on an existing street (vertex or
+  // mid-segment) rather than the raw pointer position — drives the snap-cue
+  // ring so a forming T/X junction is visible before the click commits it.
+  const [snapped, setSnapped] = useState(false);
 
   const resetPath = () => setPath([]);
 
@@ -391,6 +395,7 @@ function StreetDrawSurface({
     setWasActive(active);
     if (!active) {
       setCursor(null);
+      setSnapped(false);
       resetPath();
     }
   }
@@ -449,7 +454,9 @@ function StreetDrawSurface({
         }}
         onPointerMove={(e) => {
           const raw: Vec2 = [e.point.x, e.point.z];
-          setCursor(snapStreetPoint(raw, network, 1));
+          const snappedPoint = snapStreetPoint(raw, network, 1);
+          setCursor(snappedPoint);
+          setSnapped(snappedPoint[0] !== raw[0] || snappedPoint[1] !== raw[1]);
         }}
       >
         <planeGeometry args={[600, 600]} />
@@ -471,6 +478,15 @@ function StreetDrawSurface({
           rotation={[-Math.PI / 2, 0, 0]}
         >
           <ringGeometry args={[0.5, 0.7, 24]} />
+          <meshBasicMaterial color={color} transparent opacity={0.9} />
+        </mesh>
+      )}
+      {cursor && snapped && (
+        <mesh
+          position={[cursor[0], 0.09, cursor[1]]}
+          rotation={[-Math.PI / 2, 0, 0]}
+        >
+          <ringGeometry args={[0.5, 0.8, 20]} />
           <meshBasicMaterial color={color} transparent opacity={0.9} />
         </mesh>
       )}
