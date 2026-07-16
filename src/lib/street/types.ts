@@ -6,14 +6,15 @@ export interface StreetSpec {
   width: number;
   allowsCars: boolean;
   label: string;
+  minRadius: number;
 }
 
 /** Type defaults (metres). A Street may override `width`. */
 export const STREET_SPECS: Record<StreetType, StreetSpec> = {
-  alley: { width: 3.5, allowsCars: false, label: "Alley" },
-  street: { width: 9, allowsCars: true, label: "Street" },
-  road: { width: 14, allowsCars: true, label: "Road" },
-  boulevard: { width: 24, allowsCars: true, label: "Boulevard" },
+  alley: { width: 3.5, allowsCars: false, label: "Alley", minRadius: 6 },
+  street: { width: 9, allowsCars: true, label: "Street", minRadius: 20 },
+  road: { width: 14, allowsCars: true, label: "Road", minRadius: 45 },
+  boulevard: { width: 24, allowsCars: true, label: "Boulevard", minRadius: 120 },
 };
 
 export interface Street {
@@ -39,6 +40,10 @@ export const EMPTY_NETWORK: StreetNetwork = { streets: [], roundabouts: [] };
 
 export function effectiveWidth(s: Street): number {
   return s.width ?? STREET_SPECS[s.type].width;
+}
+
+export function minRadiusOf(s: Street): number {
+  return STREET_SPECS[s.type].minRadius;
 }
 
 let streetIdCounter = 0;
