@@ -143,9 +143,17 @@ export function smoothCentreline(points: Vec2[], samplesPerSegment = 10): Vec2[]
   return out;
 }
 
-/** Per-vertex offset of a sampled centreline by ±half the width. The normal at
- * each vertex is the left-perpendicular of the averaged direction of the
- * adjacent segments, so joints stay smooth. Left = +normal, right = −normal. */
+/** A mitered joint can't stretch farther than this multiple of the half-width —
+ * past it (a hairpin) the spike is clamped rather than shooting to infinity.
+ * 4 ≙ a deflection of ~151°; SVG's stroke-miterlimit default. */
+const MITER_LIMIT = 4;
+
+/** Per-vertex offset of a sampled centreline by ±half the width, MITERED: each
+ * offset point is the intersection of the two adjacent segments' offset lines,
+ * so the ribbon holds its full width through a corner and a square corner comes
+ * out square and filled. (Offsetting by a flat half-width along the averaged
+ * tangent would pinch a 90° turn to 71% of its width and bevel the corner off.)
+ * Left = +normal, right = −normal. */
 export function streetRibbon(
   centreline: Vec2[],
   width: number,
@@ -176,6 +184,12 @@ export function streetRibbon(
     let tx = prev[0] + next[0];
     let tz = prev[1] + next[1];
     const tl = Math.hypot(tx, tz);
+    // Miter scale: the offset point must sit at perpendicular distance h from
+    // BOTH adjacent segments, i.e. h/cos(δ/2) along the joint normal, where
+    // δ is the deflection. cos(δ/2) is exactly dot(prev, tangent) — 1 on a
+    // straight run (scale 1, so straights stay byte-identical), → 0 at a
+    // hairpin (clamped to MITER_LIMIT).
+    let miter = 1;
     // If averaged tangent is degenerate (sharp reversal), fall back to next direction
     if (tl < 1e-6) {
       tx = next[0];
@@ -183,13 +197,15 @@ export function streetRibbon(
     } else {
       tx /= tl;
       tz /= tl;
+      const cosHalf = prev[0] * tx + prev[1] * tz;
+      miter = cosHalf > 1 / MITER_LIMIT ? 1 / cosHalf : MITER_LIMIT;
     }
     // left-perpendicular of the tangent (plan coords)
     const nx = -tz;
     const nz = tx;
     const c = centreline[i];
-    left.push([c[0] + nx * h, c[1] + nz * h]);
-    right.push([c[0] - nx * h, c[1] - nz * h]);
+    left.push([c[0] + nx * h * miter, c[1] + nz * h * miter]);
+    right.push([c[0] - nx * h * miter, c[1] - nz * h * miter]);
   }
   return { left, right };
 }
@@ -242,6 +258,11 @@ export function cornerFit(
   return { deflection: delta, maxRadius };
 }
 
+/** Corners turning at least this much (radians; 60°) are treated as SHARP —
+ * kept as a square mitered corner (filled with paving) rather than rounded to
+ * the road radius. Gentle bends below it round smoothly. */
+const SHARP_DEFLECTION = Math.PI / 3;
+
 /** Real road alignment through the vertices: straight tangents joined by
  * circular arcs of radius min(minRadius, what fits). First and last vertices
  * are emitted exactly (shared junction points). Collinear corners pass
@@ -266,7 +287,11 @@ export function filletCentreline(
     const V = points[i % n];
     const B = points[(i + 1) % n];
     const { deflection, maxRadius } = cornerFit(A, V, B);
-    if (deflection === 0 || maxRadius <= 0) {
+    // Sharp corners (≈ right-angle or more) are NOT rounded — the raw vertex
+    // passes through so the ribbon's mitered offset fills the corner square
+    // with paving (matching the building frontages). Only gentle bends round to
+    // the road radius. Collinear / degenerate corners also pass through.
+    if (deflection === 0 || maxRadius <= 0 || deflection >= SHARP_DEFLECTION) {
       out.push([V[0], V[1]]);
       continue;
     }
