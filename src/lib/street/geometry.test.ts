@@ -47,16 +47,35 @@ describe("streetRibbon", () => {
     expect(right).toHaveLength(cl.length);
   });
 
-  it("a gently bent street produces non-self-intersecting frontages", () => {
+  it("a gently bent street holds its half-width offset (miter never pinches in)", () => {
     const cl = smoothCentreline([[0, 0], [10, 4], [20, 0]], 10);
     const { left, right } = streetRibbon(cl, 6);
-    // every frontage point is ~3 (half width) from its centreline point
     for (let i = 0; i < cl.length; i++) {
+      // a mitered joint sits AT the half-width on a straight run and just
+      // BEYOND it through a bend — never inside it (that would narrow the road)
       const dl = Math.hypot(left[i][0] - cl[i][0], left[i][1] - cl[i][1]);
-      expect(dl).toBeCloseTo(3, 4);
+      expect(dl).toBeGreaterThanOrEqual(3 - 1e-9);
+      expect(dl).toBeLessThan(3.05); // ~3.012 at the sharpest sample of this bend
       const dr = Math.hypot(right[i][0] - cl[i][0], right[i][1] - cl[i][1]);
-      expect(dr).toBeCloseTo(3, 4);
+      expect(dr).toBeGreaterThanOrEqual(3 - 1e-9);
+      expect(dr).toBeLessThan(3.05);
     }
+  });
+
+  it("a square corner miters square — full width held, corner filled", () => {
+    // 90° corner, width 9 ⇒ half 4.5. The offset lines are z=±4.5 (first leg)
+    // and x=∓4.5 (second leg); a true miter lands on their intersections, so
+    // the paving fills the corner box instead of bevelling it off.
+    const { left, right } = streetRibbon([[-50, 0], [0, 0], [0, 50]], 9);
+    expect(left[1][0]).toBeCloseTo(-4.5, 9);
+    expect(left[1][1]).toBeCloseTo(4.5, 9);
+    expect(right[1][0]).toBeCloseTo(4.5, 9);
+    expect(right[1][1]).toBeCloseTo(-4.5, 9);
+    // …and the road never narrows: the two edges stay 9 m apart across the turn
+    expect(Math.hypot(left[1][0] - right[1][0], left[1][1] - right[1][1])).toBeCloseTo(
+      9 * Math.SQRT2, // measured along the corner bisector — perpendicular width is 9
+      9,
+    );
   });
 
   it("keeps a full-width offset at a sharp reversal (no collapse to zero)", () => {
@@ -178,15 +197,17 @@ describe("filletCentreline", () => {
     const out = filletCentreline([[0, 0], [5, 0], [10, 0]], 20);
     expect(out).toEqual([[0, 0], [5, 0], [10, 0]]);
   });
-  it("right-angle corner: every arc sample lies on a circle of the applied radius", () => {
-    // long segments so the fillet uses the full minRadius = 2 (maxRadius = 25)
-    const pts: Vec2[] = [[-50, 0], [0, 0], [0, 50]];
-    const out = filletCentreline(pts, 2, 8);
-    // arc centre for a 90° corner turning left: equidistant (2) from both axes → (−2, 2)
-    const O: Vec2 = [-2, 2];
-    // the samples strictly between the tangent points are the arc
-    const arc = out.slice(1, out.length - 1);
-    for (const p of arc) expect(distTo(p, O)).toBeCloseTo(2, 4);
+  it("gentle corner rounds to an arc; a sharp (>=60°) corner stays square", () => {
+    // gentle ~37° bend → fillet arc appears (extra samples between the ends)
+    const gentle = filletCentreline([[-50, 0], [0, 0], [40, 30]], 20, 8);
+    expect(gentle.length).toBeGreaterThan(3);
+    // a 90° corner is SHARP → NOT rounded; the raw vertex passes through so the
+    // ribbon's miter fills it square (user: "90° corner filled, not rounded").
+    expect(filletCentreline([[-50, 0], [0, 0], [0, 50]], 20, 8)).toEqual([
+      [-50, 0],
+      [0, 0],
+      [0, 50],
+    ]);
   });
   it("too-tight corner clamps below minRadius without throwing", () => {
     const pts: Vec2[] = [[-2, 0], [0, 0], [0, 2]]; // 2 m segments, boulevard-scale minRadius
@@ -196,7 +217,7 @@ describe("filletCentreline", () => {
     for (const p of out) expect(distTo(p, [0, 0])).toBeLessThan(2.5);
   });
   it("bigger minRadius pushes the arc farther from the corner (wide sweep)", () => {
-    const pts: Vec2[] = [[-100, 0], [0, 0], [0, 100]];
+    const pts: Vec2[] = [[-100, 0], [0, 0], [90, 40]]; // ~24° bend — gentle, so it rounds
     const near = (r: number) => Math.min(...filletCentreline(pts, r, 8).map((p) => distTo(p, [0, 0])));
     expect(near(40)).toBeGreaterThan(near(5)); // boulevard bows out more than an alley
   });
@@ -263,15 +284,27 @@ describe("filletCentreline / streetRibbon — closed loops", () => {
     expect(out[out.length - 1]).toEqual([10, 10]); // last pinned
   });
 
-  it("closed: fillets EVERY corner (incl. the seam) and closes the ring", () => {
-    const sq: Vec2[] = [[0, 0], [20, 0], [20, 20], [0, 20]];
-    const out = filletCentreline(sq, 3, 8, true);
+  it("closed: fillets EVERY gentle corner (incl. the seam) and closes the ring", () => {
+    // a 12-gon ring — 30° corners, all gentle, so all of them round
+    const ring: Vec2[] = Array.from({ length: 12 }, (_, i): Vec2 => {
+      const a = (i / 12) * Math.PI * 2;
+      return [Math.cos(a) * 60, Math.sin(a) * 60];
+    });
+    const out = filletCentreline(ring, 10, 4, true);
     // ring closed: first sample repeated at the end
     expect(out[0][0]).toBeCloseTo(out[out.length - 1][0], 6);
     expect(out[0][1]).toBeCloseTo(out[out.length - 1][1], 6);
-    // no raw corner survives (all filleted, including [0,0] at the seam)
-    for (const c of sq)
+    // no raw corner survives (all filleted, including ring[0] at the seam)
+    for (const c of ring)
       expect(out.some((p) => p[0] === c[0] && p[1] === c[1])).toBe(false);
+  });
+
+  it("closed: a square ring keeps its sharp corners square, and still closes", () => {
+    const sq: Vec2[] = [[0, 0], [20, 0], [20, 20], [0, 20]];
+    const out = filletCentreline(sq, 3, 8, true);
+    // every 90° corner is SHARP → passes through raw for the ribbon to miter
+    // square (user: a 90° corner is filled with asphalt, not rounded)
+    expect(out).toEqual([[0, 0], [20, 0], [20, 20], [0, 20], [0, 0]]);
   });
 
   it("closed ribbon closes with no seam gap", () => {
