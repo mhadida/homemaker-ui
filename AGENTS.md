@@ -253,11 +253,19 @@ NOT involved; every edit is live (no Update button). Spec:
   sparsely into `network.roundabouts` (`roundaboutRing` in `geometry.ts`;
   `RoundaboutMesh`/`MonumentMesh` in `src/components/street/`). A **Roads**
   draw tool (mutually exclusive with
-  the block pen and Select) places polyline vertices with a type selector;
-  clicking a ribbon or an intersection marker opens the **Street** /
-  **Intersection** inspector in `FacadeControls.tsx` (type, width override,
-  delete; roundabout on/off + monument pick) — page state `streetNetwork`,
-  `selectedStreet`, `selectedIntersection`. A pure, non-blocking Krier/
+  the block pen and Select) places polyline vertices with a type selector
+  (options derived from `STREET_SPECS` so every type — canal included — is
+  always drawable); clicking a ribbon or an intersection marker opens the
+  **Street** / **Intersection** inspector in `FacadeControls.tsx` (type,
+  width override, **traffic mode** — cars / shared fietsstraat (red
+  asphalt) / peds (light cobble), `Street.traffic` sparse via
+  `resolveTraffic`, alleys default peds; delete; roundabout on/off +
+  monument pick) — page state `streetNetwork`, `selectedStreet`,
+  `selectedIntersection`. Selecting a street shows **draggable green vertex
+  handles** in the plan pane (`StreetNodeHandles` in FacadeViewer;
+  `moveStreetNode` in `intersections.ts` moves welded junction copies as
+  one, migrates roundabout keys, rejects sub-1 m segments; derived frontage
+  blocks refit live). A pure, non-blocking Krier/
   Alexander advisory (`geometry.ts` — `streetAdvisory`) hints at an
   uninterrupted straight alley/street run, an overlong boulevard, or a corner
   drawn tighter than the type's minimum radius; it never blocks the layout. The network **coexists** with the existing block/lot/

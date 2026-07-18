@@ -60,6 +60,9 @@ interface FacadeViewerProps {
   /** Flip the facing of a set of blocks at once (the chain being drawn). */
   onFlipChain: (ids: string[]) => void;
   onMoveNode: (from: [number, number], to: [number, number]) => boolean;
+  /** Drag a vertex of the selected street (welded junctions move as one).
+   * Returns false to reject — the handle sticks. */
+  onMoveStreetNode: (from: [number, number], to: [number, number]) => boolean;
   view?: ViewSettings;
   onDrawModeChange?: (drawMode: boolean) => void;
   corners: Corner[];
@@ -981,6 +984,163 @@ function NodeHandles({
   );
 }
 
+const STREET_NODE_COLOR = "#2f855a"; // the Roads-tool green
+const STREET_NODE_HOVER = "#5cbf8a";
+
+/** Draggable vertices for the SELECTED street — the street-network analog of
+ * NodeHandles. Same ref-driven drag lifecycle (a pointerup can land in the
+ * same tick as the pointerdown); moves apply LIVE via onMoveStreetNode
+ * (moveStreetNode moves welded junction copies together and may reject —
+ * the vertex sticks). Dragging near a vertex of an uninvolved street snaps
+ * (1 m) so releasing there welds a junction. */
+function StreetNodeHandles({
+  network,
+  selectedStreet,
+  interactive,
+  onMoveStreetNode,
+  onDraggingChange,
+}: {
+  network: StreetNetwork;
+  selectedStreet: string | null;
+  interactive: boolean;
+  onMoveStreetNode: (from: [number, number], to: [number, number]) => boolean;
+  onDraggingChange: (dragging: boolean) => void;
+}) {
+  const street = useMemo(
+    () => network.streets.find((s) => s.id === selectedStreet) ?? null,
+    [network.streets, selectedStreet],
+  );
+  const [drag, setDrag] = useState<null | {
+    pos: [number, number];
+    targets: [number, number][];
+  }>(null);
+  const dragRef = useRef<typeof drag>(null);
+  const movedRef = useRef(false);
+  const startRef = useRef<[number, number] | null>(null);
+  const endDrag = useCallback(() => {
+    if (dragRef.current === null) return;
+    dragRef.current = null;
+    setDrag(null);
+    onDraggingChange(false);
+  }, [onDraggingChange]);
+  const endDragRef = useRef(endDrag);
+  useEffect(() => {
+    endDragRef.current = endDrag;
+  });
+  const [hovered, setHovered] = useState<number | null>(null);
+  if (!street) return null;
+  return (
+    <>
+      {street.points.map((p, i) => {
+        const isActive =
+          drag !== null && drag.pos[0] === p[0] && drag.pos[1] === p[1];
+        return (
+          <mesh
+            key={`${street.id}:${i}`}
+            position={[p[0], 0.12, p[1]]}
+            rotation={[-Math.PI / 2, 0, 0]}
+            onPointerDown={
+              interactive && drag === null
+                ? (e) => {
+                    e.stopPropagation();
+                    movedRef.current = false;
+                    startRef.current = [p[0], p[1]];
+                    // Snap targets: vertices of streets NOT sharing this
+                    // vertex — releasing on one welds a junction there.
+                    const targets: [number, number][] = [];
+                    for (const s of network.streets) {
+                      if (
+                        s.points.some(
+                          (q) => q[0] === p[0] && q[1] === p[1],
+                        )
+                      )
+                        continue;
+                      for (const q of s.points) targets.push([q[0], q[1]]);
+                    }
+                    dragRef.current = { pos: [p[0], p[1]], targets };
+                    setDrag(dragRef.current);
+                    onDraggingChange(true);
+                    window.addEventListener(
+                      "pointerup",
+                      () => endDragRef.current(),
+                      { once: true },
+                    );
+                  }
+                : undefined
+            }
+            onPointerOver={
+              interactive && drag === null
+                ? (e) => {
+                    e.stopPropagation();
+                    setHovered(i);
+                  }
+                : undefined
+            }
+            onPointerOut={
+              interactive ? () => setHovered((h) => (h === i ? null : h)) : undefined
+            }
+          >
+            <circleGeometry args={[hovered === i || isActive ? 0.9 : 0.65, 24]} />
+            <meshBasicMaterial
+              color={
+                isActive
+                  ? "#3b82f6"
+                  : hovered === i
+                    ? STREET_NODE_HOVER
+                    : STREET_NODE_COLOR
+              }
+              transparent
+              opacity={0.95}
+              depthWrite={false}
+            />
+          </mesh>
+        );
+      })}
+      {drag && (
+        <mesh
+          rotation={[-Math.PI / 2, 0, 0]}
+          position={[0, 0.04, 0]}
+          onPointerMove={(e) => {
+            const raw: [number, number] = [e.point.x, e.point.z];
+            let best: [number, number] | null = null;
+            let bestD = 1;
+            for (const t of drag.targets) {
+              const d = Math.hypot(raw[0] - t[0], raw[1] - t[1]);
+              if (d < bestD) {
+                bestD = d;
+                best = t;
+              }
+            }
+            const to = best ?? raw;
+            if (
+              !movedRef.current &&
+              startRef.current &&
+              Math.hypot(
+                to[0] - startRef.current[0],
+                to[1] - startRef.current[1],
+              ) < DRAG_THRESHOLD
+            ) {
+              return;
+            }
+            if (onMoveStreetNode(drag.pos, to)) {
+              if (to[0] !== drag.pos[0] || to[1] !== drag.pos[1])
+                movedRef.current = true;
+              dragRef.current = dragRef.current
+                ? { ...dragRef.current, pos: to }
+                : dragRef.current;
+              setDrag((d) => (d ? { ...d, pos: to } : d));
+            }
+          }}
+          onPointerUp={endDrag}
+        >
+          <planeGeometry args={[600, 600]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+      )}
+    </>
+  );
+}
+
 function PlanPane({
   blocks,
   selected,
@@ -995,6 +1155,7 @@ function PlanPane({
   onCommitLine,
   onFlipChain,
   onMoveNode,
+  onMoveStreetNode,
   corners,
   onSelectCorner,
   maxCornerAngle,
@@ -1030,6 +1191,7 @@ function PlanPane({
   ) => string;
   onFlipChain: (ids: string[]) => void;
   onMoveNode: (from: [number, number], to: [number, number]) => boolean;
+  onMoveStreetNode: (from: [number, number], to: [number, number]) => boolean;
   corners: Corner[];
   onSelectCorner: (key: string) => void;
   maxCornerAngle: number;
@@ -1170,6 +1332,13 @@ function PlanPane({
         onDraggingChange={handleDraggingChange}
         corners={corners}
         onSelectCorner={onSelectCorner}
+      />
+      <StreetNodeHandles
+        network={streetNetwork}
+        selectedStreet={selectedStreet}
+        interactive={!drawMode && !selectMode && !streetDrawMode}
+        onMoveStreetNode={onMoveStreetNode}
+        onDraggingChange={handleDraggingChange}
       />
       {/* Top-down; up = -z puts the street (+z) at the bottom of the pane. */}
       <OrthographicCamera
@@ -1430,6 +1599,7 @@ export default function FacadeViewer({
   onCommitLine,
   onFlipChain,
   onMoveNode,
+  onMoveStreetNode,
   view = FACADE_DEFAULT_VIEW,
   onDrawModeChange,
   corners,
@@ -1604,6 +1774,7 @@ export default function FacadeViewer({
             onCommitLine={onCommitLine}
             onFlipChain={onFlipChain}
             onMoveNode={onMoveNode}
+            onMoveStreetNode={onMoveStreetNode}
             corners={corners}
             onSelectCorner={onSelectCorner}
             maxCornerAngle={maxCornerAngle}
@@ -1789,10 +1960,14 @@ export default function FacadeViewer({
                     aria-label="Road type"
                     className="h-7 rounded-full bg-white/90 text-zinc-900 text-[11px] font-medium px-2 shadow-lg"
                   >
-                    <option value="alley">Alley</option>
-                    <option value="street">Street</option>
-                    <option value="road">Road</option>
-                    <option value="boulevard">Boulevard</option>
+                    {/* Derived from STREET_SPECS so a new street type (the
+                     * canal once slipped through here) can never be missing
+                     * from the draw tool. */}
+                    {(Object.keys(STREET_SPECS) as StreetType[]).map((t) => (
+                      <option key={t} value={t}>
+                        {STREET_SPECS[t].label}
+                      </option>
+                    ))}
                   </select>
                 )}
               </div>

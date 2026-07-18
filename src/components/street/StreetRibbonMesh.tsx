@@ -2,7 +2,7 @@
 import { useMemo, useEffect, useState } from "react";
 import * as THREE from "three";
 import type { Street } from "@/lib/street/types";
-import { effectiveWidth, minRadiusOf } from "@/lib/street/types";
+import { effectiveWidth, minRadiusOf, resolveTraffic } from "@/lib/street/types";
 import { filletCentreline, streetRibbon } from "@/lib/street/geometry";
 import { groundHeightAt, type Ground } from "@/lib/facade/terrain";
 
@@ -13,6 +13,21 @@ const PAVING: Record<Street["type"], string> = {
   boulevard: "#3a3a40",
   canal: "#2f6b8f",
 };
+
+/** Traffic-mode paving. Cars-only keeps the per-type dark asphalt above;
+ * shared is the Dutch fietsstraat red asphalt; peds-only reads as light
+ * cobble. Alleys default to peds (STREET_SPECS.allowsCars=false), so they
+ * pick up the cobble tone. */
+const TRAFFIC_PAVING = {
+  shared: "#84463a",
+  peds: "#9c9489",
+} as const;
+
+function pavingOf(street: Street): string {
+  if (street.type === "canal") return PAVING.canal;
+  const traffic = resolveTraffic(street);
+  return traffic === "cars" ? PAVING[street.type] : TRAFFIC_PAVING[traffic];
+}
 
 const SELECTED_COLOR = "#3b82f6"; // matches the app-wide accent used for other 3D selection highlights
 
@@ -73,7 +88,7 @@ export default function StreetRibbonMesh({
       onPointerOut={onSelect ? () => setHover(false) : undefined}
     >
       <meshStandardMaterial
-        color={selected ? SELECTED_COLOR : hover ? "#7c8a9c" : PAVING[street.type]}
+        color={selected ? SELECTED_COLOR : hover ? "#7c8a9c" : pavingOf(street)}
         roughness={0.95}
         side={THREE.DoubleSide}
         polygonOffset

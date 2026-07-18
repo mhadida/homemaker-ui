@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deriveIntersections, pruneRoundabouts } from "./intersections";
+import { deriveIntersections, moveStreetNode, pruneRoundabouts } from "./intersections";
 import type { StreetNetwork } from "./types";
 
 const net = (streets: StreetNetwork["streets"]): StreetNetwork => ({ streets, roundabouts: [] });
@@ -170,5 +170,77 @@ describe("deriveIntersections — no duplicate junction at a shared point", () =
       (i) => Math.abs(i.pos[0] - 10.00005) < 1e-3 && Math.abs(i.pos[1]) < 1e-3,
     );
     expect(here).toHaveLength(1);
+  });
+});
+
+describe("moveStreetNode", () => {
+  it("moves every welded copy of a shared endpoint as one", () => {
+    const before = net([
+      { id: "a", type: "street", points: [[0, 0], [10, 0]] },
+      { id: "b", type: "street", points: [[10, 0], [10, 10]] },
+    ]);
+    const out = moveStreetNode(before, [10, 0], [12, 2]);
+    expect(out).not.toBeNull();
+    expect(out!.streets[0].points[1]).toEqual([12, 2]);
+    expect(out!.streets[1].points[0]).toEqual([12, 2]);
+    // still one junction, at the new spot
+    const is = deriveIntersections(out!);
+    expect(is).toHaveLength(1);
+    expect(is[0].pos).toEqual([12, 2]);
+  });
+
+  it("returns null when nothing sits at `from`", () => {
+    const before = net([{ id: "a", type: "street", points: [[0, 0], [10, 0]] }]);
+    expect(moveStreetNode(before, [5, 5], [6, 6])).toBeNull();
+  });
+
+  it("rejects a move that would degenerate a segment (< 1 m)", () => {
+    const before = net([{ id: "a", type: "street", points: [[0, 0], [10, 0]] }]);
+    expect(moveStreetNode(before, [10, 0], [0.5, 0])).toBeNull();
+  });
+
+  it("leaves untouched streets by reference (no spurious rebuilds)", () => {
+    const other = { id: "c", type: "street" as const, points: [[50, 50], [60, 50]] as [number, number][] };
+    const before = net([
+      { id: "a", type: "street", points: [[0, 0], [10, 0]] },
+      other,
+    ]);
+    const out = moveStreetNode(before, [10, 0], [12, 0]);
+    expect(out!.streets[1]).toBe(other);
+  });
+
+  it("a roundabout keyed at the junction follows the move", () => {
+    const before: StreetNetwork = {
+      streets: [
+        { id: "a", type: "street", points: [[0, 0], [10, 0]] },
+        { id: "b", type: "street", points: [[10, 0], [10, 10]] },
+      ],
+      roundabouts: [["10:0", { kind: "obelisk" }]],
+    };
+    const out = moveStreetNode(before, [10, 0], [12, 2]);
+    expect(out!.roundabouts).toEqual([["12:2", { kind: "obelisk" }]]);
+  });
+
+  it("a roundabout is pruned when the move breaks its junction", () => {
+    // A T-junction: the branch tip sits ON the through street. Moving the
+    // tip away un-derives the junction, so the roundabout entry (remapped to
+    // the new position) no longer matches a derived key and is pruned.
+    const before: StreetNetwork = {
+      streets: [
+        { id: "main", type: "street", points: [[0, 0], [20, 0]] },
+        { id: "branch", type: "street", points: [[10, 0], [10, 8]] },
+      ],
+      roundabouts: [["10:0", { kind: "fountain" }]],
+    };
+    const out = moveStreetNode(before, [10, 0], [30, 5]);
+    expect(out!.roundabouts).toEqual([]);
+  });
+
+  it("closed loops treat the wrap-around segment in the degeneracy check", () => {
+    const before = net([
+      { id: "ring", type: "street", points: [[0, 0], [20, 0], [20, 20], [0, 20]], closed: true },
+    ]);
+    // moving the last vertex onto the first would collapse the closing segment
+    expect(moveStreetNode(before, [0, 20], [0, 0.5])).toBeNull();
   });
 });

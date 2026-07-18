@@ -43,8 +43,8 @@ import {
   withSectionBays,
   withSectionsSymmetry,
 } from "@/lib/facade/sections";
-import type { Street, StreetType, Monument } from "@/lib/street/types";
-import { STREET_SPECS, effectiveWidth } from "@/lib/street/types";
+import type { Street, StreetType, TrafficMode, Monument } from "@/lib/street/types";
+import { STREET_SPECS, effectiveWidth, resolveTraffic } from "@/lib/street/types";
 import BayGrid from "./BayGrid";
 
 interface FacadeControlsProps {
@@ -1126,6 +1126,12 @@ const STREET_TYPES: { id: StreetType; label: string }[] = [
   { id: "canal", label: "Canal" },
 ];
 
+const TRAFFIC_MODES: { id: TrafficMode; label: string }[] = [
+  { id: "cars", label: "Cars" },
+  { id: "shared", label: "Shared" },
+  { id: "peds", label: "Peds" },
+];
+
 /** ± band around a street type's default width — proportional (not a fixed
  * delta) so it scales sensibly from an alley (3.5 m default) through a
  * boulevard (24 m default). */
@@ -1204,6 +1210,26 @@ export function StreetInspector({
           </p>
         )}
       </Section>
+
+      {/* Water carries boats, not traffic modes. */}
+      {street.type !== "canal" && (
+        <Section title="Traffic">
+          <div className="grid grid-cols-3 gap-1">
+            {TRAFFIC_MODES.map((m) => (
+              <Toggle
+                key={m.id}
+                label={m.label}
+                on={resolveTraffic(street) === m.id}
+                onClick={() => onChange({ ...street, traffic: m.id })}
+              />
+            ))}
+          </div>
+          <p className="text-[10px] leading-snug text-[var(--muted)]">
+            Shared is a fietsstraat — cars are guests on red asphalt;
+            pedestrian-only paves in light cobble.
+          </p>
+        </Section>
+      )}
 
       <Section title="Actions">
         <button

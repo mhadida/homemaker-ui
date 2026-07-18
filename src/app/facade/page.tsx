@@ -50,7 +50,7 @@ import {
   type StreetType,
   type Vec2,
 } from "@/lib/street/types";
-import { deriveIntersections, pruneRoundabouts } from "@/lib/street/intersections";
+import { deriveIntersections, moveStreetNode, pruneRoundabouts } from "@/lib/street/intersections";
 import { streetAdvisory } from "@/lib/street/geometry";
 import {
   syncCorners,
@@ -712,6 +712,19 @@ export default function FacadePage() {
     setSelectedStreet(null);
   }, []);
 
+  // Computed OUTSIDE the updater so the boolean reaches the drag handler
+  // synchronously (mirrors handleMoveNode). moveStreetNode is pure and moves
+  // welded junction copies together; derived frontage blocks refit via the
+  // streetNetwork effect below — no extra plumbing here.
+  const handleMoveStreetNode = useCallback(
+    (from: [number, number], to: [number, number]) => {
+      const next = moveStreetNode(streetNetwork, from, to);
+      if (next) setStreetNetwork(next);
+      return next !== null;
+    },
+    [streetNetwork],
+  );
+
   // Delete/Backspace removes the selection: the selected lot (street refits,
   // length preserved) or the whole block at block level / last lot, or a
   // selected road-network street. Direct — no two-step confirm for keyboard
@@ -1151,6 +1164,7 @@ export default function FacadePage() {
             onCommitLine={handleCommitLine}
             onFlipChain={handleFlipChain}
             onMoveNode={handleMoveNode}
+            onMoveStreetNode={handleMoveStreetNode}
             view={view}
             onDrawModeChange={setDrawActive}
             corners={corners}
