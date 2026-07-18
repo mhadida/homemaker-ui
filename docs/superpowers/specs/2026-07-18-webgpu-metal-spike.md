@@ -56,6 +56,40 @@ this was written) — see "Measure it" and "Risks to verify".
   WebGPU-native shadows (node-based / `customDepthMaterial` per casting mesh, or
   three's WebGPU shadow setup) — a concrete, bounded migration cost to budget.
 
+### Findings, continued (the incompatibility list)
+
+Under `?webgpu`, each accommodation surfaced the next incompatible material:
+
+1. **Shadows — `MeshDepthMaterial`.** three's WebGPU renderer compiles the
+   shadow-map depth material through its NodeBuilder, which rejects the classic
+   `MeshDepthMaterial`. Disabling it needed more than `<Canvas shadows={false}>`;
+   even gating `castShadow` at the sun light did **not** fully clear it — three's
+   WebGPU shadow system compiles the depth material eagerly / globally, so
+   removing shadows is not a one-liner. **Entangled.**
+2. **Fat lines — `ShaderMaterial`.** Every drei `<Line>` overlay (street guides,
+   block outlines, facing ticks, selection) uses `LineMaterial` (a
+   `ShaderMaterial`), rejected by the node system. Needs node/TSL line materials.
+
+## Conclusion
+
+**WebGPU is a genuine material migration for this app, not a flag flip.** Standard
+building meshes convert automatically, but the scene depends on multiple
+WebGPU-incompatible material paths (shadow depth material — stubbornly so — and
+all fat-line overlays), each needing a node/TSL rewrite, plus re-verification of
+the quad `<View>` layout, instancing, transparency and Save-image. Because the
+app can't render on WebGPU until those are migrated, a clean apples-to-apples FPS
+number wasn't obtainable in a time-boxed spike — and that inability is itself the
+answer to "is this a cheap win": **no.**
+
+**Recommendation:** invest in **WebGL-side optimization first** (profile the heavy
+scene, then instance/merge more geometry, add LOD + frustum culling) — zero
+migration, helps the live app today, and benefits any future desktop build.
+Revisit WebGPU in ~6–12 months as three/R3F node-material coverage matures. If a
+WebGPU migration is chosen deliberately, it earns its own multi-task plan
+(node shadows → node/TSL lines → re-verify View/instancing/save-image).
+
+Spike branch `spike/webgpu` is fully reversible; nothing here is merged.
+
 ## Measure it (on the Mac that matters)
 
 1. `npm run dev`, open a **heavy** scene (draw a grid of ~8–10 long streets so a
