@@ -84,6 +84,25 @@ describe("round-trip", () => {
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.scene.blocks).toHaveLength(2);
   });
+  it("round-trips a canal street (type derived from STREET_SPECS, not a stale list)", () => {
+    const s: SceneState = {
+      blocks: [],
+      cornerChoices: new Map(),
+      ground: DEFAULT_GROUND,
+      streetWidth: STREET_WIDTH_DEFAULT,
+      maxCornerAngle: DEFAULT_MAX_CORNER_ANGLE,
+      streetNetwork: {
+        streets: [{ id: "canal-1", type: "canal", points: [[0, 0], [40, 0]] }],
+        roundabouts: [],
+      },
+    };
+    const res = fromJSON(toJSON(s));
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.scene.streetNetwork.streets).toHaveLength(1);
+      expect(res.scene.streetNetwork.streets[0].type).toBe("canal");
+    }
+  });
   it("round-trips a street-derived block's source link", () => {
     const s: SceneState = {
       blocks: [
