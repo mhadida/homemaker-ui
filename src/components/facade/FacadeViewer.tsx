@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
 } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import {
@@ -15,7 +16,7 @@ import {
   MapControls,
   OrthographicCamera,
   PerspectiveCamera,
-  Line,
+  Line as DreiLine,
   Stats,
 } from "@react-three/drei";
 import * as THREE from "three";
@@ -44,6 +45,20 @@ import {
 import { filletCentreline, snapStreetPoint } from "@/lib/street/geometry";
 import { STREET_SPECS } from "@/lib/street/types";
 import type { StreetNetwork, StreetType, Vec2 } from "@/lib/street/types";
+
+/** WebGPU spike: drei's fat `<Line>` uses `LineMaterial` (a ShaderMaterial),
+ * which the WebGPU node renderer rejects. This wrapper hides all line overlays
+ * on the `?webgpu` path so the mesh scene renders for FPS measurement; the WebGL
+ * path renders drei's Line exactly as before. Migrating lines to node materials
+ * is a documented cost in the spike note. */
+function Line(props: ComponentProps<typeof DreiLine>) {
+  if (
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).has("webgpu")
+  )
+    return null;
+  return <DreiLine {...props} />;
+}
 
 interface FacadeViewerProps {
   blocks: FacadeBlock[];
