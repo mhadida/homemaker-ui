@@ -1123,6 +1123,7 @@ const STREET_TYPES: { id: StreetType; label: string }[] = [
   { id: "street", label: "Street" },
   { id: "road", label: "Road" },
   { id: "boulevard", label: "Boulevard" },
+  { id: "canal", label: "Canal" },
 ];
 
 /** ± band around a street type's default width — proportional (not a fixed

@@ -1,6 +1,6 @@
 export type Vec2 = [number, number];
 
-export type StreetType = "alley" | "street" | "road" | "boulevard";
+export type StreetType = "alley" | "street" | "road" | "boulevard" | "canal";
 
 export interface StreetSpec {
   width: number;
@@ -15,6 +15,7 @@ export const STREET_SPECS: Record<StreetType, StreetSpec> = {
   street: { width: 9, allowsCars: true, label: "Street", minRadius: 20 },
   road: { width: 14, allowsCars: true, label: "Road", minRadius: 45 },
   boulevard: { width: 24, allowsCars: true, label: "Boulevard", minRadius: 120 },
+  canal: { width: 14, allowsCars: false, label: "Canal", minRadius: 45 },
 };
 
 export interface Street {

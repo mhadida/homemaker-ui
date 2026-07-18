@@ -362,6 +362,7 @@ const STREET_PREVIEW_COLORS: Record<StreetType, string> = {
   street: "#facc15",
   road: "#fb923c",
   boulevard: "#f472b6",
+  canal: "#2f6b8f",
 };
 
 /** Street tool: click chains polyline vertices; Escape or clicking near the
