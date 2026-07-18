@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { canalOffsets, canalWaterY, CANAL_WATER_DEPTH } from "./canal";
+import { canalOffsets, canalWaterY, CANAL_WATER_DEPTH, bridgesFor, bridgeArch } from "./canal";
 import { STREET_SPECS } from "./types";
-import type { Vec2 } from "./types";
+import type { Vec2, StreetNetwork } from "./types";
 import { groundHeightAt } from "@/lib/facade/terrain";
+import { deriveIntersections } from "./intersections";
 
 describe("canal type + offsets", () => {
   it("canal STREET_SPECS: water 14, no cars, gentle radius", () => {
@@ -35,5 +36,49 @@ describe("canal level water", () => {
     for (const p of [...bank.left, ...bank.right]) {
       expect(groundHeightAt(p[0], p[1], g)).toBeGreaterThanOrEqual(wY - 1e-9);
     }
+  });
+});
+
+describe("canal bridges", () => {
+  it("bridges only a canal↔land junction", () => {
+    const net: StreetNetwork = {
+      streets: [
+        { id: "c", type: "canal", points: [[0, -10], [0, 10]] },
+        { id: "s", type: "street", points: [[-10, 0], [10, 0]] },
+      ],
+      roundabouts: [],
+    };
+    const b = bridgesFor(net, deriveIntersections(net));
+    expect(b).toHaveLength(1);
+    expect(b[0].span).toBeCloseTo(15, 6);            // 14 + 2*0.5
+    expect(Math.abs(b[0].tangent[0])).toBeLessThan(1e-6); // canal runs along ±z
+  });
+
+  it("no bridge at land↔land or canal↔canal", () => {
+    const land: StreetNetwork = {
+      streets: [
+        { id: "a", type: "street", points: [[0, -10], [0, 10]] },
+        { id: "b", type: "street", points: [[-10, 0], [10, 0]] },
+      ], roundabouts: [],
+    };
+    expect(bridgesFor(land, deriveIntersections(land))).toHaveLength(0);
+    const canals: StreetNetwork = {
+      streets: [
+        { id: "a", type: "canal", points: [[0, -10], [0, 10]] },
+        { id: "b", type: "canal", points: [[-10, 0], [10, 0]] },
+      ], roundabouts: [],
+    };
+    expect(bridgesFor(canals, deriveIntersections(canals))).toHaveLength(0);
+  });
+
+  it("bridgeArch: parabolic humpback, apex + parapet, deck width", () => {
+    const tris = bridgeArch(15, 1.5, 3, 12);
+    expect(tris.length % 3).toBe(0);
+    expect(tris.length).toBeGreaterThan(0);
+    const ys = tris.map((t) => t[1]);
+    expect(Math.max(...ys)).toBeCloseTo(1.5 + 0.5, 6); // apex + parapet height
+    const zs = tris.map((t) => t[2]);
+    expect(Math.max(...zs)).toBeCloseTo(1.5, 6);        // deckWidth/2
+    expect(Math.min(...zs)).toBeCloseTo(-1.5, 6);
   });
 });
