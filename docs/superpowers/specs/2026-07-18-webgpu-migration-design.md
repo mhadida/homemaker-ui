@@ -1,8 +1,36 @@
 # WebGPU (Metal) Renderer Migration — Design
 
-**Status:** spec (design; detailed per-phase plans come AFTER the Phase-0 gate)
+**Status:** Phases 0–2 DONE (browser-verified 2026-07-18) — Phase 0 returned **GO**;
+Phase 3 partially verified (Save-image gap open); Phase 4 not started
 **Date:** 2026-07-18
 **Branch:** `feature/webgpu-migration` (continues the `spike/webgpu` scaffolding)
+
+## Phase 0–2 results (browser-verified)
+
+- **Node lines** ✓ — `NodeLine.tsx` (drei `<Line>` on WebGL, WebGPU `Line2` +
+  `Line2NodeMaterial` on `?webgpu`; `segments` mode for box-edge outlines).
+  Gotcha: never mount a `Line2` with an empty geometry — the pipeline compiles
+  before `instanceStart` exists and caches invalid WGSL.
+- **Node shadows** ✓ — the spike's "stubborn MeshDepthMaterial" was
+  **drei `<ContactShadows>`** (it renders the scene through a depth material),
+  NOT the sun's shadow map. Native WebGPU shadow mapping works unmodified;
+  ContactShadows is WebGL-only-gated, sun `castShadow` ungated everywhere.
+- **Grid** — drei `<Grid>` is a GLSL ShaderMaterial; `NodeGrid.tsx` is a TSL
+  port (same fwidth-antialiased cell/section math, camera-plane fade).
+- **Quad `<View>`** ✓ — required a **viewport Y-flip shim**: drei View places
+  panes with WebGL's bottom-left-origin viewport/scissor convention; WebGPU's
+  origin is top-left and three passes values through unflipped, vertically
+  mirroring the layout. `ViewCompatWebGPURenderer` (in FacadeViewer's gl init)
+  flips Y in `setViewport`/`setScissor`.
+- **Instancing** ✓ (windows/frames render), **canal transparency** ✓,
+  **compass + Stats** ✓.
+- **WebGL2 fallback** ✓ — `?webgpu&webgl2` → `forceWebGL: true`; renders
+  identically (node materials compile to GLSL), zero console errors.
+- **Save-image** ✗ — `drawImage(webgpuCanvas)` reads 0 pixels (no
+  preserveDrawingBuffer semantics). Needs a render-target readback
+  (`readRenderTargetPixelsAsync`) → **Phase 3**.
+- **FPS (M-series Mac, dpr 2, dev build):** maximized 3D pane **39 → 116 FPS
+  (~3×)**; heavy scene (22 blocks / 140 lots) quad view **9 → 16 FPS (~1.8×)**.
 **Builds on:** `2026-07-18-webgpu-metal-spike.md` (the spike that established the
 incompatibility list).
 

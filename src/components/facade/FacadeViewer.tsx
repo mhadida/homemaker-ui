@@ -7,7 +7,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ComponentProps,
 } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import {
@@ -16,11 +15,12 @@ import {
   MapControls,
   OrthographicCamera,
   PerspectiveCamera,
-  Line as DreiLine,
   Stats,
 } from "@react-three/drei";
 import * as THREE from "three";
 import SceneContents from "./SceneContents";
+import Line from "./NodeLine";
+import { isWebGPUPath, isForcedWebGL2 } from "./webgpu";
 import { computeLayout } from "@/lib/facade/layout";
 import { fitOrthoZoom, elevationCameraPosition } from "@/lib/facade/camera";
 import { deriveNodes, type WorldNode } from "@/lib/facade/nodes";
@@ -45,20 +45,6 @@ import {
 import { filletCentreline, snapStreetPoint } from "@/lib/street/geometry";
 import { STREET_SPECS } from "@/lib/street/types";
 import type { StreetNetwork, StreetType, Vec2 } from "@/lib/street/types";
-
-/** WebGPU spike: drei's fat `<Line>` uses `LineMaterial` (a ShaderMaterial),
- * which the WebGPU node renderer rejects. This wrapper hides all line overlays
- * on the `?webgpu` path so the mesh scene renders for FPS measurement; the WebGL
- * path renders drei's Line exactly as before. Migrating lines to node materials
- * is a documented cost in the spike note. */
-function Line(props: ComponentProps<typeof DreiLine>) {
-  if (
-    typeof window !== "undefined" &&
-    new URLSearchParams(window.location.search).has("webgpu")
-  )
-    return null;
-  return <DreiLine {...props} />;
-}
 
 interface FacadeViewerProps {
   blocks: FacadeBlock[];
@@ -1674,14 +1660,16 @@ export default function FacadeViewer({
     }
   };
 
-  // WebGPU spike: `?webgpu` swaps the default WebGL renderer for three's
-  // WebGPURenderer (native Metal on Mac). Dynamic-imported so the WebGPU build
-  // never enters the default bundle; the WebGL path is byte-identical.
+  // WebGPU migration (flag-gated rollout): `?webgpu` swaps the default WebGL
+  // renderer for three's WebGPURenderer (native Metal on Mac, WebGL2 fallback
+  // elsewhere). Dynamic-imported so the WebGPU build never enters the default
+  // bundle; without the flag the WebGL path is byte-identical.
   // `?stats` (implied by `?webgpu`) shows an FPS panel for A/B measurement.
-  const spikeParams =
-    typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
-  const useWebGPU = spikeParams?.has("webgpu") ?? false;
-  const showStats = useWebGPU || (spikeParams?.has("stats") ?? false);
+  const useWebGPU = isWebGPUPath();
+  const showStats =
+    useWebGPU ||
+    (typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).has("stats"));
 
   return (
     <div
@@ -1807,7 +1795,7 @@ export default function FacadeViewer({
 
       {/* One shared canvas behind the tracking cells. */}
       <Canvas
-        shadows={!useWebGPU}
+        shadows
         className="!absolute !inset-0"
         style={{ pointerEvents: "none" }}
         eventSource={containerRef}
@@ -1816,7 +1804,58 @@ export default function FacadeViewer({
             ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
               (async (props: any) => {
                 const { WebGPURenderer } = await import("three/webgpu");
-                const renderer = new WebGPURenderer({ ...props, antialias: true, alpha: true });
+                const size = new THREE.Vector2();
+                // drei's <View> places panes with WebGL's bottom-left-origin
+                // viewport/scissor convention; WebGPU's origin is top-left
+                // and three passes the values through unflipped, which
+                // vertically mirrors the quad pane layout. Flip Y at the
+                // renderer boundary so the same View code serves both
+                // backends. Vector4/null forms (full-surface + reset paths)
+                // pass through untouched.
+                class ViewCompatWebGPURenderer extends WebGPURenderer {
+                  setViewport(
+                    x: number | THREE.Vector4,
+                    y?: number,
+                    width?: number,
+                    height?: number,
+                  ) {
+                    if (typeof x === "number") {
+                      this.getSize(size);
+                      super.setViewport(
+                        x,
+                        size.height - (y ?? 0) - (height ?? 0),
+                        width ?? 0,
+                        height ?? 0,
+                      );
+                    } else {
+                      super.setViewport(x as never);
+                    }
+                  }
+                  setScissor(
+                    x: number | THREE.Vector4,
+                    y?: number,
+                    width?: number,
+                    height?: number,
+                  ) {
+                    if (typeof x === "number") {
+                      this.getSize(size);
+                      super.setScissor(
+                        x,
+                        size.height - (y ?? 0) - (height ?? 0),
+                        width ?? 0,
+                        height ?? 0,
+                      );
+                    } else {
+                      super.setScissor(x as never);
+                    }
+                  }
+                }
+                const renderer = new ViewCompatWebGPURenderer({
+                  ...props,
+                  antialias: true,
+                  alpha: true,
+                  forceWebGL: isForcedWebGL2(),
+                });
                 await renderer.init();
                 return renderer;
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
