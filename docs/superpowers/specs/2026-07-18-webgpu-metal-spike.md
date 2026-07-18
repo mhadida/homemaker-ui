@@ -44,6 +44,18 @@ Confirmed so far: `three@0.184` exports `WebGPURenderer` via `three/webgpu`;
 200. **NOT yet confirmed at runtime** (browser automation was unavailable when
 this was written) — see "Measure it" and "Risks to verify".
 
+## Findings (live)
+
+- **WebGPU renderer initializes** — it gets far enough to build materials, so the
+  `three/webgpu` init + dynamic import + async `gl` path all work in-browser.
+- **Shadows are incompatible:** `THREE.NodeBuilder: Material "MeshDepthMaterial"
+  is not compatible` (×7). Three's shadow-map depth pass uses the classic
+  `MeshDepthMaterial`, which WebGPURenderer's node system can't compile. **Spike
+  accommodation:** `<Canvas shadows={!useWebGPU}>` disables the shadow pass on the
+  WebGPU path so the scene renders and FPS is measurable. A real migration needs
+  WebGPU-native shadows (node-based / `customDepthMaterial` per casting mesh, or
+  three's WebGPU shadow setup) — a concrete, bounded migration cost to budget.
+
 ## Measure it (on the Mac that matters)
 
 1. `npm run dev`, open a **heavy** scene (draw a grid of ~8–10 long streets so a

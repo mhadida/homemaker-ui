@@ -1792,7 +1792,7 @@ export default function FacadeViewer({
 
       {/* One shared canvas behind the tracking cells. */}
       <Canvas
-        shadows
+        shadows={!useWebGPU}
         className="!absolute !inset-0"
         style={{ pointerEvents: "none" }}
         eventSource={containerRef}
