@@ -1,4 +1,4 @@
-import type { StreetNetwork, Vec2 } from "./types";
+import type { Monument, StreetNetwork, Vec2 } from "./types";
 import { closestPointOnSegment } from "./geometry";
 
 export interface Intersection {
@@ -140,4 +140,56 @@ export function deriveIntersections(net: StreetNetwork): Intersection[] {
 export function pruneRoundabouts(net: StreetNetwork): StreetNetwork {
   const valid = new Set(deriveIntersections(net).map((i) => i.key));
   return { ...net, roundabouts: net.roundabouts.filter(([k]) => valid.has(k)) };
+}
+
+/** A drag that leaves any affected segment shorter than this is rejected —
+ * a (near-)zero-length segment degenerates the ribbon offset math. */
+const MIN_SEG = 1;
+
+/** Move every street vertex sitting EXACTLY at `from` to `to` — a shared
+ * endpoint (a welded junction) moves as one, mirroring how block nodes move.
+ * Returns null (reject) when no vertex sits at `from`, or when the move
+ * would leave a segment touching the moved point shorter than MIN_SEG.
+ * Roundabout entries keyed at the old position follow the junction (an entry
+ * already present at the destination wins), and entries the move un-derives
+ * are pruned. Pure. */
+export function moveStreetNode(
+  net: StreetNetwork,
+  from: Vec2,
+  to: Vec2,
+): StreetNetwork | null {
+  const at = (p: Vec2, q: Vec2) => p[0] === q[0] && p[1] === q[1];
+  let touched = false;
+  const streets = net.streets.map((s) => {
+    if (!s.points.some((p) => at(p, from))) return s;
+    touched = true;
+    return {
+      ...s,
+      points: s.points.map((p) =>
+        at(p, from) ? ([to[0], to[1]] as Vec2) : p,
+      ),
+    };
+  });
+  if (!touched) return null;
+
+  // Reject degenerate results — only segments that INVOLVE the moved point;
+  // a pre-existing short segment elsewhere is not this move's fault.
+  for (const s of streets) {
+    const n = s.points.length;
+    const last = s.closed ? n : n - 1;
+    for (let i = 0; i < last; i++) {
+      const a = s.points[i];
+      const b = s.points[(i + 1) % n];
+      if (!at(a, to) && !at(b, to)) continue;
+      if (Math.hypot(a[0] - b[0], a[1] - b[1]) < MIN_SEG) return null;
+    }
+  }
+
+  const fromKey = keyOf(from);
+  const toKey = keyOf(to);
+  const hasAtTo = net.roundabouts.some(([k]) => k === toKey);
+  const roundabouts = net.roundabouts.flatMap<[string, Monument]>(([k, m]) =>
+    k === fromKey ? (hasAtTo ? [] : [[toKey, m]]) : [[k, m]],
+  );
+  return pruneRoundabouts({ streets, roundabouts });
 }

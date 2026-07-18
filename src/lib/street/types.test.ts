@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { STREET_SPECS, effectiveWidth, nextStreetId, EMPTY_NETWORK, minRadiusOf, type Street } from "./types";
+import { STREET_SPECS, effectiveWidth, nextStreetId, EMPTY_NETWORK, minRadiusOf, resolveTraffic, type Street } from "./types";
 
 describe("STREET_SPECS", () => {
   it("has the four types with the agreed widths + car flags", () => {
@@ -38,5 +38,17 @@ describe("minRadius", () => {
   it("minRadiusOf returns the type default", () => {
     const s: Street = { id: "street-1", type: "road", points: [[0, 0], [10, 0]] };
     expect(minRadiusOf(s)).toBe(STREET_SPECS.road.minRadius);
+  });
+});
+
+describe("resolveTraffic", () => {
+  it("defaults from the type: car types → cars, alley → peds", () => {
+    expect(resolveTraffic({ id: "s", type: "street", points: [] })).toBe("cars");
+    expect(resolveTraffic({ id: "a", type: "alley", points: [] })).toBe("peds");
+  });
+  it("an explicit per-street mode wins", () => {
+    expect(
+      resolveTraffic({ id: "s", type: "street", points: [], traffic: "shared" }),
+    ).toBe("shared");
   });
 });

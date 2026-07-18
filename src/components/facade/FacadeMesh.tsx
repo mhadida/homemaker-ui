@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
-import { Line } from "@react-three/drei";
+import Line from "./NodeLine";
 import {
   computeLayout,
   WALL_THICKNESS,

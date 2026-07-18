@@ -18,6 +18,10 @@ export const STREET_SPECS: Record<StreetType, StreetSpec> = {
   canal: { width: 14, allowsCars: false, label: "Canal", minRadius: 45 },
 };
 
+/** Who the street carries: cars only, pedestrians only, or shared — the
+ * Dutch fietsstraat where cars are guests. */
+export type TrafficMode = "cars" | "peds" | "shared";
+
 export interface Street {
   id: string;
   type: StreetType;
@@ -28,6 +32,9 @@ export interface Street {
   /** closed loop: an implicit closing segment joins points[n-1] → points[0]
    * (a ring road). Absent = open polyline. `points` never repeats the first. */
   closed?: boolean;
+  /** optional per-street traffic mode; absent = the type default
+   * (resolveTraffic). Meaningless for canals. */
+  traffic?: TrafficMode;
 }
 
 export interface Monument {
@@ -44,6 +51,12 @@ export const EMPTY_NETWORK: StreetNetwork = { streets: [], roundabouts: [] };
 
 export function effectiveWidth(s: Street): number {
   return s.width ?? STREET_SPECS[s.type].width;
+}
+
+/** Resolved traffic mode: the explicit per-street choice, else the type
+ * default — car-carrying types default to cars-only, alleys to pedestrians. */
+export function resolveTraffic(s: Street): TrafficMode {
+  return s.traffic ?? (STREET_SPECS[s.type].allowsCars ? "cars" : "peds");
 }
 
 export function minRadiusOf(s: Street): number {

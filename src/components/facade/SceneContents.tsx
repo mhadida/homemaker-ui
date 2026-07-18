@@ -1,9 +1,12 @@
 "use client";
 
 import { useMemo } from "react";
-import { Environment, ContactShadows, Grid, Edges, Line } from "@react-three/drei";
+import { Environment, ContactShadows, Grid } from "@react-three/drei";
 import * as THREE from "three";
 import FacadeMesh from "./FacadeMesh";
+import Line from "./NodeLine";
+import NodeGrid from "./NodeGrid";
+import { isWebGPUPath } from "./webgpu";
 import InstancedFacadeBoxes from "./InstancedFacadeBoxes";
 import StreetNetworkView from "@/components/street/StreetNetworkView";
 import type { StreetNetwork } from "@/lib/street/types";
@@ -105,14 +108,53 @@ function useGroundGeometry() {
   }, []);
 }
 
+/** The 12 edges of a centred w×h×d box as segment endpoint pairs — what
+ * drei's `<Edges>` computes from a box via EdgesGeometry. Stated explicitly
+ * so the outline can render through NodeLine's segments mode on the WebGPU
+ * path (drei's Edges is built on the classic LineMaterial, which the node
+ * renderer rejects). */
+function boxEdgePoints(
+  w: number,
+  h: number,
+  d: number,
+): [number, number, number][] {
+  const x = w / 2;
+  const y = h / 2;
+  const z = d / 2;
+  const c = (sx: number, sy: number, sz: number): [number, number, number] => [
+    sx * x,
+    sy * y,
+    sz * z,
+  ];
+  return [
+    // bottom ring
+    c(-1, -1, -1), c(1, -1, -1),
+    c(1, -1, -1), c(1, -1, 1),
+    c(1, -1, 1), c(-1, -1, 1),
+    c(-1, -1, 1), c(-1, -1, -1),
+    // top ring
+    c(-1, 1, -1), c(1, 1, -1),
+    c(1, 1, -1), c(1, 1, 1),
+    c(1, 1, 1), c(-1, 1, 1),
+    c(-1, 1, 1), c(-1, 1, -1),
+    // verticals
+    c(-1, -1, -1), c(-1, 1, -1),
+    c(1, -1, -1), c(1, 1, -1),
+    c(1, -1, 1), c(1, 1, 1),
+    c(-1, -1, 1), c(-1, 1, 1),
+  ];
+}
+
 function SelectionMarker({ params }: { params: FacadeParams }) {
   const h = useMemo(() => computeLayout(params).totalHeight, [params]);
+  const edges = useMemo(
+    () => boxEdgePoints(params.width + 0.15, h + 0.15, 0.7),
+    [params.width, h],
+  );
   return (
-    <mesh position={[0, h / 2, -0.15]}>
-      <boxGeometry args={[params.width + 0.15, h + 0.15, 0.7]} />
-      <meshBasicMaterial visible={false} />
-      <Edges color="#3b82f6" lineWidth={1.5} />
-    </mesh>
+    <group position={[0, h / 2, -0.15]}>
+      <Line segments points={edges} color="#3b82f6" lineWidth={1.5} />
+    </group>
   );
 }
 
@@ -403,29 +445,54 @@ export default function SceneContents({
           />
         </mesh>
 
-        <Grid
-          position={[0, 0, 0]}
-          args={[60, 60]}
-          cellSize={1}
-          cellThickness={0.7}
-          cellColor="#1f1d1b"
-          sectionSize={5}
-          sectionThickness={1.4}
-          sectionColor="#0d0c0b"
-          fadeDistance={70}
-          fadeStrength={1.2}
-          infiniteGrid
-        />
+        {/* drei's Grid is a GLSL ShaderMaterial the node renderer can't
+         * compile; NodeGrid is its TSL port with identical parameters. */}
+        {isWebGPUPath() ? (
+          <NodeGrid
+            position={[0, 0, 0]}
+            args={[60, 60]}
+            cellSize={1}
+            cellThickness={0.7}
+            cellColor="#1f1d1b"
+            sectionSize={5}
+            sectionThickness={1.4}
+            sectionColor="#0d0c0b"
+            fadeDistance={70}
+            fadeStrength={1.2}
+            infiniteGrid
+          />
+        ) : (
+          <Grid
+            position={[0, 0, 0]}
+            args={[60, 60]}
+            cellSize={1}
+            cellThickness={0.7}
+            cellColor="#1f1d1b"
+            sectionSize={5}
+            sectionThickness={1.4}
+            sectionColor="#0d0c0b"
+            fadeDistance={70}
+            fadeStrength={1.2}
+            infiniteGrid
+          />
+        )}
       </group>
 
-      <ContactShadows
-        position={[0, 0.005, 0]}
-        opacity={0.45}
-        scale={50}
-        blur={2.5}
-        far={20}
-        resolution={1024}
-      />
+      {/* drei's ContactShadows renders the scene through a MeshDepthMaterial,
+       * which the WebGPU node renderer can't compile (it was the spike's
+       * stubborn "MeshDepthMaterial is not compatible" error — not the sun's
+       * shadow map). On the WebGPU path the real sun shadow covers the ground
+       * contact; WebGL keeps the soft blob unchanged. */}
+      {!isWebGPUPath() && (
+        <ContactShadows
+          position={[0, 0.005, 0]}
+          opacity={0.45}
+          scale={50}
+          blur={2.5}
+          far={20}
+          resolution={1024}
+        />
+      )}
     </>
   );
 }

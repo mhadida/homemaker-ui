@@ -203,6 +203,18 @@ NOT involved; every edit is live (no Update button). Spec:
   (blocks.ts) bumps the session id counter past loaded ids so drawn blocks
   never collide. No backend. Spec:
   `docs/superpowers/specs/2026-07-14-save-load-design.md`.
+- **Renderer**: three's **WebGPURenderer by default** (native Metal on Mac —
+  measured ~3× the classic WebGL frame rate; auto WebGL2 fallback where
+  WebGPU is unavailable). `?webgl` = classic WebGLRenderer escape hatch,
+  `?webgl2` forces the fallback backend, `?stats` shows an FPS panel.
+  Renderer-dependent pieces route through `src/components/facade/webgpu.ts`
+  (the flag choke point), `NodeLine.tsx` (fat lines: drei `<Line>` on
+  classic, `Line2NodeMaterial` on WebGPU — never mount one empty), and
+  `NodeGrid.tsx` (TSL port of drei's Grid). drei `ContactShadows` is
+  classic-only (it renders through MeshDepthMaterial); the quad `<View>`
+  needs the viewport Y-flip shim in `FacadeViewer` (WebGPU origin is
+  top-left); Save-image grabs WebGPU frames via captureStream+ImageCapture.
+  Spec: `docs/superpowers/specs/2026-07-18-webgpu-migration-design.md`.
 - **AI prompt**: `/api/facade-prompt` (flat fully-required zod spec — OpenAI
   structured output rejects optionals) targets the selected lot, plus an
   instant local keyword parser.
@@ -241,11 +253,19 @@ NOT involved; every edit is live (no Update button). Spec:
   sparsely into `network.roundabouts` (`roundaboutRing` in `geometry.ts`;
   `RoundaboutMesh`/`MonumentMesh` in `src/components/street/`). A **Roads**
   draw tool (mutually exclusive with
-  the block pen and Select) places polyline vertices with a type selector;
-  clicking a ribbon or an intersection marker opens the **Street** /
-  **Intersection** inspector in `FacadeControls.tsx` (type, width override,
-  delete; roundabout on/off + monument pick) — page state `streetNetwork`,
-  `selectedStreet`, `selectedIntersection`. A pure, non-blocking Krier/
+  the block pen and Select) places polyline vertices with a type selector
+  (options derived from `STREET_SPECS` so every type — canal included — is
+  always drawable); clicking a ribbon or an intersection marker opens the
+  **Street** / **Intersection** inspector in `FacadeControls.tsx` (type,
+  width override, **traffic mode** — cars / shared fietsstraat (red
+  asphalt) / peds (light cobble), `Street.traffic` sparse via
+  `resolveTraffic`, alleys default peds; delete; roundabout on/off +
+  monument pick) — page state `streetNetwork`, `selectedStreet`,
+  `selectedIntersection`. Selecting a street shows **draggable green vertex
+  handles** in the plan pane (`StreetNodeHandles` in FacadeViewer;
+  `moveStreetNode` in `intersections.ts` moves welded junction copies as
+  one, migrates roundabout keys, rejects sub-1 m segments; derived frontage
+  blocks refit live). A pure, non-blocking Krier/
   Alexander advisory (`geometry.ts` — `streetAdvisory`) hints at an
   uninterrupted straight alley/street run, an overlong boulevard, or a corner
   drawn tighter than the type's minimum radius; it never blocks the layout. The network **coexists** with the existing block/lot/
