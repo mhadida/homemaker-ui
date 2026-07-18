@@ -203,6 +203,18 @@ NOT involved; every edit is live (no Update button). Spec:
   (blocks.ts) bumps the session id counter past loaded ids so drawn blocks
   never collide. No backend. Spec:
   `docs/superpowers/specs/2026-07-14-save-load-design.md`.
+- **Renderer**: three's **WebGPURenderer by default** (native Metal on Mac —
+  measured ~3× the classic WebGL frame rate; auto WebGL2 fallback where
+  WebGPU is unavailable). `?webgl` = classic WebGLRenderer escape hatch,
+  `?webgl2` forces the fallback backend, `?stats` shows an FPS panel.
+  Renderer-dependent pieces route through `src/components/facade/webgpu.ts`
+  (the flag choke point), `NodeLine.tsx` (fat lines: drei `<Line>` on
+  classic, `Line2NodeMaterial` on WebGPU — never mount one empty), and
+  `NodeGrid.tsx` (TSL port of drei's Grid). drei `ContactShadows` is
+  classic-only (it renders through MeshDepthMaterial); the quad `<View>`
+  needs the viewport Y-flip shim in `FacadeViewer` (WebGPU origin is
+  top-left); Save-image grabs WebGPU frames via captureStream+ImageCapture.
+  Spec: `docs/superpowers/specs/2026-07-18-webgpu-migration-design.md`.
 - **AI prompt**: `/api/facade-prompt` (flat fully-required zod spec — OpenAI
   structured output rejects optionals) targets the selected lot, plus an
   instant local keyword parser.

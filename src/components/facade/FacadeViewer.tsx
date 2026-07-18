@@ -1536,7 +1536,7 @@ export default function FacadeViewer({
 
   // Per-pane capture: crop the shared canvas to the pane's rect and
   // composite the sky gradient (Canvas has preserveDrawingBuffer for this).
-  const saveImage = useCallback(() => {
+  const saveImage = useCallback(async () => {
     const canvas = containerRef.current?.querySelector("canvas");
     const target: PaneId = active ?? "perspective";
     const cell = cellRefs[target].current;
@@ -1549,6 +1549,27 @@ export default function FacadeViewer({
     const sw = pRect.width * dpr;
     const sh = pRect.height * dpr;
     if (sw <= 0 || sh <= 0) return;
+    // A WebGPU canvas has no preserveDrawingBuffer semantics — drawImage on
+    // it reads 0 pixels. Grab a composited frame through captureStream +
+    // ImageCapture instead (same pixel coordinate space as the canvas). The
+    // classic-WebGL escape hatch keeps the direct drawImage path.
+    let source: CanvasImageSource = canvas;
+    if (isWebGPUPath() && "ImageCapture" in window) {
+      const track = canvas.captureStream(0).getVideoTracks()[0];
+      try {
+        (track as MediaStreamTrack & { requestFrame?: () => void }).requestFrame?.();
+        // grabFrame is live in Chrome but missing from TS's dom lib.
+        source = await (
+          new ImageCapture(track) as ImageCapture & {
+            grabFrame(): Promise<ImageBitmap>;
+          }
+        ).grabFrame();
+      } catch {
+        source = canvas; // best effort — fall back to the direct read
+      } finally {
+        track.stop();
+      }
+    }
     const out = document.createElement("canvas");
     out.width = sw;
     out.height = sh;
@@ -1557,7 +1578,7 @@ export default function FacadeViewer({
     for (const [p, c] of SKY_STOPS) grad.addColorStop(p, c);
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, sw, sh);
-    ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+    ctx.drawImage(source, sx, sy, sw, sh, 0, 0, sw, sh);
     const a = document.createElement("a");
     a.href = out.toDataURL("image/png");
     a.download = "facade.png";
@@ -1660,16 +1681,14 @@ export default function FacadeViewer({
     }
   };
 
-  // WebGPU migration (flag-gated rollout): `?webgpu` swaps the default WebGL
-  // renderer for three's WebGPURenderer (native Metal on Mac, WebGL2 fallback
-  // elsewhere). Dynamic-imported so the WebGPU build never enters the default
-  // bundle; without the flag the WebGL path is byte-identical.
-  // `?stats` (implied by `?webgpu`) shows an FPS panel for A/B measurement.
+  // three's WebGPURenderer is the DEFAULT (native Metal on Mac, ~3× the
+  // classic WebGL frame rate; WebGL2 fallback where WebGPU is unavailable).
+  // `?webgl` opts back into the classic WebGLRenderer as a rollout escape
+  // hatch. `?stats` shows an FPS panel for A/B measurement.
   const useWebGPU = isWebGPUPath();
   const showStats =
-    useWebGPU ||
-    (typeof window !== "undefined" &&
-      new URLSearchParams(window.location.search).has("stats"));
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).has("stats");
 
   return (
     <div

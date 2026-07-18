@@ -1,7 +1,9 @@
 # WebGPU (Metal) Renderer Migration — Design
 
-**Status:** Phases 0–2 DONE (browser-verified 2026-07-18) — Phase 0 returned **GO**;
-Phase 3 partially verified (Save-image gap open); Phase 4 not started
+**Status:** COMPLETE (browser-verified 2026-07-18) — Phase 0 returned **GO**;
+Phases 1–4 shipped. **WebGPU is the default renderer**; `?webgl` is the
+classic-renderer escape hatch. Save-image fixed via captureStream +
+ImageCapture frame grab (Phase 3's one gap).
 **Date:** 2026-07-18
 **Branch:** `feature/webgpu-migration` (continues the `spike/webgpu` scaffolding)
 
