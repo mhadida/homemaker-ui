@@ -28,6 +28,14 @@ import {
 const BASEMENT_MIN = 0.3; // no sliver plinths below this drop
 const BASEMENT_COLOR = "#6f6a62"; // stone
 
+/** WebGPU spike: three's WebGPU renderer eagerly compiles the shadow-map depth
+ * material (MeshDepthMaterial) for any `castShadow` light — and its node system
+ * rejects it — so `<Canvas shadows={false}>` alone isn't enough. Gate the sun's
+ * shadow off at the light on the `?webgpu` path. WebGL path is unchanged. */
+const spikeWebGPU = () =>
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).has("webgpu");
+
 /** Leveling plinth below a building on sloping ground: a stone box from the
  * floor (local y=0) down to −drop, pierced by a row of thin horizontal
  * semi-basement windows on the street face. */
@@ -328,7 +336,7 @@ export default function SceneContents({
       <directionalLight
         position={sunPos}
         intensity={1.4}
-        castShadow
+        castShadow={!spikeWebGPU()}
         shadow-mapSize-width={2048}
         shadow-mapSize-height={2048}
         shadow-camera-far={80}
