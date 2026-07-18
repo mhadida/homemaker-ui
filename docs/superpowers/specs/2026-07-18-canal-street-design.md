@@ -36,7 +36,9 @@ centre │──── water/2 ────│ quay │─── sidewalk ──
 - `QUAY` = **0.5** m — the quay-wall thickness; the wall drops `WATER_DEPTH` from
   bank grade to the water surface.
 - `SIDEWALK` = **3** m — paved walkable band at bank grade.
-- `WATER_DEPTH` = **1.2** m — water surface below bank grade.
+- `WATER_DEPTH` = **1.2** m — the *minimum* depth: the level water surface sits
+  at least this far below the lowest bank point along the canal. On flat ground
+  this is the uniform depth everywhere (see "Water level" below).
 
 **Bank half-offset** (centreline → building line) is therefore
 `WATER_WIDTH/2 + QUAY + SIDEWALK = 7 + 0.5 + 3 = 10.5` m.
@@ -87,10 +89,33 @@ draping applied by the component — see below):
 - `canalSidewalks(centreline, width)` → two flat bands between quay foot and
   sidewalk outer edge, at bank grade.
 
-Each builder returns 2-D offset polylines + the y-rule (`grade` or
-`grade − WATER_DEPTH`); the component lifts to world Y via `groundHeightAt` per
-vertex (same drape as `StreetRibbonMesh`). Walls stay a constant `WATER_DEPTH`
-tall because both the bank edge and the water edge drape together.
+Each builder returns 2-D offset polylines; the component lifts them to world Y
+(see "Water level"). The **sidewalks** drape on the ground per vertex via
+`groundHeightAt` (same as `StreetRibbonMesh`). The **water surface** is a single
+level `waterY` (a flat horizontal quad). Each **quay wall** is a quad with its
+top edge on the draped bank grade and its bottom edge at the level `waterY`, so
+walls are **variable height** along the canal — shortest at the lowest bank,
+taller uphill.
+
+## Water level (canal rule: water is always level)
+
+Each canal holds **one level pool**: the water surface is a single horizontal
+`waterY`, computed per canal street:
+
+```
+waterY = (min ground height over the canal's bank-edge vertices) − WATER_DEPTH
+```
+
+Taking the *minimum* bank grade guarantees the water sits below every bank point
+(never floods), and the quay walls take up the slack — a wall's height is
+`bankGrade(vertex) − waterY`, so walls are shortest at the lowest bank and grow
+taller uphill. This is what a level canal cut into a slope actually looks like.
+
+**Flat-ground equivalence:** on flat ground the min bank grade equals the grade
+everywhere, so `waterY = grade − WATER_DEPTH` — identical to a draped
+constant-depth surface. A `slope: 0` scene is byte-identical; the level-vs-tilted
+difference only appears on a slope. Locks/steps for canals that descend a large
+elevation change are deferred (a very steep canal just reads as over-walled).
 
 ## Bridges — derived, like roundabouts
 
@@ -158,10 +183,10 @@ to untangle.
 
 - **`src/components/street/CanalMesh.tsx`** — one canal street: water surface
   (translucent blue `meshStandardMaterial`, low roughness, `transparent`,
-  `opacity ≈ 0.8`, `depthWrite` off), two quay-wall strips (stone grey), two
-  sidewalk bands (light stone). Draped via `groundHeightAt`, mirroring
-  `StreetRibbonMesh`'s per-vertex lift. Selectable/hoverable exactly like a road
-  ribbon (`onSelect`, tint on select).
+  `opacity ≈ 0.8`, `depthWrite` off) at the level `waterY`, two quay-wall strips
+  (stone grey) whose tops drape and whose bottoms sit on `waterY`, two sidewalk
+  bands (light stone) draped via `groundHeightAt` per vertex. Selectable/hoverable
+  exactly like a road ribbon (`onSelect`, tint on select).
 - **`src/components/street/BridgeMesh.tsx`** — one arch per `BridgePlacement`.
 - **`src/components/street/StreetNetworkView.tsx`** — route each street:
   `type === "canal"` → `<CanalMesh>`, else `<StreetRibbonMesh>`; and render a
@@ -186,8 +211,8 @@ old document with no canals loads identically, a saved canal round-trips.
 
 - Animated / rippling water (static surface for v1).
 - Boats, mooring, locks/steps in the channel.
-- True-horizontal (level) water on steep slopes — v1 drapes the surface parallel
-  to the banks at constant depth.
+- Locks / steps for a canal descending a large elevation change — v1 holds one
+  level pool per canal (quay walls just grow taller uphill).
 - Land-ribbon trimming at crossings (unnecessary with the recessed channel).
 - Bridges carrying a car street's width/paving — v1 is a fixed pedestrian arch,
   as chosen.
@@ -201,8 +226,10 @@ pattern):
 - `bankHalf` value for canal (10.5) and identity with the old formula for
   non-canal types.
 - the three offset polylines sit at the correct half-widths from the centreline.
-- quay walls are `WATER_DEPTH` tall; water surface is `WATER_DEPTH` below the
-  bank band.
+- the water surface is a single level Y (every water vertex equal);
+  `waterY = minBankGrade − WATER_DEPTH`; on flat ground it is exactly
+  `WATER_DEPTH` below grade everywhere (equal to a draped constant-depth
+  surface). Quay-wall height = `bankGrade − waterY` (≥ `WATER_DEPTH`).
 - `bridgesFor`: canal + non-canal → one bridge; canal + canal → none;
   land + land → none; `tangent` is the canal direction and `span = 15`.
 - `bridgeArchTriangles`: apex rises `BRIDGE_RISE`, deck breadth
