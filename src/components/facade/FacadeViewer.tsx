@@ -16,6 +16,7 @@ import {
   OrthographicCamera,
   PerspectiveCamera,
   Line,
+  Stats,
 } from "@react-three/drei";
 import * as THREE from "three";
 import SceneContents from "./SceneContents";
@@ -1658,6 +1659,15 @@ export default function FacadeViewer({
     }
   };
 
+  // WebGPU spike: `?webgpu` swaps the default WebGL renderer for three's
+  // WebGPURenderer (native Metal on Mac). Dynamic-imported so the WebGPU build
+  // never enters the default bundle; the WebGL path is byte-identical.
+  // `?stats` (implied by `?webgpu`) shows an FPS panel for A/B measurement.
+  const spikeParams =
+    typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+  const useWebGPU = spikeParams?.has("webgpu") ?? false;
+  const showStats = useWebGPU || (spikeParams?.has("stats") ?? false);
+
   return (
     <div
       ref={containerRef}
@@ -1786,11 +1796,23 @@ export default function FacadeViewer({
         className="!absolute !inset-0"
         style={{ pointerEvents: "none" }}
         eventSource={containerRef}
-        gl={{ alpha: true, antialias: true, preserveDrawingBuffer: true }}
+        gl={
+          useWebGPU
+            ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (async (props: any) => {
+                const { WebGPURenderer } = await import("three/webgpu");
+                const renderer = new WebGPURenderer({ ...props, antialias: true, alpha: true });
+                await renderer.init();
+                return renderer;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              }) as any
+            : { alpha: true, antialias: true, preserveDrawingBuffer: true }
+        }
         dpr={[1, 2]}
       >
         <GlobalClear />
         <View.Port />
+        {showStats && <Stats />}
       </Canvas>
 
       {/* Mobile pane switcher */}
