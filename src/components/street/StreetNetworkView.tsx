@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import type { StreetNetwork, Monument } from "@/lib/street/types";
 import { deriveIntersections } from "@/lib/street/intersections";
 import StreetRibbonMesh from "./StreetRibbonMesh";
+import CanalMesh from "./CanalMesh";
 import RoundaboutMesh from "./RoundaboutMesh";
 import IntersectionMarker from "./IntersectionMarker";
 import type { Ground } from "@/lib/facade/terrain";
@@ -38,15 +39,25 @@ export default function StreetNetworkView({
   const intersections = useMemo(() => deriveIntersections(network), [network]);
   return (
     <group>
-      {network.streets.map((s) => (
-        <StreetRibbonMesh
-          key={s.id}
-          street={s}
-          selected={selectedStreet === s.id}
-          onSelect={onSelectStreet ? () => onSelectStreet(s.id) : undefined}
-          ground={ground}
-        />
-      ))}
+      {network.streets.map((s) =>
+        s.type === "canal" ? (
+          <CanalMesh
+            key={s.id}
+            street={s}
+            selected={selectedStreet === s.id}
+            onSelect={onSelectStreet ? () => onSelectStreet(s.id) : undefined}
+            ground={ground}
+          />
+        ) : (
+          <StreetRibbonMesh
+            key={s.id}
+            street={s}
+            selected={selectedStreet === s.id}
+            onSelect={onSelectStreet ? () => onSelectStreet(s.id) : undefined}
+            ground={ground}
+          />
+        ),
+      )}
       {intersections.map((it) => {
         const m: Monument | undefined = roundabouts.get(it.key);
         return (

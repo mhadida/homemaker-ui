@@ -1,5 +1,6 @@
 import type { Vec2 } from "./types";
 import { streetRibbon } from "./geometry";
+import { groundHeightAt, type Ground } from "@/lib/facade/terrain";
 
 /** Canal cross-section constants (metres). */
 export const CANAL_QUAY = 0.5;        // quay-wall thickness
@@ -18,4 +19,16 @@ export function canalOffsets(centreline: Vec2[], width: number) {
     quayFoot: streetRibbon(centreline, width + 2 * CANAL_QUAY),
     bank: streetRibbon(centreline, width + 2 * CANAL_QUAY + 2 * CANAL_SIDEWALK),
   };
+}
+
+/** The single level water-surface Y: WATER_DEPTH below the lowest bank-edge
+ * ground point, so the level pool never floods. Flat ground → grade − depth. */
+export function canalWaterY(centreline: Vec2[], width: number, ground: Ground): number {
+  const { bank } = canalOffsets(centreline, width);
+  let minG = Infinity;
+  for (const p of [...bank.left, ...bank.right]) {
+    const g = groundHeightAt(p[0], p[1], ground);
+    if (g < minG) minG = g;
+  }
+  return minG - CANAL_WATER_DEPTH;
 }
