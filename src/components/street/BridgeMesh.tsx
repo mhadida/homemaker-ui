@@ -21,15 +21,34 @@ export default function BridgeMesh({
     return g;
   }, [placement.span]);
   useEffect(() => () => geo.dispose(), [geo]);
-  const [x, z] = placement.pos;
-  const baseY = groundHeightAt(x, z, ground);
-  // local +x spans the channel (canal normal); local +z is the deck breadth.
-  const n: [number, number] = [-placement.tangent[1], placement.tangent[0]];
-  const yaw = Math.atan2(-n[1], n[0]);
+
+  // Drape the arch so each springing end sits on ITS bank: local +x runs bank-
+  // to-bank (tilted to the grade difference across the span), local +z is the
+  // deck breadth (along the canal), local +y is up. Flat / longitudinal-slope
+  // ground → an untilted arch at grade (byte-identical to a rigid placement).
+  const { pos, quat } = useMemo(() => {
+    const [x, z] = placement.pos;
+    const t = placement.tangent;
+    const hs = placement.span / 2;
+    const nx = -t[1], nz = t[0];                       // across-channel unit
+    const ga = groundHeightAt(x + nx * hs, z + nz * hs, ground); // +x-end bank
+    const gb = groundHeightAt(x - nx * hs, z - nz * hs, ground); // −x-end bank
+    const baseY = (ga + gb) / 2;                       // arch centre height
+    const spanDir = new THREE.Vector3(nx * hs, (ga - gb) / 2, nz * hs).normalize();
+    const zAxis = new THREE.Vector3().crossVectors(spanDir, new THREE.Vector3(0, 1, 0)).normalize();
+    const yAxis = new THREE.Vector3().crossVectors(zAxis, spanDir).normalize();
+    const m = new THREE.Matrix4().makeBasis(spanDir, yAxis, zAxis);
+    const q = new THREE.Quaternion().setFromRotationMatrix(m);
+    return {
+      pos: [x, baseY, z] as [number, number, number],
+      quat: [q.x, q.y, q.z, q.w] as [number, number, number, number],
+    };
+  }, [placement, ground]);
+
   return (
-    <group position={[x, baseY, z]} rotation={[0, yaw, 0]}>
+    <group position={pos} quaternion={quat}>
       <mesh geometry={geo} castShadow receiveShadow>
-        <meshStandardMaterial color={STONE} roughness={0.9} />
+        <meshStandardMaterial color={STONE} roughness={0.9} side={THREE.DoubleSide} />
       </mesh>
     </group>
   );
