@@ -1,9 +1,18 @@
-import type { StreetNetwork, Vec2 } from "./types";
+import type { Street, StreetNetwork, Vec2 } from "./types";
 import { effectiveWidth } from "./types";
 import { streetRibbon, closestPointOnSegment } from "./geometry";
+import { CANAL_QUAY, CANAL_SIDEWALK } from "./canal";
 
 export const PAVEMENT_GAP = 1.5; // m from carriageway edge to the building line
 export const FRONTAGE_MIN = 6;   // m — a shorter (junction-crowded) edge yields no building
+
+/** Centreline → building line. A canal sets back by its quay + sidewalk; every
+ * other type keeps the existing carriageway-gap formula (byte-identical). */
+function bankHalf(s: Street): number {
+  return s.type === "canal"
+    ? effectiveWidth(s) / 2 + CANAL_QUAY + CANAL_SIDEWALK
+    : effectiveWidth(s) / 2 + PAVEMENT_GAP;
+}
 
 export interface Frontage {
   streetId: string;
@@ -57,7 +66,7 @@ export function streetFrontages(net: StreetNetwork): Frontage[] {
   const info: StreetInfo[] = net.streets
     .filter((s) => s.points.length >= 2)
     .map((s) => {
-      const half = effectiveWidth(s) / 2 + PAVEMENT_GAP;
+      const half = bankHalf(s);
       // A closed loop rings buildings the whole way round: append the seam
       // point so the offset polyline includes the closing segment, and pass
       // `closed` so the ribbon wraps with no seam gap.
@@ -66,7 +75,7 @@ export function streetFrontages(net: StreetNetwork): Frontage[] {
         : (s.points as Vec2[]);
       const { left, right } = streetRibbon(
         pts,
-        effectiveWidth(s) + 2 * PAVEMENT_GAP,
+        2 * bankHalf(s),
         s.closed,
       );
       return { id: s.id, half, pts, left, right };

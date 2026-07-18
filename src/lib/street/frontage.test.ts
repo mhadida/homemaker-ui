@@ -112,3 +112,24 @@ describe("streetFrontages — mid-span junction split", () => {
     expect(new Set(hLeft.map((f) => f.part)).size).toBe(2);
   });
 });
+
+describe("streetFrontages — canal bank set-back", () => {
+  it("a canal sets its building line back by water/2 + quay + sidewalk (10.5 m)", () => {
+    const net: StreetNetwork = {
+      streets: [{ id: "c", type: "canal", points: [[0, 0], [40, 0]] }],
+      roundabouts: [],
+    };
+    const fs = streetFrontages(net);
+    expect(fs.length).toBeGreaterThan(0);
+    for (const f of fs) expect(Math.abs(Math.abs(f.a[1]) - 10.5)).toBeLessThan(1e-6);
+  });
+
+  it("a non-canal street's frontage offset is unchanged (6 m)", () => {
+    const net: StreetNetwork = {
+      streets: [{ id: "s", type: "street", points: [[0, 0], [40, 0]] }],
+      roundabouts: [],
+    };
+    const fs = streetFrontages(net);
+    for (const f of fs) expect(Math.abs(Math.abs(f.a[1]) - 6)).toBeLessThan(1e-6); // 9/2 + 1.5
+  });
+});
