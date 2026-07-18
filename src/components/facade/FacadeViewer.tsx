@@ -1242,7 +1242,7 @@ function PerspectivePane({
         position={[6, 5, 14]}
         fov={40}
         near={0.1}
-        far={200}
+        far={2000}
       />
       <OrbitControls
         makeDefault
@@ -1250,7 +1250,7 @@ function PerspectivePane({
         dampingFactor={0.08}
         target={[0, 4, 0]}
         minDistance={3}
-        maxDistance={60}
+        maxDistance={600}
         maxPolarAngle={Math.PI / 2.05}
         enablePan
         panSpeed={0.8}
