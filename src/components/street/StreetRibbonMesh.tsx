@@ -11,6 +11,7 @@ const PAVING: Record<Street["type"], string> = {
   street: "#4a4a4c",
   road: "#3f3f44",
   boulevard: "#3a3a40",
+  canal: "#2f6b8f",
 };
 
 const SELECTED_COLOR = "#3b82f6"; // matches the app-wide accent used for other 3D selection highlights

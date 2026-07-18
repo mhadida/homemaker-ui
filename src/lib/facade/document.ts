@@ -6,8 +6,8 @@ import { DEFAULT_GROUND } from "./terrain";
 import { STREET_WIDTH_DEFAULT } from "./street";
 import type { FacadeParams } from "./types";
 import { DEFAULT_FACADE } from "./types";
-import type { Monument, Street, StreetNetwork, StreetType } from "@/lib/street/types";
-import { EMPTY_NETWORK } from "@/lib/street/types";
+import type { Monument, Street, StreetNetwork } from "@/lib/street/types";
+import { EMPTY_NETWORK, STREET_SPECS } from "@/lib/street/types";
 
 /** Bump when the on-disk shape changes incompatibly. Loaders reject unknown
  * versions rather than silently mis-reading (beta data-preservation rule). */
@@ -105,12 +105,10 @@ function normalizeParams(raw: Record<string, unknown>): FacadeParams {
   } as FacadeParams;
 }
 
-const STREET_TYPES: ReadonlySet<string> = new Set<StreetType>([
-  "alley",
-  "street",
-  "road",
-  "boulevard",
-]);
+// Derived from STREET_SPECS (the single source of truth for street types) so a
+// newly-added type can never silently fail to load. A hand-maintained list here
+// previously drifted and dropped `canal` streets on load.
+const STREET_TYPES: ReadonlySet<string> = new Set(Object.keys(STREET_SPECS));
 
 /** A drawn street: id, a known type, and a non-empty points array of
  * [finite, finite] pairs. Mirrors validLine/validBlock's shape-check style,
