@@ -232,6 +232,9 @@ describe("syncCorners", () => {
 
   it("SHELL_FIELDS is exactly what syncCorners copies (two-facades mode)", () => {
     const { A, B } = rightAngle();
+    // Give every optional shell field a real value on the source side so the
+    // per-field assertions can't pass vacuously on undefined === undefined.
+    A.lots[1].params = { ...A.lots[1].params, massingDepth: 12 };
     const out = syncCorners([A, B], new Map(), 150, "A");
     const src = out[0].lots[1].params;
     const dst = out[1].lots[0].params;

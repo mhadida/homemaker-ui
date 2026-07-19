@@ -35,6 +35,37 @@ export function canalWaterY(centreline: Vec2[], width: number, ground: Ground): 
   return minG - CANAL_WATER_DEPTH;
 }
 
+/** Ground rise along a canal beyond this is called out — the level pool sits
+ * WATER_DEPTH under the LOWEST bank, so every metre of climb is a metre of
+ * extra quay wall at the high end. Roughly one lock's worth. */
+export const CANAL_GRADE_TOLERANCE = 1;
+
+/** Advisory (never blocking, mirrors streetAdvisory): a canal drawn up a
+ * slope makes no sense — water is level. Measures the ground rise along the
+ * centreline (vertices + midpoints); null when within tolerance, for
+ * non-canals, and on flat ground. */
+export function canalGradeAdvisory(street: Street, ground: Ground): string | null {
+  if (street.type !== "canal" || street.points.length < 2) return null;
+  let min = Infinity;
+  let max = -Infinity;
+  const sample = (x: number, z: number) => {
+    const g = groundHeightAt(x, z, ground);
+    if (g < min) min = g;
+    if (g > max) max = g;
+  };
+  for (let i = 0; i < street.points.length; i++) {
+    const p = street.points[i];
+    sample(p[0], p[1]);
+    if (i > 0) {
+      const q = street.points[i - 1];
+      sample((p[0] + q[0]) / 2, (p[1] + q[1]) / 2);
+    }
+  }
+  const rise = max - min;
+  if (rise <= CANAL_GRADE_TOLERANCE) return null;
+  return `This canal climbs ${rise.toFixed(1)} m — water stays level, so the high end digs a ${rise.toFixed(1)} m trench. Route it along the contours (or flatten the ground).`;
+}
+
 export interface BridgePlacement {
   key: string;
   pos: Vec2;

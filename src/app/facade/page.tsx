@@ -52,6 +52,7 @@ import {
 } from "@/lib/street/types";
 import { deriveIntersections, moveStreetNode, pruneRoundabouts } from "@/lib/street/intersections";
 import { streetAdvisory } from "@/lib/street/geometry";
+import { canalGradeAdvisory } from "@/lib/street/canal";
 import {
   syncCorners,
   detectCorners,
@@ -712,6 +713,42 @@ export default function FacadePage() {
     setSelectedStreet(null);
   }, []);
 
+  /** Backspace mid-chain in the pen: remove the just-committed segment's
+   * block (the chain anchor rewinds in PenSurface). Same corner re-sync as
+   * every block removal. */
+  const handleUndoSegment = useCallback(
+    (blockId: string) => {
+      setBlocks((bs) =>
+        syncCorners(
+          bs.filter((b) => b.id !== blockId),
+          cornerChoices,
+          maxCornerAngle,
+        ),
+      );
+      setSelected((s) => (s?.blockId === blockId ? null : s));
+    },
+    [cornerChoices, maxCornerAngle],
+  );
+
+  /** Wipe the whole scene (the Select-mode Clear-all button; the button
+   * itself carries the two-step confirm). Content only — view settings,
+   * ground and street width survive. Also drops the autosave so a refresh
+   * doesn't resurrect the cleared scene. */
+  const handleClearAll = useCallback(() => {
+    setBlocks([]);
+    setCornerChoices(new Map());
+    setStreetNetwork(EMPTY_NETWORK);
+    setSelected(null);
+    setSelectedStreet(null);
+    setSelectedIntersection(null);
+    setMarquee(null);
+    try {
+      localStorage.removeItem(AUTOSAVE_KEY);
+    } catch {
+      // storage unavailable — the state reset above still cleared the scene
+    }
+  }, []);
+
   // Computed OUTSIDE the updater so the boolean reaches the drag handler
   // synchronously (mirrors handleMoveNode). moveStreetNode is pure and moves
   // welded junction copies together; derived frontage blocks refit via the
@@ -1165,6 +1202,8 @@ export default function FacadePage() {
             onFlipChain={handleFlipChain}
             onMoveNode={handleMoveNode}
             onMoveStreetNode={handleMoveStreetNode}
+            onUndoSegment={handleUndoSegment}
+            onClearAll={handleClearAll}
             view={view}
             onDrawModeChange={setDrawActive}
             corners={corners}
@@ -1201,7 +1240,10 @@ export default function FacadePage() {
             ) : selectedStreetObj ? (
               <StreetInspector
                 street={selectedStreetObj}
-                advisory={streetAdvisory(selectedStreetObj)}
+                advisory={
+                  canalGradeAdvisory(selectedStreetObj, ground) ??
+                  streetAdvisory(selectedStreetObj)
+                }
                 onChange={handleStreetChange}
                 onDelete={() => handleDeleteStreet(selectedStreetObj.id)}
               />

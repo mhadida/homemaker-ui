@@ -45,6 +45,14 @@ import {
 } from "@/lib/facade/sections";
 import type { Street, StreetType, TrafficMode, Monument } from "@/lib/street/types";
 import { STREET_SPECS, effectiveWidth, resolveTraffic } from "@/lib/street/types";
+import {
+  rangeAvg,
+  rangeVariation,
+  rangeFromAvg,
+  GEN_WIDTH_BOUNDS,
+  GEN_STOREYS_BOUNDS,
+  GEN_VARIATION_MAX,
+} from "@/lib/facade/genControls";
 import BayGrid from "./BayGrid";
 
 interface FacadeControlsProps {
@@ -842,41 +850,81 @@ function BlockInspector({
   return (
     <div className="space-y-5">
       <Section title="Generation">
+        {/* Average + variation view over the stored min/max ranges — the
+         * saved shape and the generator are untouched (genControls.ts). */}
         <SliderRow
-          label="Lot width min"
-          value={gen.lotWidth.min}
-          display={`${gen.lotWidth.min.toFixed(1)}m`}
-          min={4}
-          max={gen.lotWidth.max}
+          label="Avg building width"
+          value={rangeAvg(gen.lotWidth)}
+          display={`${rangeAvg(gen.lotWidth).toFixed(1)}m`}
+          min={GEN_WIDTH_BOUNDS.lo}
+          max={GEN_WIDTH_BOUNDS.hi}
           step={0.5}
-          onChange={(v) => update({ lotWidth: { ...gen.lotWidth, min: v } })}
+          onChange={(v) =>
+            update({
+              lotWidth: rangeFromAvg(
+                v,
+                rangeVariation(gen.lotWidth),
+                GEN_WIDTH_BOUNDS.lo,
+                GEN_WIDTH_BOUNDS.hi,
+              ),
+            })
+          }
         />
         <SliderRow
-          label="Lot width max"
-          value={gen.lotWidth.max}
-          display={`${gen.lotWidth.max.toFixed(1)}m`}
-          min={gen.lotWidth.min}
-          max={14}
+          label="Width variation"
+          value={rangeVariation(gen.lotWidth)}
+          display={`${Math.round(rangeVariation(gen.lotWidth) * 100)}%`}
+          min={0}
+          max={GEN_VARIATION_MAX}
+          step={0.05}
+          onChange={(v) =>
+            update({
+              lotWidth: rangeFromAvg(
+                rangeAvg(gen.lotWidth),
+                v,
+                GEN_WIDTH_BOUNDS.lo,
+                GEN_WIDTH_BOUNDS.hi,
+              ),
+            })
+          }
+        />
+        <SliderRow
+          label="Avg height (storeys)"
+          value={rangeAvg(gen.storeys)}
+          display={`${rangeAvg(gen.storeys).toFixed(1)}`}
+          min={GEN_STOREYS_BOUNDS.lo}
+          max={GEN_STOREYS_BOUNDS.hi}
           step={0.5}
-          onChange={(v) => update({ lotWidth: { ...gen.lotWidth, max: v } })}
+          onChange={(v) =>
+            update({
+              storeys: rangeFromAvg(
+                v,
+                rangeVariation(gen.storeys),
+                GEN_STOREYS_BOUNDS.lo,
+                GEN_STOREYS_BOUNDS.hi,
+                true,
+              ),
+            })
+          }
         />
         <SliderRow
-          label="Storeys min"
-          value={gen.storeys.min}
-          display={`${gen.storeys.min}`}
-          min={1}
-          max={gen.storeys.max}
-          step={1}
-          onChange={(v) => update({ storeys: { ...gen.storeys, min: v } })}
-        />
-        <SliderRow
-          label="Storeys max"
-          value={gen.storeys.max}
-          display={`${gen.storeys.max}`}
-          min={gen.storeys.min}
-          max={6}
-          step={1}
-          onChange={(v) => update({ storeys: { ...gen.storeys, max: v } })}
+          label="Height variation"
+          value={rangeVariation(gen.storeys)}
+          display={`${Math.round(rangeVariation(gen.storeys) * 100)}%`}
+          min={0}
+          max={GEN_VARIATION_MAX}
+          step={0.05}
+          onChange={(v) =>
+            update({
+              storeys: rangeFromAvg(
+                rangeAvg(gen.storeys),
+                v,
+                GEN_STOREYS_BOUNDS.lo,
+                GEN_STOREYS_BOUNDS.hi,
+                true,
+              ),
+            })
+          }
         />
         <SliderRow
           label="Shopfront share"
@@ -888,7 +936,7 @@ function BlockInspector({
           onChange={(shopfrontShare) => update({ shopfrontShare })}
         />
         <SliderRow
-          label="Variation"
+          label="Style variation"
           value={gen.variation}
           display={`${Math.round(gen.variation * 100)}%`}
           min={0}

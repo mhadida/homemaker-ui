@@ -40,6 +40,7 @@ import type { Corner } from "@/lib/facade/corners";
 import type { Ground } from "@/lib/facade/terrain";
 import { groundHeightAt } from "@/lib/facade/terrain";
 import { walkStep, EYE_HEIGHT, type WalkKeys } from "@/lib/facade/walk";
+import { snapToGrid } from "@/lib/facade/grid";
 import { marqueeEmpty, type Marquee } from "@/lib/facade/marquee";
 import {
   streetLines,
@@ -63,10 +64,14 @@ interface FacadeViewerProps {
   ) => string;
   /** Flip the facing of a set of blocks at once (the chain being drawn). */
   onFlipChain: (ids: string[]) => void;
+  /** Backspace mid-chain: delete the last committed segment's block. */
+  onUndoSegment: (blockId: string) => void;
   onMoveNode: (from: [number, number], to: [number, number]) => boolean;
   /** Drag a vertex of the selected street (welded junctions move as one).
    * Returns false to reject — the handle sticks. */
   onMoveStreetNode: (from: [number, number], to: [number, number]) => boolean;
+  /** Wipe the whole scene (Select-mode Clear-all button, two-step confirm). */
+  onClearAll: () => void;
   view?: ViewSettings;
   onDrawModeChange?: (drawMode: boolean) => void;
   corners: Corner[];
@@ -175,8 +180,11 @@ function PenSurface({
   active,
   onCommitLine,
   onFlipChain,
+  onUndoSegment,
   streetRef,
   streetWidth,
+  gridSnap,
+  gridAngle,
 }: {
   blocks: FacadeBlock[];
   active: boolean;
@@ -186,8 +194,14 @@ function PenSurface({
     flipped: boolean,
   ) => string;
   onFlipChain: (ids: string[]) => void;
+  /** Backspace mid-chain: delete the last committed segment's block. */
+  onUndoSegment: (blockId: string) => void;
   streetRef: StreetRef | null;
   streetWidth: number;
+  /** Rectilinear grid lock: snap placed points to a rotated 5 m grid.
+   * Weld snapping runs after and wins. */
+  gridSnap: boolean;
+  gridAngle: number;
 }) {
   const [path, setPath] = useState<[number, number][]>([]);
   const [cursor, setCursor] = useState<[number, number] | null>(null);
@@ -208,10 +222,14 @@ function PenSurface({
   // live committed-chain ids and the current flip callback without re-binding.
   // Synced in a deps-less effect — mirrors NodeHandles' endDragRef pattern.
   const chainIdsRef = useRef<string[]>([]);
+  const pathRef = useRef<[number, number][]>([]);
   const onFlipChainRef = useRef(onFlipChain);
+  const onUndoSegmentRef = useRef(onUndoSegment);
   useEffect(() => {
     chainIdsRef.current = chainIds;
+    pathRef.current = path;
     onFlipChainRef.current = onFlipChain;
+    onUndoSegmentRef.current = onUndoSegment;
   });
 
   const resetChain = () => {
@@ -257,6 +275,25 @@ function PenSurface({
         // segment already committed in this chain, so it stays consistent.
         setFFlip((v) => !v);
         onFlipChainRef.current(chainIdsRef.current);
+      } else if (
+        e.key === "Backspace" ||
+        e.key === "Delete" ||
+        ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z")
+      ) {
+        // Step back one node: delete the last committed segment's block and
+        // rewind the chain anchor. On the bare anchor, drop the chain.
+        const p = pathRef.current;
+        if (p.length === 0) return;
+        e.preventDefault();
+        if (p.length === 1) {
+          resetChain();
+          return;
+        }
+        const ids = chainIdsRef.current;
+        const lastId = ids[ids.length - 1];
+        if (lastId) onUndoSegmentRef.current(lastId);
+        setChainIds((c) => c.slice(0, -1));
+        setPath((pp) => pp.slice(0, -1));
       }
     };
     window.addEventListener("keydown", onKey);
@@ -298,7 +335,10 @@ function PenSurface({
         position={[0, 0.02, 0]}
         onPointerDown={(e) => {
           e.stopPropagation();
-          const p = snapPoint([e.point.x, e.point.z], blocks);
+          const raw: [number, number] = gridSnap
+            ? snapToGrid([e.point.x, e.point.z], gridAngle)
+            : [e.point.x, e.point.z];
+          const p = snapPoint(raw, blocks);
           if (path.length === 0) {
             setPath([p]);
             return;
@@ -326,7 +366,14 @@ function PenSurface({
           }
         }}
         onPointerMove={(e) =>
-          setCursor(snapPoint([e.point.x, e.point.z], blocks))
+          setCursor(
+            snapPoint(
+              gridSnap
+                ? snapToGrid([e.point.x, e.point.z], gridAngle)
+                : [e.point.x, e.point.z],
+              blocks,
+            ),
+          )
         }
       >
         <planeGeometry args={[600, 600]} />
@@ -383,11 +430,17 @@ function StreetDrawSurface({
   activeType,
   onCommitStreet,
   network,
+  gridSnap,
+  gridAngle,
 }: {
   active: boolean;
   activeType: StreetType;
   onCommitStreet: (type: StreetType, points: Vec2[], closed?: boolean) => void;
   network: StreetNetwork;
+  /** Rectilinear grid lock (rotated 5 m grid); street/junction snapping
+   * runs after and wins. */
+  gridSnap: boolean;
+  gridAngle: number;
 }) {
   const [path, setPath] = useState<Vec2[]>([]);
   const [cursor, setCursor] = useState<Vec2 | null>(null);
@@ -425,6 +478,16 @@ function StreetDrawSurface({
       if (e.key === "Escape") {
         if (path.length >= 2) onCommitStreet(activeType, path);
         resetPath();
+      } else if (
+        e.key === "Backspace" ||
+        e.key === "Delete" ||
+        ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z")
+      ) {
+        // Step back one placed vertex of the in-progress polyline.
+        if (path.length > 0) {
+          e.preventDefault();
+          setPath((p) => p.slice(0, -1));
+        }
       }
     };
     window.addEventListener("keydown", onKey);
@@ -446,7 +509,9 @@ function StreetDrawSurface({
         position={[0, 0.02, 0]}
         onPointerDown={(e) => {
           e.stopPropagation();
-          const raw: Vec2 = [e.point.x, e.point.z];
+          const raw: Vec2 = gridSnap
+            ? snapToGrid([e.point.x, e.point.z], gridAngle)
+            : [e.point.x, e.point.z];
           const p = snapStreetPoint(raw, network, 1);
           if (path.length === 0) {
             setPath([p]);
@@ -465,7 +530,9 @@ function StreetDrawSurface({
           setPath([...path, p]);
         }}
         onPointerMove={(e) => {
-          const raw: Vec2 = [e.point.x, e.point.z];
+          const raw: Vec2 = gridSnap
+            ? snapToGrid([e.point.x, e.point.z], gridAngle)
+            : [e.point.x, e.point.z];
           const snappedPoint = snapStreetPoint(raw, network, 1);
           setCursor(snappedPoint);
           setSnapped(snappedPoint[0] !== raw[0] || snappedPoint[1] !== raw[1]);
@@ -1158,8 +1225,11 @@ function PlanPane({
   onCommitStreet,
   onCommitLine,
   onFlipChain,
+  onUndoSegment,
   onMoveNode,
   onMoveStreetNode,
+  gridSnap,
+  gridAngle,
   corners,
   onSelectCorner,
   maxCornerAngle,
@@ -1194,8 +1264,11 @@ function PlanPane({
     flipped: boolean,
   ) => string;
   onFlipChain: (ids: string[]) => void;
+  onUndoSegment: (blockId: string) => void;
   onMoveNode: (from: [number, number], to: [number, number]) => boolean;
   onMoveStreetNode: (from: [number, number], to: [number, number]) => boolean;
+  gridSnap: boolean;
+  gridAngle: number;
   corners: Corner[];
   onSelectCorner: (key: string) => void;
   maxCornerAngle: number;
@@ -1302,6 +1375,7 @@ function PlanPane({
         onSelectStreet={onSelectStreet}
         selectedIntersection={selectedIntersection}
         onSelectIntersection={onSelectIntersection}
+        gridAngleDeg={gridSnap ? gridAngle : null}
       />
       <StreetGuides streetRef={streetRef} streetWidth={streetWidth} />
       <PenSurface
@@ -1309,8 +1383,11 @@ function PlanPane({
         active={drawMode}
         onCommitLine={onCommitLine}
         onFlipChain={onFlipChain}
+        onUndoSegment={onUndoSegment}
         streetRef={streetRef}
         streetWidth={streetWidth}
+        gridSnap={gridSnap}
+        gridAngle={gridAngle}
       />
       <MarqueeSurface
         blocks={blocks}
@@ -1328,6 +1405,8 @@ function PlanPane({
         activeType={activeStreetType}
         onCommitStreet={onCommitStreet}
         network={streetNetwork}
+        gridSnap={gridSnap}
+        gridAngle={gridAngle}
       />
       <NodeHandles
         blocks={blocks}
@@ -1721,8 +1800,10 @@ export default function FacadeViewer({
   onSelectLot,
   onCommitLine,
   onFlipChain,
+  onUndoSegment,
   onMoveNode,
   onMoveStreetNode,
+  onClearAll,
   view = FACADE_DEFAULT_VIEW,
   onDrawModeChange,
   corners,
@@ -1767,14 +1848,23 @@ export default function FacadeViewer({
   // The Select tool (marquee). Mutually exclusive with draw mode; off by
   // default so every existing path is byte-identical.
   const [selectMode, setSelectMode] = useState(false);
+  // Two-step confirm for the select-mode Clear-all button.
+  const [confirmClear, setConfirmClear] = useState(false);
   // The street tool (draws the standalone road network). Mutually exclusive
   // with the other two; off by default so every existing path is
   // byte-identical.
   const [streetDrawMode, setStreetDrawMode] = useState(false);
   const [activeStreetType, setActiveStreetType] = useState<StreetType>("street");
+  // Rectilinear grid lock for the path tools: snap to a 5 m grid rotated
+  // gridAngle degrees from north. Off by default (byte-identical drawing).
+  const [gridSnap, setGridSnap] = useState(false);
+  const [gridAngle, setGridAngle] = useState(0);
   useEffect(() => {
-    onDrawModeChange?.(drawMode);
-  }, [drawMode, onDrawModeChange]);
+    // "Sketching" for the page means ANY path tool is mid-flight — the pen
+    // or the road tool — so the page's global Delete/⌘A shortcuts stay out
+    // of the way of Backspace-undo while drawing.
+    onDrawModeChange?.(drawMode || streetDrawMode);
+  }, [drawMode, streetDrawMode, onDrawModeChange]);
   // Arm the pen only when the world is TRULY empty — no blocks AND no streets
   // (e.g. a fresh session, or the last block deleted with no roads drawn). A
   // streets-only scene is a valid, common state (streets are the primary
@@ -1898,8 +1988,11 @@ export default function FacadeViewer({
             onCommitStreet={onCommitStreet}
             onCommitLine={onCommitLine}
             onFlipChain={onFlipChain}
+            onUndoSegment={onUndoSegment}
             onMoveNode={onMoveNode}
             onMoveStreetNode={onMoveStreetNode}
+            gridSnap={gridSnap}
+            gridAngle={gridAngle}
             corners={corners}
             onSelectCorner={onSelectCorner}
             maxCornerAngle={maxCornerAngle}
@@ -2082,6 +2175,30 @@ export default function FacadeViewer({
                     {selectMode ? "⬚ Selecting — Esc" : "⬚ Select"}
                   </button>
                 )}
+                {selectMode && (
+                  /* Testing convenience: wipe the whole scene. Select-mode
+                   * only (deliberate context, can't fat-finger while
+                   * drawing) + two-step confirm — it deletes everything. */
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (confirmClear) {
+                        setConfirmClear(false);
+                        onClearAll();
+                      } else {
+                        setConfirmClear(true);
+                        window.setTimeout(() => setConfirmClear(false), 3000);
+                      }
+                    }}
+                    className={`flex h-7 items-center gap-1.5 rounded-full px-3 text-[11px] font-medium shadow-lg transition-colors ${
+                      confirmClear
+                        ? "bg-red-600 text-white"
+                        : "bg-white/90 text-zinc-900 hover:bg-white"
+                    }`}
+                  >
+                    {confirmClear ? "⚠ Clear everything?" : "🗑 Clear all"}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={toggleStreetDraw}
@@ -2114,6 +2231,34 @@ export default function FacadeViewer({
                       </option>
                     ))}
                   </select>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setGridSnap((g) => !g)}
+                  aria-pressed={gridSnap}
+                  title="Lock drawing to a rectilinear 5 m grid"
+                  className={`flex h-7 items-center gap-1.5 rounded-full px-3 text-[11px] font-medium shadow-lg transition-colors ${
+                    gridSnap
+                      ? "bg-zinc-700 text-white"
+                      : "bg-white/90 text-zinc-900 hover:bg-white"
+                  }`}
+                >
+                  ⌗ Grid
+                </button>
+                {gridSnap && (
+                  <label className="flex h-7 items-center gap-1.5 rounded-full bg-white/90 px-3 text-[11px] font-medium text-zinc-900 shadow-lg">
+                    <input
+                      type="range"
+                      min={-90}
+                      max={90}
+                      step={5}
+                      value={gridAngle}
+                      onChange={(e) => setGridAngle(Number(e.target.value))}
+                      aria-label="Grid angle from north"
+                      className="w-20 accent-zinc-700"
+                    />
+                    {gridAngle}°
+                  </label>
                 )}
               </div>
             )}
