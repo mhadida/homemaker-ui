@@ -274,6 +274,7 @@ export default function SceneContents({
   onSelectStreet,
   selectedIntersection = null,
   onSelectIntersection,
+  gridAngleDeg = null,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -281,6 +282,9 @@ export default function SceneContents({
   view: ViewSettings;
   maxCornerAngle: number;
   ground: Ground;
+  /** Rotate the drawn grid to the drawing-grid angle while grid lock is on
+   * (plan pane). null → axis-aligned, byte-identical. */
+  gridAngleDeg?: number | null;
   /** Live marquee selection to highlight (blocks/lots via SelectionMarker,
    * nodes via a gold ring). null → no marquee (byte-identical). */
   marquee?: Marquee | null;
@@ -445,36 +449,40 @@ export default function SceneContents({
         </mesh>
 
         {/* drei's Grid is a GLSL ShaderMaterial the node renderer can't
-         * compile; NodeGrid is its TSL port with identical parameters. */}
-        {isWebGPUPath() ? (
-          <NodeGrid
-            position={[0, 0, 0]}
-            args={[60, 60]}
-            cellSize={1}
-            cellThickness={0.7}
-            cellColor="#1f1d1b"
-            sectionSize={5}
-            sectionThickness={1.4}
-            sectionColor="#0d0c0b"
-            fadeDistance={70}
-            fadeStrength={1.2}
-            infiniteGrid
-          />
-        ) : (
-          <Grid
-            position={[0, 0, 0]}
-            args={[60, 60]}
-            cellSize={1}
-            cellThickness={0.7}
-            cellColor="#1f1d1b"
-            sectionSize={5}
-            sectionThickness={1.4}
-            sectionColor="#0d0c0b"
-            fadeDistance={70}
-            fadeStrength={1.2}
-            infiniteGrid
-          />
-        )}
+         * compile; NodeGrid is its TSL port with identical parameters. The
+         * wrapper group spins the grid to the drawing-grid angle while grid
+         * lock is on (5 m sections = the snap spacing). */}
+        <group rotation={[0, ((gridAngleDeg ?? 0) * Math.PI) / 180, 0]}>
+          {isWebGPUPath() ? (
+            <NodeGrid
+              position={[0, 0, 0]}
+              args={[60, 60]}
+              cellSize={1}
+              cellThickness={0.7}
+              cellColor="#1f1d1b"
+              sectionSize={5}
+              sectionThickness={1.4}
+              sectionColor="#0d0c0b"
+              fadeDistance={70}
+              fadeStrength={1.2}
+              infiniteGrid
+            />
+          ) : (
+            <Grid
+              position={[0, 0, 0]}
+              args={[60, 60]}
+              cellSize={1}
+              cellThickness={0.7}
+              cellColor="#1f1d1b"
+              sectionSize={5}
+              sectionThickness={1.4}
+              sectionColor="#0d0c0b"
+              fadeDistance={70}
+              fadeStrength={1.2}
+              infiniteGrid
+            />
+          )}
+        </group>
       </group>
 
       {/* drei's ContactShadows renders the scene through a MeshDepthMaterial,
