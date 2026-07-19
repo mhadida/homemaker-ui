@@ -287,16 +287,33 @@ export function syncCorners(
     const choice = cornerChoice(choices, corner, blocks);
     const src = corner[srcSide];
     const dst = corner[dstSide];
+    // A unified corner's merged mass carries ONE L-roof whose ridges follow
+    // both streets — "perpendicular" has no meaning across the L, so force
+    // the source to parallel BEFORE it becomes the sync template. Straight
+    // blocks and two-facades corners keep per-wing orientation.
+    if (choice.mode === "unified") {
+      const s = get(src.blockId).lots[src.lotIndex];
+      if ((s.params.roofOrientation ?? "parallel") !== "parallel") {
+        patchLot(src, { ...s.params, roofOrientation: "parallel" }, false);
+      }
+    }
     // Read the CURRENT (possibly already-patched) state so propagation
     // carries forward through lots that a prior step in this same call
     // already synced — that's what lets the shell cross a chain.
     const srcLot = get(src.blockId).lots[src.lotIndex];
     const dstLot = get(dst.blockId).lots[dst.lotIndex];
-    patchLot(
-      dst,
-      syncedParams(srcLot.params, dstLot.params, choice.mode === "unified"),
-      true,
+    const synced = syncedParams(
+      srcLot.params,
+      dstLot.params,
+      choice.mode === "unified",
     );
+    // The destination follows to parallel in unified mode too.
+    const withOrient =
+      choice.mode === "unified" &&
+      ((synced ?? dstLot.params).roofOrientation ?? "parallel") !== "parallel"
+        ? { ...(synced ?? dstLot.params), roofOrientation: "parallel" as const }
+        : synced;
+    patchLot(dst, withOrient, true);
     patchLot(src, null, true); // depthOffset zeroing on the source side too
   };
 
@@ -406,5 +423,49 @@ export function miterFor(corner: Corner): { a: number; b: number } {
       ? base
       : -Math.min((Math.tan(turnRad / 2) * WALL_THICKNESS) / 2, CONCAVE_TRIM_MAX),
     b: 0,
+  };
+}
+
+/** Matches miterFor's 3×thickness cap; turn is capped at 150° where
+ * tan(75°) ≈ 3.73, so the cap binds only on the sharpest corners. */
+export const MASS_MITER_MAX = 3;
+
+/** The MASSING analogue of miterFor: how far side a's body box extends so a
+ * unified convex corner's elbow (massingDepth × massingDepth at 90°) is
+ * solid instead of a void. Same formula as the wall miter with the mass
+ * depth in place of WALL_THICKNESS; side b butts (extending both would
+ * double-fill). Concave boxes already interpenetrate — zero. */
+export function massMiterFor(corner: Corner, depth: number): { a: number; b: number } {
+  if (!corner.convex) return { a: 0, b: 0 };
+  const turnRad = (corner.turn * Math.PI) / 180;
+  const base = Math.min(Math.tan(turnRad / 2) * depth, MASS_MITER_MAX * depth);
+  if (base < 1e-9) return { a: 0, b: 0 };
+  return { a: base, b: 0 };
+}
+
+/** The corner-local frame the L-roof and elbow fill are computed in: the
+ * node, each wing's inward direction + outward facade normal, and the two
+ * corner-lot widths (2026-07-17 corner-l-roof spec). */
+export interface CornerFrame {
+  V: [number, number];
+  uA: [number, number];
+  uB: [number, number];
+  nA: [number, number];
+  nB: [number, number];
+  Wa: number;
+  Wb: number;
+}
+
+export function cornerFrame(corner: Corner, blocks: FacadeBlock[]): CornerFrame {
+  const A = blocks.find((b) => b.id === corner.a.blockId)!;
+  const B = blocks.find((b) => b.id === corner.b.blockId)!;
+  return {
+    V: [corner.node[0], corner.node[1]],
+    uA: awayDir(A, corner.a.end),
+    uB: awayDir(B, corner.b.end),
+    nA: blockFrame(A).normal,
+    nB: blockFrame(B).normal,
+    Wa: A.lots[corner.a.lotIndex].params.width,
+    Wb: B.lots[corner.b.lotIndex].params.width,
   };
 }

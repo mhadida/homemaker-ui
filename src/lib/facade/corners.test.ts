@@ -5,6 +5,8 @@ import {
   cornerChoice,
   miterFor,
   SHELL_FIELDS,
+  massMiterFor,
+  type Corner,
   type CornerChoice,
 } from "./corners";
 import { DEFAULT_GEN, type FacadeBlock } from "./blocks";
@@ -417,5 +419,35 @@ describe("syncCorners section flattening", () => {
     const before = A.lots[0].params.sections;
     const out = syncCorners([A, B], new Map(), 150);
     expect(out[0].lots[0].params.sections).toBe(before);
+  });
+});
+
+describe("massMiterFor", () => {
+  const corner = (turn: number, convex: boolean): Corner => ({
+    key: "A:b|B:a",
+    node: [0, 0],
+    a: { blockId: "A", end: "b", lotIndex: 0, lotSide: "right" },
+    b: { blockId: "B", end: "a", lotIndex: 0, lotSide: "left" },
+    turn,
+    convex,
+  });
+
+  it("a convex 90° corner extends side a by tan(45°)·D = D", () => {
+    const m = massMiterFor(corner(90, true), 10);
+    expect(m.a).toBeCloseTo(10);
+    expect(m.b).toBe(0);
+  });
+
+  it("concave corners get no extension (boxes already overlap)", () => {
+    expect(massMiterFor(corner(90, false), 10)).toEqual({ a: 0, b: 0 });
+  });
+
+  it("caps at MASS_MITER_MAX × depth on the sharpest turns", () => {
+    // tan(74°) ≈ 3.49 > 3 → capped
+    expect(massMiterFor(corner(148, true), 10).a).toBe(30);
+  });
+
+  it("a straight-through junction extends nothing", () => {
+    expect(massMiterFor(corner(0, true), 10)).toEqual({ a: 0, b: 0 });
   });
 });
