@@ -95,6 +95,10 @@ export interface CornerChoice {
   /** Which side is the design source in unified mode (and the default
    * shell source when no edited side is known). */
   primary: "a" | "b";
+  /** Corner turret on a unified corner: a round tower straddling the node —
+   * full-height ("ground") or corbelled out above the first floor
+   * ("corbel"). Sparse; absent = "none" (byte-identical). */
+  turret?: "none" | "ground" | "corbel";
 }
 
 /** The shared shell — the single source of truth for what "one building"

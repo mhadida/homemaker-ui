@@ -33,6 +33,7 @@ import {
 } from "@/lib/facade/corners";
 import { cornerRoofPlan, type CornerRoofPlan } from "@/lib/facade/cornerRoof";
 import CornerRoofMesh from "./CornerRoofMesh";
+import TurretMesh from "./TurretMesh";
 import { ROOF_COLORS } from "./FacadeMesh";
 import type { Marquee } from "@/lib/facade/marquee";
 import {
@@ -376,11 +377,23 @@ export default function SceneContents({
   // unified or a precondition fails — every path falls back byte-identical.
   const cornerMerge = useMemo(() => {
     const roofs: { key: string; plan: CornerRoofPlan; datum: number; color: string }[] = [];
+    const turrets: {
+      key: string;
+      x: number;
+      z: number;
+      datum: number;
+      baseY: number;
+      wallTop: number;
+      corbelled: boolean;
+      wallColor: string;
+      trimColor: string;
+      roofColor: string;
+    }[] = [];
     const massMiters = new Map<string, LotMiter>();
     const noRoof = new Set<string>();
     const datumOverride = new Map<string, number>();
     if (!cornerChoices || corners.length === 0)
-      return { roofs, massMiters, noRoof, datumOverride };
+      return { roofs, turrets, massMiters, noRoof, datumOverride };
     const byId = new Map(blocks.map((b) => [b.id, b]));
     for (const c of corners) {
       const choice = cornerChoice(cornerChoices, c, blocks);
@@ -424,6 +437,24 @@ export default function SceneContents({
       datumOverride.set(`${c.a.blockId}:${c.a.lotIndex}`, datum);
       datumOverride.set(`${c.b.blockId}:${c.b.lotIndex}`, datum);
 
+      // Corner turret — straddles the node; independent of the roof
+      // preconditions (a flat-roofed corner can still carry one).
+      const turret = choice.turret ?? "none";
+      if (turret !== "none") {
+        turrets.push({
+          key: c.key,
+          x: c.node[0],
+          z: c.node[1],
+          datum,
+          baseY: turret === "corbel" ? (pLayout.storeyLevels[1] ?? 0) : 0,
+          wallTop: pLayout.wallTop,
+          corbelled: turret === "corbel",
+          wallColor: pLot.params.wallColor,
+          trimColor: pLot.params.trimColor,
+          roofColor: ROOF_COLORS[pLot.params.roofColor ?? "slate"],
+        });
+      }
+
       // One L-roof only when every precondition holds; otherwise the wings
       // keep their independent tents exactly as today.
       if (!pLayout.roof) continue; // flat — the fill above still applies
@@ -456,7 +487,7 @@ export default function SceneContents({
       noRoof.add(`${c.a.blockId}:${c.a.lotIndex}`);
       noRoof.add(`${c.b.blockId}:${c.b.lotIndex}`);
     }
-    return { roofs, massMiters, noRoof, datumOverride };
+    return { roofs, turrets, massMiters, noRoof, datumOverride };
   }, [cornerChoices, corners, blocks, miters, ground]);
   // Both corner-side lots to highlight when a corner is selected. Null when
   // no corner is selected OR the selected corner has dissolved (angle change
@@ -534,6 +565,10 @@ export default function SceneContents({
        * replacing the two suppressed per-wing tents. */}
       {cornerMerge.roofs.map((r) => (
         <CornerRoofMesh key={r.key} plan={r.plan} datum={r.datum} color={r.color} />
+      ))}
+      {/* Corner turrets (round towers straddling unified corner nodes). */}
+      {cornerMerge.turrets.map(({ key, ...t }) => (
+        <TurretMesh key={`turret-${key}`} {...t} />
       ))}
       {/* Scene-wide window glass + frames as two InstancedMeshes (perf). The
        * per-block FacadeMesh skips WindowFill under USE_INSTANCING. */}

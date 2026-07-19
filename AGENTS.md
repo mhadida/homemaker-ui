@@ -132,7 +132,10 @@ NOT involved; every edit is live (no Update button). Spec:
   only. Any failed precondition (flat roof, unequal depths/wallTops,
   perpendicular orientation, concave wing ≤ D/2) falls back to today's
   independent tents, byte-identical. Assembly in `SceneContents`
-  (`cornerMerge` memo → `CornerRoofMesh`). Spec:
+  (`cornerMerge` memo → `CornerRoofMesh`). A unified corner can also carry
+  a **corner turret** (`CornerChoice.turret`: none / to-ground / corbelled
+  above the first floor — inspector row; `TurretMesh` renders the round
+  shaft + cone straddling the node in the shell's colors). Spec:
   `docs/superpowers/specs/2026-07-17-corner-l-roof-design.md`.
 - **Sections**: one lot's facade divides into vertical strips of whole bays
   with ±15 cm perpendicular relief (`FacadeParams.sections`, sparse — absent

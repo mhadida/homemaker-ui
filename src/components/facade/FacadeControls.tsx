@@ -780,6 +780,36 @@ function CornerInspector({
             ? `Faces mirror Street ${choice.primary.toUpperCase()} — windows, bays, ground floor.`
             : "Each frontage keeps its own windows, bays, and ground floor."}
         </p>
+        {choice.mode === "unified" && (
+          <>
+            <span className="text-[10px] text-[var(--muted)] block">
+              Corner turret
+            </span>
+            <div className="grid grid-cols-3 gap-1">
+              <Toggle
+                label="None"
+                on={(choice.turret ?? "none") === "none"}
+                onClick={() =>
+                  onCornerChoice(data.key, { ...choice, turret: "none" })
+                }
+              />
+              <Toggle
+                label="To ground"
+                on={choice.turret === "ground"}
+                onClick={() =>
+                  onCornerChoice(data.key, { ...choice, turret: "ground" })
+                }
+              />
+              <Toggle
+                label="Corbelled"
+                on={choice.turret === "corbel"}
+                onClick={() =>
+                  onCornerChoice(data.key, { ...choice, turret: "corbel" })
+                }
+              />
+            </div>
+          </>
+        )}
       </Section>
       <DetectionSection
         maxCornerAngle={maxCornerAngle}
