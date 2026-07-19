@@ -63,6 +63,8 @@ interface FacadeViewerProps {
   ) => string;
   /** Flip the facing of a set of blocks at once (the chain being drawn). */
   onFlipChain: (ids: string[]) => void;
+  /** Backspace mid-chain: delete the last committed segment's block. */
+  onUndoSegment: (blockId: string) => void;
   onMoveNode: (from: [number, number], to: [number, number]) => boolean;
   /** Drag a vertex of the selected street (welded junctions move as one).
    * Returns false to reject — the handle sticks. */
@@ -177,6 +179,7 @@ function PenSurface({
   active,
   onCommitLine,
   onFlipChain,
+  onUndoSegment,
   streetRef,
   streetWidth,
 }: {
@@ -188,6 +191,8 @@ function PenSurface({
     flipped: boolean,
   ) => string;
   onFlipChain: (ids: string[]) => void;
+  /** Backspace mid-chain: delete the last committed segment's block. */
+  onUndoSegment: (blockId: string) => void;
   streetRef: StreetRef | null;
   streetWidth: number;
 }) {
@@ -210,10 +215,14 @@ function PenSurface({
   // live committed-chain ids and the current flip callback without re-binding.
   // Synced in a deps-less effect — mirrors NodeHandles' endDragRef pattern.
   const chainIdsRef = useRef<string[]>([]);
+  const pathRef = useRef<[number, number][]>([]);
   const onFlipChainRef = useRef(onFlipChain);
+  const onUndoSegmentRef = useRef(onUndoSegment);
   useEffect(() => {
     chainIdsRef.current = chainIds;
+    pathRef.current = path;
     onFlipChainRef.current = onFlipChain;
+    onUndoSegmentRef.current = onUndoSegment;
   });
 
   const resetChain = () => {
@@ -259,6 +268,25 @@ function PenSurface({
         // segment already committed in this chain, so it stays consistent.
         setFFlip((v) => !v);
         onFlipChainRef.current(chainIdsRef.current);
+      } else if (
+        e.key === "Backspace" ||
+        e.key === "Delete" ||
+        ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z")
+      ) {
+        // Step back one node: delete the last committed segment's block and
+        // rewind the chain anchor. On the bare anchor, drop the chain.
+        const p = pathRef.current;
+        if (p.length === 0) return;
+        e.preventDefault();
+        if (p.length === 1) {
+          resetChain();
+          return;
+        }
+        const ids = chainIdsRef.current;
+        const lastId = ids[ids.length - 1];
+        if (lastId) onUndoSegmentRef.current(lastId);
+        setChainIds((c) => c.slice(0, -1));
+        setPath((pp) => pp.slice(0, -1));
       }
     };
     window.addEventListener("keydown", onKey);
@@ -427,6 +455,16 @@ function StreetDrawSurface({
       if (e.key === "Escape") {
         if (path.length >= 2) onCommitStreet(activeType, path);
         resetPath();
+      } else if (
+        e.key === "Backspace" ||
+        e.key === "Delete" ||
+        ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z")
+      ) {
+        // Step back one placed vertex of the in-progress polyline.
+        if (path.length > 0) {
+          e.preventDefault();
+          setPath((p) => p.slice(0, -1));
+        }
       }
     };
     window.addEventListener("keydown", onKey);
@@ -1160,6 +1198,7 @@ function PlanPane({
   onCommitStreet,
   onCommitLine,
   onFlipChain,
+  onUndoSegment,
   onMoveNode,
   onMoveStreetNode,
   corners,
@@ -1196,6 +1235,7 @@ function PlanPane({
     flipped: boolean,
   ) => string;
   onFlipChain: (ids: string[]) => void;
+  onUndoSegment: (blockId: string) => void;
   onMoveNode: (from: [number, number], to: [number, number]) => boolean;
   onMoveStreetNode: (from: [number, number], to: [number, number]) => boolean;
   corners: Corner[];
@@ -1311,6 +1351,7 @@ function PlanPane({
         active={drawMode}
         onCommitLine={onCommitLine}
         onFlipChain={onFlipChain}
+        onUndoSegment={onUndoSegment}
         streetRef={streetRef}
         streetWidth={streetWidth}
       />
@@ -1723,6 +1764,7 @@ export default function FacadeViewer({
   onSelectLot,
   onCommitLine,
   onFlipChain,
+  onUndoSegment,
   onMoveNode,
   onMoveStreetNode,
   onClearAll,
@@ -1778,8 +1820,11 @@ export default function FacadeViewer({
   const [streetDrawMode, setStreetDrawMode] = useState(false);
   const [activeStreetType, setActiveStreetType] = useState<StreetType>("street");
   useEffect(() => {
-    onDrawModeChange?.(drawMode);
-  }, [drawMode, onDrawModeChange]);
+    // "Sketching" for the page means ANY path tool is mid-flight — the pen
+    // or the road tool — so the page's global Delete/⌘A shortcuts stay out
+    // of the way of Backspace-undo while drawing.
+    onDrawModeChange?.(drawMode || streetDrawMode);
+  }, [drawMode, streetDrawMode, onDrawModeChange]);
   // Arm the pen only when the world is TRULY empty — no blocks AND no streets
   // (e.g. a fresh session, or the last block deleted with no roads drawn). A
   // streets-only scene is a valid, common state (streets are the primary
@@ -1903,6 +1948,7 @@ export default function FacadeViewer({
             onCommitStreet={onCommitStreet}
             onCommitLine={onCommitLine}
             onFlipChain={onFlipChain}
+            onUndoSegment={onUndoSegment}
             onMoveNode={onMoveNode}
             onMoveStreetNode={onMoveStreetNode}
             corners={corners}

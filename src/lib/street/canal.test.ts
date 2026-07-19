@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { canalOffsets, canalWaterY, CANAL_WATER_DEPTH, bridgesFor, bridgeArch } from "./canal";
+import { canalOffsets, canalWaterY, canalGradeAdvisory, CANAL_WATER_DEPTH, bridgesFor, bridgeArch } from "./canal";
 import { STREET_SPECS } from "./types";
-import type { Vec2, StreetNetwork } from "./types";
+import type { Street, Vec2, StreetNetwork } from "./types";
 import { groundHeightAt } from "@/lib/facade/terrain";
 import { deriveIntersections } from "./intersections";
 
@@ -80,5 +80,44 @@ describe("canal bridges", () => {
     const zs = tris.map((t) => t[2]);
     expect(Math.max(...zs)).toBeCloseTo(1.5, 6);        // deckWidth/2
     expect(Math.min(...zs)).toBeCloseTo(-1.5, 6);
+  });
+});
+
+describe("canalGradeAdvisory", () => {
+  const canal = (points: [number, number][]): Street => ({
+    id: "c",
+    type: "canal",
+    points,
+  });
+
+  it("null on flat ground", () => {
+    expect(
+      canalGradeAdvisory(canal([[0, 0], [50, 0]]), { slope: 0, azimuth: 0 }),
+    ).toBeNull();
+  });
+
+  it("null for a canal along the contour of a slope", () => {
+    // azimuth 0 slopes along +z; a canal running along x stays level
+    expect(
+      canalGradeAdvisory(canal([[0, 0], [80, 0]]), { slope: 0.1, azimuth: 0 }),
+    ).toBeNull();
+  });
+
+  it("calls out a canal climbing a slope", () => {
+    // running along z on a 10% z-slope over 80 m → ~8 m rise
+    const msg = canalGradeAdvisory(canal([[0, 0], [0, 80]]), {
+      slope: 0.1,
+      azimuth: 0,
+    });
+    expect(msg).toMatch(/climbs/);
+  });
+
+  it("ignores non-canals on any slope", () => {
+    expect(
+      canalGradeAdvisory(
+        { id: "s", type: "street", points: [[0, 0], [0, 80]] },
+        { slope: 0.1, azimuth: 0 },
+      ),
+    ).toBeNull();
   });
 });

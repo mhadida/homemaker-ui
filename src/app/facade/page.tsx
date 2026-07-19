@@ -52,6 +52,7 @@ import {
 } from "@/lib/street/types";
 import { deriveIntersections, moveStreetNode, pruneRoundabouts } from "@/lib/street/intersections";
 import { streetAdvisory } from "@/lib/street/geometry";
+import { canalGradeAdvisory } from "@/lib/street/canal";
 import {
   syncCorners,
   detectCorners,
@@ -712,6 +713,23 @@ export default function FacadePage() {
     setSelectedStreet(null);
   }, []);
 
+  /** Backspace mid-chain in the pen: remove the just-committed segment's
+   * block (the chain anchor rewinds in PenSurface). Same corner re-sync as
+   * every block removal. */
+  const handleUndoSegment = useCallback(
+    (blockId: string) => {
+      setBlocks((bs) =>
+        syncCorners(
+          bs.filter((b) => b.id !== blockId),
+          cornerChoices,
+          maxCornerAngle,
+        ),
+      );
+      setSelected((s) => (s?.blockId === blockId ? null : s));
+    },
+    [cornerChoices, maxCornerAngle],
+  );
+
   /** Wipe the whole scene (the Select-mode Clear-all button; the button
    * itself carries the two-step confirm). Content only — view settings,
    * ground and street width survive. Also drops the autosave so a refresh
@@ -1184,6 +1202,7 @@ export default function FacadePage() {
             onFlipChain={handleFlipChain}
             onMoveNode={handleMoveNode}
             onMoveStreetNode={handleMoveStreetNode}
+            onUndoSegment={handleUndoSegment}
             onClearAll={handleClearAll}
             view={view}
             onDrawModeChange={setDrawActive}
@@ -1221,7 +1240,10 @@ export default function FacadePage() {
             ) : selectedStreetObj ? (
               <StreetInspector
                 street={selectedStreetObj}
-                advisory={streetAdvisory(selectedStreetObj)}
+                advisory={
+                  canalGradeAdvisory(selectedStreetObj, ground) ??
+                  streetAdvisory(selectedStreetObj)
+                }
                 onChange={handleStreetChange}
                 onDelete={() => handleDeleteStreet(selectedStreetObj.id)}
               />

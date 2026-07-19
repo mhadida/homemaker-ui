@@ -114,6 +114,9 @@ export const SHELL_FIELDS = [
   "dormers",
   "gableStyle",
   "gableHeight",
+  // The corner L-roof needs one gradient across both wings, so the mass
+  // depth is shell too (2026-07-17 corner-l-roof spec).
+  "massingDepth",
 ] as const;
 
 const lotOf = (blocks: FacadeBlock[], side: CornerSide) =>
