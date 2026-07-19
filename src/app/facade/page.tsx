@@ -712,6 +712,25 @@ export default function FacadePage() {
     setSelectedStreet(null);
   }, []);
 
+  /** Wipe the whole scene (the Select-mode Clear-all button; the button
+   * itself carries the two-step confirm). Content only — view settings,
+   * ground and street width survive. Also drops the autosave so a refresh
+   * doesn't resurrect the cleared scene. */
+  const handleClearAll = useCallback(() => {
+    setBlocks([]);
+    setCornerChoices(new Map());
+    setStreetNetwork(EMPTY_NETWORK);
+    setSelected(null);
+    setSelectedStreet(null);
+    setSelectedIntersection(null);
+    setMarquee(null);
+    try {
+      localStorage.removeItem(AUTOSAVE_KEY);
+    } catch {
+      // storage unavailable — the state reset above still cleared the scene
+    }
+  }, []);
+
   // Computed OUTSIDE the updater so the boolean reaches the drag handler
   // synchronously (mirrors handleMoveNode). moveStreetNode is pure and moves
   // welded junction copies together; derived frontage blocks refit via the
@@ -1165,6 +1184,7 @@ export default function FacadePage() {
             onFlipChain={handleFlipChain}
             onMoveNode={handleMoveNode}
             onMoveStreetNode={handleMoveStreetNode}
+            onClearAll={handleClearAll}
             view={view}
             onDrawModeChange={setDrawActive}
             corners={corners}

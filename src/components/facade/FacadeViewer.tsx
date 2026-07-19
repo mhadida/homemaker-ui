@@ -67,6 +67,8 @@ interface FacadeViewerProps {
   /** Drag a vertex of the selected street (welded junctions move as one).
    * Returns false to reject — the handle sticks. */
   onMoveStreetNode: (from: [number, number], to: [number, number]) => boolean;
+  /** Wipe the whole scene (Select-mode Clear-all button, two-step confirm). */
+  onClearAll: () => void;
   view?: ViewSettings;
   onDrawModeChange?: (drawMode: boolean) => void;
   corners: Corner[];
@@ -1723,6 +1725,7 @@ export default function FacadeViewer({
   onFlipChain,
   onMoveNode,
   onMoveStreetNode,
+  onClearAll,
   view = FACADE_DEFAULT_VIEW,
   onDrawModeChange,
   corners,
@@ -1767,6 +1770,8 @@ export default function FacadeViewer({
   // The Select tool (marquee). Mutually exclusive with draw mode; off by
   // default so every existing path is byte-identical.
   const [selectMode, setSelectMode] = useState(false);
+  // Two-step confirm for the select-mode Clear-all button.
+  const [confirmClear, setConfirmClear] = useState(false);
   // The street tool (draws the standalone road network). Mutually exclusive
   // with the other two; off by default so every existing path is
   // byte-identical.
@@ -2080,6 +2085,30 @@ export default function FacadeViewer({
                     }`}
                   >
                     {selectMode ? "⬚ Selecting — Esc" : "⬚ Select"}
+                  </button>
+                )}
+                {selectMode && (
+                  /* Testing convenience: wipe the whole scene. Select-mode
+                   * only (deliberate context, can't fat-finger while
+                   * drawing) + two-step confirm — it deletes everything. */
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (confirmClear) {
+                        setConfirmClear(false);
+                        onClearAll();
+                      } else {
+                        setConfirmClear(true);
+                        window.setTimeout(() => setConfirmClear(false), 3000);
+                      }
+                    }}
+                    className={`flex h-7 items-center gap-1.5 rounded-full px-3 text-[11px] font-medium shadow-lg transition-colors ${
+                      confirmClear
+                        ? "bg-red-600 text-white"
+                        : "bg-white/90 text-zinc-900 hover:bg-white"
+                    }`}
+                  >
+                    {confirmClear ? "⚠ Clear everything?" : "🗑 Clear all"}
                   </button>
                 )}
                 <button
