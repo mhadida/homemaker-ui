@@ -692,6 +692,7 @@ export default function FacadeMesh({
   miter,
   massMiter,
   roof = true,
+  skin = false,
 }: {
   params: FacadeParams;
   miter?: LotMiter;
@@ -702,6 +703,11 @@ export default function FacadeMesh({
   /** false suppresses this lot's own roof AND its dormers — the merged
    * corner L-roof (CornerRoofMesh) covers both wings instead. */
   roof?: boolean;
+  /** Skin mode (square-facing rear facades): render the wall + openings +
+   * ornament ONLY — no massing box, no roof/dormers, no shaped gable. The
+   * front facade's massing already spans the depth and caps both faces;
+   * this is just the window wall against its back. */
+  skin?: boolean;
 }) {
   const ml = miter?.left ?? 0;
   const mr = miter?.right ?? 0;
@@ -724,8 +730,8 @@ export default function FacadeMesh({
   // without this, every slider tick leaks GPU buffers.
   useEffect(() => () => stripGeos.forEach((g) => g.dispose()), [stripGeos]);
   const roofGeo = useMemo(
-    () => (roof && layout.roof ? buildRoofGeometry(layout.roof) : null),
-    [layout.roof, roof],
+    () => (roof && !skin && layout.roof ? buildRoofGeometry(layout.roof) : null),
+    [layout.roof, roof, skin],
   );
   useEffect(() => () => roofGeo?.dispose(), [roofGeo]);
 
@@ -755,6 +761,7 @@ export default function FacadeMesh({
              * the clamped depth; wall-colored so the building reads solid. A
              * pass-through passage within this strip pierces it (piers +
              * lintel + tunnel). The strip group's offset applies the relief. */}
+            {!skin && (
             <StripMass
               x0={massX0}
               x1={massX1}
@@ -769,6 +776,7 @@ export default function FacadeMesh({
                   : null
               }
             />
+            )}
             <mesh geometry={stripGeos[si]} castShadow receiveShadow>
               <meshStandardMaterial color={params.wallColor} roughness={0.85} />
             </mesh>
@@ -782,7 +790,9 @@ export default function FacadeMesh({
                     // Under instancing the glass/frame/bars are drawn by the
                     // scene-wide InstancedFacadeBoxes; the wall's punched hole
                     // (buildStripGeometry), sills and surrounds stay here.
-                    return USE_INSTANCING ? null : (
+                    // Skin facades are NOT in the instancer (it only walks
+                    // front placements), so they always fill inline.
+                    return USE_INSTANCING && !skin ? null : (
                       <WindowFill
                         key={key}
                         o={o}
@@ -943,7 +953,7 @@ export default function FacadeMesh({
       ))}
 
       {/* Shaped front gable rising above the eave (null unless chosen). */}
-      {layout.gable && (
+      {layout.gable && !skin && (
         <GableMesh
           gable={layout.gable}
           wallColor={params.wallColor}

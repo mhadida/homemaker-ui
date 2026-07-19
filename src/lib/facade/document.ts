@@ -205,6 +205,11 @@ export function deserializeScene(raw: unknown): LoadResult {
                 validRoundabout,
               )
             : [],
+          // Square monuments share the roundabout entry shape ([id, monument]).
+          // Additive — old saves have no field and load with none.
+          squares: Array.isArray((rawNet as { squares?: unknown }).squares)
+            ? ((rawNet as { squares: unknown[] }).squares).filter(validRoundabout)
+            : [],
         }
       : EMPTY_NETWORK;
 

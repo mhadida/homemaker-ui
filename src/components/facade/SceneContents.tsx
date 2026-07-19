@@ -13,6 +13,7 @@ import type { StreetNetwork } from "@/lib/street/types";
 import { effectiveWidth, minRadiusOf } from "@/lib/street/types";
 import { canalHoleOutline } from "@/lib/street/canal";
 import { filletCentreline } from "@/lib/street/geometry";
+import { deriveSquares, isSquareFrontingBlock } from "@/lib/street/squares";
 import type { FacadeParams } from "@/lib/facade/types";
 import type { ViewSettings } from "@/lib/building/types";
 import {
@@ -185,6 +186,7 @@ function BlockGroup({
   massMiters,
   noRoof,
   datumOverride,
+  rearSkin,
 }: {
   block: FacadeBlock;
   selected: Selection | null;
@@ -200,6 +202,9 @@ function BlockGroup({
   massMiters: Map<string, LotMiter>;
   noRoof: Set<string>;
   datumOverride: Map<string, number>;
+  /** This block lines a square's interior — each lot grows a second facade
+   * skin on the massing rear, facing the void. */
+  rearSkin: boolean;
 }) {
   const placements = useMemo(() => lotPlacements(block), [block]);
   const frame = useMemo(() => blockFrame(block), [block]);
@@ -247,6 +252,14 @@ function BlockGroup({
               massMiter={massMiters.get(key)}
               roof={!noRoof.has(key)}
             />
+            {/* Second facade on the massing rear, facing the square void —
+             * wall + openings + ornament only (skin mode); the front's
+             * massing and roof already span the depth. */}
+            {rearSkin && (
+              <group position={[0, 0, -depth]} rotation={[0, Math.PI, 0]}>
+                <FacadeMesh params={lot.params} skin />
+              </group>
+            )}
             <Basement width={lot.params.width} depth={depth} drop={drop} />
             {/* At a live corner, cornerSides lights both wings and suppresses
              * the single-lot marker. When no corner resolves (lot/block level,
@@ -306,6 +319,8 @@ export default function SceneContents({
   onSelectStreet,
   selectedIntersection = null,
   onSelectIntersection,
+  selectedSquare = null,
+  onSelectSquare,
   gridAngleDeg = null,
   cornerChoices,
 }: {
@@ -335,6 +350,9 @@ export default function SceneContents({
   selectedIntersection?: string | null;
   /** Undefined → intersections aren't selectable. */
   onSelectIntersection?: (key: string) => void;
+  /** Selected square (loop id) + selection callback. */
+  selectedSquare?: string | null;
+  onSelectSquare?: (streetId: string) => void;
 }) {
   const groundGeo = useGroundGeometry(streetNetwork);
   const groundQuat = useMemo(() => {
@@ -489,6 +507,17 @@ export default function SceneContents({
     }
     return { roofs, turrets, massMiters, noRoof, datumOverride };
   }, [cornerChoices, corners, blocks, miters, ground]);
+  // Square-fronting blocks: street-derived blocks lining a closed loop's
+  // interior back onto the square void, so they earn a second facade skin
+  // facing it. Empty set when no closed loops (byte-identical).
+  const squareFrontingIds = useMemo(() => {
+    if (!streetNetwork) return new Set<string>();
+    const squares = deriveSquares(streetNetwork);
+    if (squares.length === 0) return new Set<string>();
+    return new Set(
+      blocks.filter((b) => isSquareFrontingBlock(b, squares)).map((b) => b.id),
+    );
+  }, [streetNetwork, blocks]);
   // Both corner-side lots to highlight when a corner is selected. Null when
   // no corner is selected OR the selected corner has dissolved (angle change
   // / node drag) — the marker condition falls back to the plain lot marker.
@@ -559,6 +588,7 @@ export default function SceneContents({
           massMiters={cornerMerge.massMiters}
           noRoof={cornerMerge.noRoof}
           datumOverride={cornerMerge.datumOverride}
+          rearSkin={squareFrontingIds.has(block.id)}
         />
       ))}
       {/* Merged corner L-roofs — one hip/valley surface per unified corner,
@@ -595,6 +625,8 @@ export default function SceneContents({
           onSelectStreet={onSelectStreet}
           selectedIntersection={selectedIntersection}
           onSelectIntersection={onSelectIntersection}
+          selectedSquare={selectedSquare}
+          onSelectSquare={onSelectSquare}
           ground={ground}
         />
       )}

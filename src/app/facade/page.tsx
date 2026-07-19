@@ -51,6 +51,7 @@ import {
   type Vec2,
 } from "@/lib/street/types";
 import { deriveIntersections, moveStreetNode, pruneRoundabouts } from "@/lib/street/intersections";
+import { deriveSquares, pruneSquareMonuments } from "@/lib/street/squares";
 import { streetAdvisory } from "@/lib/street/geometry";
 import { canalGradeAdvisory } from "@/lib/street/canal";
 import {
@@ -76,6 +77,7 @@ import FacadeControls, {
   MarqueeControls,
   StreetInspector,
   IntersectionInspector,
+  SquareInspector,
 } from "@/components/facade/FacadeControls";
 import PromptInput from "@/components/demo/PromptInput";
 
@@ -273,6 +275,7 @@ export default function FacadePage() {
   const [selectedIntersection, setSelectedIntersection] = useState<
     string | null
   >(null);
+  const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Marquee (rubber-band) multi-selection. Coexists with single `selected`:
@@ -314,6 +317,7 @@ export default function FacadePage() {
     );
     setSelectedStreet(null);
     setSelectedIntersection(null);
+    setSelectedSquare(null);
   }, []);
 
   const handleSave = useCallback(() => {
@@ -421,6 +425,18 @@ export default function FacadePage() {
     () => deriveIntersections(streetNetwork),
     [streetNetwork],
   );
+  const selectedSquareData = useMemo(() => {
+    if (!selectedSquare) return null;
+    const sq = deriveSquares(streetNetwork).find(
+      (q) => q.streetId === selectedSquare,
+    );
+    if (!sq) return null;
+    const monument =
+      (streetNetwork.squares ?? []).find(([id]) => id === selectedSquare)?.[1] ??
+      null;
+    return { square: sq, monument };
+  }, [selectedSquare, streetNetwork]);
+
   const selectedIntersectionData = useMemo(() => {
     if (!selectedIntersection) return null;
     const it = intersections.find((i) => i.key === selectedIntersection);
@@ -495,6 +511,7 @@ export default function FacadePage() {
       // can't show a stale Street/Intersection view under a fresh lot pick.
       setSelectedStreet(null);
       setSelectedIntersection(null);
+      setSelectedSquare(null);
       // A single-lot chamfer block can bridge two corners (both ends of its
       // one lot). One facade mesh can't disambiguate which the user meant, so
       // we take the first — the plan-pane node handles reach either corner
@@ -578,6 +595,7 @@ export default function FacadePage() {
       setSelected(null); // a marquee supersedes the single selection
       setSelectedStreet(null);
       setSelectedIntersection(null);
+      setSelectedSquare(null);
     },
     [blocks],
   );
@@ -708,7 +726,9 @@ export default function FacadePage() {
 
   const handleDeleteStreet = useCallback((id: string) => {
     setStreetNetwork((n) =>
-      pruneRoundabouts({ ...n, streets: n.streets.filter((s) => s.id !== id) }),
+      pruneSquareMonuments(
+        pruneRoundabouts({ ...n, streets: n.streets.filter((s) => s.id !== id) }),
+      ),
     );
     setSelectedStreet(null);
   }, []);
@@ -741,6 +761,7 @@ export default function FacadePage() {
     setSelected(null);
     setSelectedStreet(null);
     setSelectedIntersection(null);
+    setSelectedSquare(null);
     setMarquee(null);
     try {
       localStorage.removeItem(AUTOSAVE_KEY);
@@ -783,6 +804,7 @@ export default function FacadePage() {
         setSelected(null);
         setSelectedStreet(null);
         setSelectedIntersection(null);
+        setSelectedSquare(null);
         setMarquee({ blocks: blocks.map((b) => b.id), lots: [], nodes: [] });
         return;
       }
@@ -874,6 +896,7 @@ export default function FacadePage() {
       setSelected({ blockId: id, lot: 0, level: "block" });
       setSelectedStreet(null);
       setSelectedIntersection(null);
+      setSelectedSquare(null);
       return id;
     },
     [cornerChoices, maxCornerAngle],
@@ -919,8 +942,29 @@ export default function FacadePage() {
     setSelected(null);
     setMarquee(null);
     setSelectedIntersection(null);
+    setSelectedSquare(null);
     setSelectedStreet(id);
   }, []);
+
+  const handleSelectSquare = useCallback((streetId: string) => {
+    setSelected(null);
+    setSelectedStreet(null);
+    setSelectedIntersection(null);
+    setSelectedSquare(streetId);
+  }, []);
+
+  const handleSetSquareMonument = useCallback(
+    (streetId: string, m: Monument | null) => {
+      setStreetNetwork((n) => {
+        const rest = (n.squares ?? []).filter(([id]) => id !== streetId);
+        return {
+          ...n,
+          squares: m ? [...rest, [streetId, m] as [string, Monument]] : rest,
+        };
+      });
+    },
+    [],
+  );
 
   const handleSelectIntersection = useCallback((key: string) => {
     setSelected(null);
@@ -1025,6 +1069,7 @@ export default function FacadePage() {
       });
       setSelectedStreet(null);
       setSelectedIntersection(null);
+      setSelectedSquare(null);
     },
     [corners],
   );
@@ -1225,6 +1270,8 @@ export default function FacadePage() {
             onSelectStreet={handleSelectStreet}
             selectedIntersection={selectedIntersection}
             onSelectIntersection={handleSelectIntersection}
+            selectedSquare={selectedSquare}
+            onSelectSquare={handleSelectSquare}
           />
         </div>
 
@@ -1256,6 +1303,14 @@ export default function FacadePage() {
                     selectedIntersectionData.intersection.key,
                     m,
                   )
+                }
+              />
+            ) : selectedSquareData ? (
+              <SquareInspector
+                monument={selectedSquareData.monument}
+                area={selectedSquareData.square.area}
+                onSetMonument={(m) =>
+                  handleSetSquareMonument(selectedSquareData.square.streetId, m)
                 }
               />
             ) : selected && selectedBlock && params ? (

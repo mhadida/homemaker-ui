@@ -101,6 +101,8 @@ interface FacadeViewerProps {
   /** Selected derived-intersection key (inspector target). */
   selectedIntersection: string | null;
   onSelectIntersection: (key: string) => void;
+  selectedSquare: string | null;
+  onSelectSquare: (streetId: string) => void;
 }
 
 type PaneId = "plan" | "perspective" | "overview" | "detail";
@@ -1249,6 +1251,8 @@ function PlanPane({
   onSelectStreet,
   selectedIntersection,
   onSelectIntersection,
+  selectedSquare,
+  onSelectSquare,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -1289,6 +1293,8 @@ function PlanPane({
   onSelectStreet: (id: string) => void;
   selectedIntersection: string | null;
   onSelectIntersection: (key: string) => void;
+  selectedSquare: string | null;
+  onSelectSquare: (streetId: string) => void;
 }) {
   const [nodeDrag, setNodeDrag] = useState(false);
   const dragEndAt = useRef(0);
@@ -1379,6 +1385,8 @@ function PlanPane({
         onSelectStreet={onSelectStreet}
         selectedIntersection={selectedIntersection}
         onSelectIntersection={onSelectIntersection}
+        selectedSquare={selectedSquare}
+        onSelectSquare={onSelectSquare}
         gridAngleDeg={gridSnap ? gridAngle : null}
       />
       <StreetGuides streetRef={streetRef} streetWidth={streetWidth} />
@@ -1567,6 +1575,8 @@ function PerspectivePane({
   onSelectStreet,
   selectedIntersection,
   onSelectIntersection,
+  selectedSquare,
+  onSelectSquare,
   walk,
   onExitWalk,
 }: {
@@ -1583,6 +1593,8 @@ function PerspectivePane({
   onSelectStreet: (id: string) => void;
   selectedIntersection: string | null;
   onSelectIntersection: (key: string) => void;
+  selectedSquare: string | null;
+  onSelectSquare: (streetId: string) => void;
   walk: boolean;
   onExitWalk: () => void;
 }) {
@@ -1607,6 +1619,8 @@ function PerspectivePane({
         onSelectStreet={onSelectStreet}
         selectedIntersection={selectedIntersection}
         onSelectIntersection={onSelectIntersection}
+        selectedSquare={selectedSquare}
+        onSelectSquare={onSelectSquare}
       />
       <PerspectiveCamera
         makeDefault
@@ -1664,6 +1678,8 @@ function ElevationPane({
   onSelectStreet,
   selectedIntersection,
   onSelectIntersection,
+  selectedSquare,
+  onSelectSquare,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -1680,6 +1696,8 @@ function ElevationPane({
   onSelectStreet: (id: string) => void;
   selectedIntersection: string | null;
   onSelectIntersection: (key: string) => void;
+  selectedSquare: string | null;
+  onSelectSquare: (streetId: string) => void;
 }) {
   // Zero-block world: `block` is undefined. Hooks below must still run
   // unconditionally (Rules of Hooks) — every derived value falls back to a
@@ -1780,6 +1798,8 @@ function ElevationPane({
         onSelectStreet={onSelectStreet}
         selectedIntersection={selectedIntersection}
         onSelectIntersection={onSelectIntersection}
+        selectedSquare={selectedSquare}
+        onSelectSquare={onSelectSquare}
       />
       <OrthographicCamera
         ref={camRef}
@@ -1835,6 +1855,8 @@ export default function FacadeViewer({
   onSelectStreet,
   selectedIntersection,
   onSelectIntersection,
+  selectedSquare,
+  onSelectSquare,
 }: FacadeViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null!);
   const planRef = useRef<HTMLDivElement>(null);
@@ -2022,6 +2044,8 @@ export default function FacadeViewer({
             onSelectStreet={onSelectStreet}
             selectedIntersection={selectedIntersection}
             onSelectIntersection={onSelectIntersection}
+        selectedSquare={selectedSquare}
+        onSelectSquare={onSelectSquare}
           />
         );
       case "perspective":
@@ -2040,6 +2064,8 @@ export default function FacadeViewer({
             onSelectStreet={onSelectStreet}
             selectedIntersection={selectedIntersection}
             onSelectIntersection={onSelectIntersection}
+        selectedSquare={selectedSquare}
+        onSelectSquare={onSelectSquare}
             walk={walkMode}
             onExitWalk={() => setWalkMode(false)}
           />
@@ -2062,6 +2088,8 @@ export default function FacadeViewer({
             onSelectStreet={onSelectStreet}
             selectedIntersection={selectedIntersection}
             onSelectIntersection={onSelectIntersection}
+        selectedSquare={selectedSquare}
+        onSelectSquare={onSelectSquare}
           />
         );
       case "detail":
@@ -2082,6 +2110,8 @@ export default function FacadeViewer({
             onSelectStreet={onSelectStreet}
             selectedIntersection={selectedIntersection}
             onSelectIntersection={onSelectIntersection}
+        selectedSquare={selectedSquare}
+        onSelectSquare={onSelectSquare}
           />
         );
     }

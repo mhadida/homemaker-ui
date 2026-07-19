@@ -1346,6 +1346,56 @@ const MONUMENTS: { id: Monument["kind"]; label: string }[] = [
  * derived street junction and pick its monument. Writes go through
  * `onSetRoundabout(monument | null)` — null removes the entry from
  * `network.roundabouts`, turning the roundabout off. */
+/** The Square inspector: pick (or clear) the monument standing at a derived
+ * square's centroid. The square itself is always derived from its closed
+ * loop — only this choice is stored (network.squares, sparse). */
+export function SquareInspector({
+  monument,
+  area,
+  onSetMonument,
+}: {
+  /** null → no monument on this square yet. */
+  monument: Monument | null;
+  /** interior area, m² (display only) */
+  area: number;
+  onSetMonument: (monument: Monument | null) => void;
+}) {
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium text-[var(--foreground)]">
+          Square
+        </span>
+        <span className="text-[10px] text-[var(--muted)]">
+          {Math.round(area)} m²
+        </span>
+      </div>
+
+      <Section title="Monument">
+        <div className="grid grid-cols-3 gap-1">
+          <Toggle
+            label="None"
+            on={!monument}
+            onClick={() => onSetMonument(null)}
+          />
+          {MONUMENTS.map((m) => (
+            <Toggle
+              key={m.id}
+              label={m.label}
+              on={monument?.kind === m.id}
+              onClick={() => onSetMonument({ kind: m.id })}
+            />
+          ))}
+        </div>
+        <p className="text-[10px] leading-snug text-[var(--muted)]">
+          Buildings lining the inside of this loop face the square with a
+          second frontage automatically.
+        </p>
+      </Section>
+    </div>
+  );
+}
+
 export function IntersectionInspector({
   monument,
   onSetRoundabout,

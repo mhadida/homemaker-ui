@@ -45,9 +45,17 @@ export interface StreetNetwork {
   streets: Street[];
   /** roundabout choices: [derived intersection key, monument]. Sparse. */
   roundabouts: [string, Monument][];
+  /** square-monument choices: [closed-loop street id, monument]. Sparse and
+   * OPTIONAL — absent means no square carries a monument (old saves and
+   * fixtures stay valid; squares themselves are always derived). */
+  squares?: [string, Monument][];
 }
 
-export const EMPTY_NETWORK: StreetNetwork = { streets: [], roundabouts: [] };
+export const EMPTY_NETWORK: StreetNetwork = {
+  streets: [],
+  roundabouts: [],
+  squares: [],
+};
 
 export function effectiveWidth(s: Street): number {
   return s.width ?? STREET_SPECS[s.type].width;

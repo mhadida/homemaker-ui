@@ -2,13 +2,15 @@
 import { useMemo } from "react";
 import type { StreetNetwork, Monument } from "@/lib/street/types";
 import { deriveIntersections } from "@/lib/street/intersections";
+import { deriveSquares } from "@/lib/street/squares";
 import StreetRibbonMesh from "./StreetRibbonMesh";
 import CanalMesh from "./CanalMesh";
 import RoundaboutMesh from "./RoundaboutMesh";
 import IntersectionMarker from "./IntersectionMarker";
 import BridgeMesh from "./BridgeMesh";
 import { bridgesFor } from "@/lib/street/canal";
-import type { Ground } from "@/lib/facade/terrain";
+import MonumentMesh from "./MonumentMesh";
+import { groundHeightAt, type Ground } from "@/lib/facade/terrain";
 
 const ROUNDABOUT_OUTER_R = 9;
 const ROUNDABOUT_ISLAND_R = 3;
@@ -22,6 +24,8 @@ export default function StreetNetworkView({
   onSelectStreet,
   selectedIntersection = null,
   onSelectIntersection,
+  selectedSquare = null,
+  onSelectSquare,
   ground,
 }: {
   network: StreetNetwork;
@@ -34,12 +38,21 @@ export default function StreetNetworkView({
   selectedIntersection?: string | null;
   /** Undefined → intersections aren't selectable. */
   onSelectIntersection?: (key: string) => void;
+  /** Selected square (closed-loop street id) — tints its centre marker. */
+  selectedSquare?: string | null;
+  /** Undefined → squares aren't selectable. */
+  onSelectSquare?: (streetId: string) => void;
   /** Tilted ground plane — drapes ribbons/roundabouts/markers onto it. */
   ground: Ground;
 }) {
   const roundabouts = useMemo(() => new Map(network.roundabouts), [network.roundabouts]);
   const intersections = useMemo(() => deriveIntersections(network), [network]);
   const bridges = useMemo(() => bridgesFor(network, intersections), [network, intersections]);
+  const squares = useMemo(() => deriveSquares(network), [network]);
+  const squareMonuments = useMemo(
+    () => new Map(network.squares ?? []),
+    [network.squares],
+  );
   return (
     <group>
       {network.streets.map((s) =>
@@ -89,6 +102,31 @@ export default function StreetNetworkView({
       {bridges.map((b) => (
         <BridgeMesh key={b.key} placement={b} ground={ground} />
       ))}
+      {/* Squares: the void inside a closed loop — a monument at the centroid
+       * (when chosen) and a clickable centre marker for the inspector. */}
+      {squares.map((q) => {
+        const m: Monument | undefined = squareMonuments.get(q.streetId);
+        return (
+          <group key={`square-${q.streetId}`}>
+            {m && (
+              <MonumentMesh
+                centre={q.centroid}
+                kind={m.kind}
+                baseY={groundHeightAt(q.centroid[0], q.centroid[1], ground)}
+              />
+            )}
+            {onSelectSquare && (
+              <IntersectionMarker
+                pos={q.centroid}
+                radius={JUNCTION_MARKER_R}
+                selected={selectedSquare === q.streetId}
+                onSelect={() => onSelectSquare(q.streetId)}
+                ground={ground}
+              />
+            )}
+          </group>
+        );
+      })}
     </group>
   );
 }

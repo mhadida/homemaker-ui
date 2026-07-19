@@ -286,9 +286,17 @@ NOT involved; every edit is live (no Update button). Spec:
   uninterrupted straight alley/street run, an overlong boulevard, or a corner
   drawn tighter than the type's minimum radius; it never blocks the layout. The network **coexists** with the existing block/lot/
   corner system — additive, no shared state (Save/Load extends the document;
-  an empty network is byte-identical). Block/plot/building derivation from
-  the network, mid-span crossings, and open-square plazas are deferred to
-  later sub-projects. Specs:
+  an empty network is byte-identical). **Squares & plazas**: every closed
+  loop big enough to enclose a void is a derived Square
+  (`src/lib/street/squares.ts` pure — `deriveSquares` finds the interior
+  side by point-in-polygon probe, `isSquareFrontingBlock`,
+  `pruneSquareMonuments`; monument choice stored sparsely in
+  `network.squares` [loop id, monument]). Interior-side derived blocks grow
+  a second facade skin on the massing rear facing the void (`FacadeMesh
+  skin` mode — wall+openings+ornament only, windows filled inline since
+  the instancer only walks front placements); a clickable centre marker
+  opens the Square inspector (fountain/obelisk/none). Block/plot/building
+  derivation beyond frontages and mid-span crossings stay deferred. Specs:
   `docs/superpowers/specs/2026-07-15-street-network-design.md` (network) +
   `docs/superpowers/specs/2026-07-16-street-realism-design.md` (SP-2a:
   radius-limited fillet + topography draping).
