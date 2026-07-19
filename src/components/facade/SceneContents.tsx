@@ -384,10 +384,9 @@ export default function SceneContents({
       <directionalLight position={[-8, 10, -6]} intensity={0.25} />
       <pointLight position={[0, 30, 0]} intensity={0.3} />
 
-      <Environment
-        files="https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/furstenstein_1k.hdr"
-        background={false}
-      />
+      {/* Bundled locally (CC0, Poly Haven) — a runtime CDN fetch here once
+       * took the whole viewer down when the network hiccuped. */}
+      <Environment files="/hdri/furstenstein_1k.hdr" background={false} />
 
       {blocks.map((block) => (
         <BlockGroup
