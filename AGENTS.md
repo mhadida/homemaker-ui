@@ -117,10 +117,23 @@ NOT involved; every edit is live (no Update button). Spec:
   edits pin lots against reroll.
 - **Corner buildings**: welded two-block junctions turning ≤ the global max
   angle merge into one building (`src/lib/facade/corners.ts`): shells
-  (storeys/colors/ornament/glazing) sync through the `syncCorners` choke
-  point on every mutation; walls miter so cornice/parapet run continuously;
-  corner nodes tint gold and a stationary click opens the corner inspector
-  (unified ↔ 2-facades, primary side, global angle).
+  (storeys/colors/ornament/glazing, incl. `massingDepth`) sync through the
+  `syncCorners` choke point on every mutation; walls miter so
+  cornice/parapet run continuously; corner nodes tint gold and a stationary
+  click opens the corner inspector (unified ↔ 2-facades, primary side,
+  global angle). A **unified** corner reads as ONE mass with ONE roof
+  (`src/lib/facade/cornerRoof.ts` pure — `cornerRoofPlan` builds the
+  four-plane hip/valley L-roof; front faces foot at the node V, back faces
+  at the back-eave crossing Q, everything meets at the centreline crossing
+  P): `massMiterFor` fills the convex elbow (mass-depth-scaled miter, the
+  wall keeps its thin one), both wings level to the primary side's datum,
+  per-wing roofs+dormers suppress (`FacadeMesh roof={false}`), and
+  `syncCorners` forces `roofOrientation: "parallel"` at unified corners
+  only. Any failed precondition (flat roof, unequal depths/wallTops,
+  perpendicular orientation, concave wing ≤ D/2) falls back to today's
+  independent tents, byte-identical. Assembly in `SceneContents`
+  (`cornerMerge` memo → `CornerRoofMesh`). Spec:
+  `docs/superpowers/specs/2026-07-17-corner-l-roof-design.md`.
 - **Sections**: one lot's facade divides into vertical strips of whole bays
   with ±15 cm perpendicular relief (`FacadeParams.sections`, sparse — absent
   means one flush strip). `resolveSections` in `layout.ts` holds all clamps

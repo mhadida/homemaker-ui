@@ -1204,6 +1204,7 @@ export default function FacadePage() {
             onMoveStreetNode={handleMoveStreetNode}
             onUndoSegment={handleUndoSegment}
             onClearAll={handleClearAll}
+            cornerChoices={cornerChoices}
             view={view}
             onDrawModeChange={setDrawActive}
             corners={corners}

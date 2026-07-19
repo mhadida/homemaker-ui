@@ -18,7 +18,9 @@ import type { LotMiter } from "@/lib/facade/corners";
 import { roofTriangles, type RoofPlan, type Dormer } from "@/lib/facade/roof";
 import { USE_INSTANCING } from "@/lib/facade/instancing";
 
-const ROOF_COLORS = { slate: "#4a4e57", red: "#8a3b2e" } as const;
+/** Exported for CornerRoofMesh — the merged corner roof paints with the
+ * primary side's covering. */
+export const ROOF_COLORS = { slate: "#4a4e57", red: "#8a3b2e" } as const;
 
 /** Roof BufferGeometry from a plan. Non-indexed (crisp faceted faces) with
  * each triangle auto-oriented so its normal points away from the mass
@@ -688,12 +690,23 @@ function CorniceSegment({
 export default function FacadeMesh({
   params,
   miter,
+  massMiter,
+  roof = true,
 }: {
   params: FacadeParams;
   miter?: LotMiter;
+  /** Corner-elbow body extension (unified corners): the mass box extends
+   * further than the wall miter so a convex elbow is solid. Absent → the
+   * mass follows the wall miter exactly as before. */
+  massMiter?: LotMiter;
+  /** false suppresses this lot's own roof AND its dormers — the merged
+   * corner L-roof (CornerRoofMesh) covers both wings instead. */
+  roof?: boolean;
 }) {
   const ml = miter?.left ?? 0;
   const mr = miter?.right ?? 0;
+  const massMl = massMiter?.left ?? ml;
+  const massMr = massMiter?.right ?? mr;
   const layout = useMemo(() => computeLayout(params), [params]);
   const stripGeos = useMemo(
     () =>
@@ -711,8 +724,8 @@ export default function FacadeMesh({
   // without this, every slider tick leaks GPU buffers.
   useEffect(() => () => stripGeos.forEach((g) => g.dispose()), [stripGeos]);
   const roofGeo = useMemo(
-    () => (layout.roof ? buildRoofGeometry(layout.roof) : null),
-    [layout.roof],
+    () => (roof && layout.roof ? buildRoofGeometry(layout.roof) : null),
+    [layout.roof, roof],
   );
   useEffect(() => () => roofGeo?.dispose(), [roofGeo]);
 
@@ -728,6 +741,11 @@ export default function FacadeMesh({
         // at the outer facade ends only.
         const bandX0 = strip.x0 - (first ? ml : 0);
         const bandX1 = strip.x1 + (last ? mr : 0);
+        // The body may extend further than the wall at a unified corner —
+        // the elbow fill (massMiterFor) — while ornament bands keep the
+        // wall miter.
+        const massX0 = strip.x0 - (first ? massMl : 0);
+        const massX1 = strip.x1 + (last ? massMr : 0);
         const copingL = first ? 0.05 : 0;
         const copingR = last ? 0.05 : 0;
         return (
@@ -738,8 +756,8 @@ export default function FacadeMesh({
              * pass-through passage within this strip pierces it (piers +
              * lintel + tunnel). The strip group's offset applies the relief. */}
             <StripMass
-              x0={bandX0}
-              x1={bandX1}
+              x0={massX0}
+              x1={massX1}
               wallTop={layout.wallTop}
               massingDepth={layout.massingDepth}
               color={params.wallColor}
@@ -911,8 +929,10 @@ export default function FacadeMesh({
         </mesh>
       )}
 
-      {/* Dormers on the front roof slope (empty unless requested). */}
-      {layout.roofDormers.map((d, i) => (
+      {/* Dormers on the front roof slope (empty unless requested). They ride
+       * the lot's own roof, so a suppressed roof takes them with it. */}
+      {roof &&
+        layout.roofDormers.map((d, i) => (
         <DormerMesh
           key={i}
           d={d}

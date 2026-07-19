@@ -36,7 +36,7 @@ import {
   type FacadeBlock,
   type Selection,
 } from "@/lib/facade/blocks";
-import type { Corner } from "@/lib/facade/corners";
+import type { Corner, CornerChoice } from "@/lib/facade/corners";
 import type { Ground } from "@/lib/facade/terrain";
 import { groundHeightAt } from "@/lib/facade/terrain";
 import { walkStep, EYE_HEIGHT, type WalkKeys } from "@/lib/facade/walk";
@@ -77,6 +77,7 @@ interface FacadeViewerProps {
   corners: Corner[];
   onSelectCorner: (key: string) => void;
   maxCornerAngle: number;
+  cornerChoices?: ReadonlyMap<string, CornerChoice>;
   ground: Ground;
   /** Street reference (first block) + width for street-aware orientation and
    * the plan-pane construction guides. null in the blank world. */
@@ -1233,6 +1234,7 @@ function PlanPane({
   corners,
   onSelectCorner,
   maxCornerAngle,
+  cornerChoices,
   ground,
   streetRef,
   streetWidth,
@@ -1272,6 +1274,7 @@ function PlanPane({
   corners: Corner[];
   onSelectCorner: (key: string) => void;
   maxCornerAngle: number;
+  cornerChoices?: ReadonlyMap<string, CornerChoice>;
   ground: Ground;
   streetRef: StreetRef | null;
   streetWidth: number;
@@ -1368,6 +1371,7 @@ function PlanPane({
         onSelectLot={guardedSelectLot}
         view={view}
         maxCornerAngle={maxCornerAngle}
+        cornerChoices={cornerChoices}
         ground={ground}
         marquee={marquee}
         streetNetwork={streetNetwork}
@@ -1555,6 +1559,7 @@ function PerspectivePane({
   onSelectLot,
   view,
   maxCornerAngle,
+  cornerChoices,
   ground,
   marquee,
   streetNetwork,
@@ -1570,6 +1575,7 @@ function PerspectivePane({
   onSelectLot: (blockId: string, lot: number) => void;
   view: ViewSettings;
   maxCornerAngle: number;
+  cornerChoices?: ReadonlyMap<string, CornerChoice>;
   ground: Ground;
   marquee: Marquee | null;
   streetNetwork: StreetNetwork;
@@ -1593,6 +1599,7 @@ function PerspectivePane({
         onSelectLot={onSelectLot}
         view={view}
         maxCornerAngle={maxCornerAngle}
+        cornerChoices={cornerChoices}
         ground={ground}
         marquee={marquee}
         streetNetwork={streetNetwork}
@@ -1649,6 +1656,7 @@ function ElevationPane({
   size,
   mode,
   maxCornerAngle,
+  cornerChoices,
   ground,
   marquee,
   streetNetwork,
@@ -1664,6 +1672,7 @@ function ElevationPane({
   size: { w: number; h: number };
   mode: "overview" | "detail";
   maxCornerAngle: number;
+  cornerChoices?: ReadonlyMap<string, CornerChoice>;
   ground: Ground;
   marquee: Marquee | null;
   streetNetwork: StreetNetwork;
@@ -1763,6 +1772,7 @@ function ElevationPane({
         onSelectLot={onSelectLot}
         view={view}
         maxCornerAngle={maxCornerAngle}
+        cornerChoices={cornerChoices}
         ground={ground}
         marquee={marquee}
         streetNetwork={streetNetwork}
@@ -1809,6 +1819,7 @@ export default function FacadeViewer({
   corners,
   onSelectCorner,
   maxCornerAngle,
+  cornerChoices,
   ground,
   streetRef,
   streetWidth,
@@ -1996,6 +2007,7 @@ export default function FacadeViewer({
             corners={corners}
             onSelectCorner={onSelectCorner}
             maxCornerAngle={maxCornerAngle}
+        cornerChoices={cornerChoices}
             ground={ground}
             streetRef={streetRef}
             streetWidth={streetWidth}
@@ -2020,6 +2032,7 @@ export default function FacadeViewer({
             onSelectLot={onSelectLot}
             view={view}
             maxCornerAngle={maxCornerAngle}
+        cornerChoices={cornerChoices}
             ground={ground}
             marquee={marquee}
             streetNetwork={streetNetwork}
@@ -2041,6 +2054,7 @@ export default function FacadeViewer({
             size={overviewSize}
             mode="overview"
             maxCornerAngle={maxCornerAngle}
+        cornerChoices={cornerChoices}
             ground={ground}
             marquee={marquee}
             streetNetwork={streetNetwork}
@@ -2060,6 +2074,7 @@ export default function FacadeViewer({
             size={detailSize}
             mode="detail"
             maxCornerAngle={maxCornerAngle}
+        cornerChoices={cornerChoices}
             ground={ground}
             marquee={marquee}
             streetNetwork={streetNetwork}

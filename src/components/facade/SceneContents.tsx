@@ -19,7 +19,18 @@ import {
   type Selection,
 } from "@/lib/facade/blocks";
 import { computeLayout, MASSING_DEPTH_DEFAULT } from "@/lib/facade/layout";
-import { detectCorners, miterFor, type LotMiter } from "@/lib/facade/corners";
+import {
+  detectCorners,
+  miterFor,
+  massMiterFor,
+  cornerChoice,
+  cornerFrame,
+  type CornerChoice,
+  type LotMiter,
+} from "@/lib/facade/corners";
+import { cornerRoofPlan, type CornerRoofPlan } from "@/lib/facade/cornerRoof";
+import CornerRoofMesh from "./CornerRoofMesh";
+import { ROOF_COLORS } from "./FacadeMesh";
 import type { Marquee } from "@/lib/facade/marquee";
 import {
   levelingFor,
@@ -166,6 +177,9 @@ function BlockGroup({
   ground,
   cornerSides,
   marqueeLots,
+  massMiters,
+  noRoof,
+  datumOverride,
 }: {
   block: FacadeBlock;
   selected: Selection | null;
@@ -176,6 +190,11 @@ function BlockGroup({
   /** Lot indices highlighted by a live marquee (whole enclosed block → all
    * indices; partial block → its selected lots). */
   marqueeLots: Set<number> | null;
+  /** Merged-corner elbow extensions / roof suppression / shared datums —
+   * empty when no unified corner touches this block. */
+  massMiters: Map<string, LotMiter>;
+  noRoof: Set<string>;
+  datumOverride: Map<string, number>;
 }) {
   const placements = useMemo(() => lotPlacements(block), [block]);
   const frame = useMemo(() => blockFrame(block), [block]);
@@ -193,7 +212,8 @@ function BlockGroup({
       {block.lots.map((lot, i) => {
         const pos = placements[i].position;
         const depth = lot.params.massingDepth ?? MASSING_DEPTH_DEFAULT;
-        const { datum, drop } = levelingFor(
+        const key = `${block.id}:${i}`;
+        const { datum: ownDatum, drop: ownDrop } = levelingFor(
           pos[0],
           pos[2],
           lot.params.width,
@@ -201,6 +221,11 @@ function BlockGroup({
           placements[i].rotationY,
           ground,
         );
+        // A merged corner levels both wings at the primary side's datum so
+        // the shared mass and L-roof can't tear on a slope; the basement
+        // grows by the lift so it still reaches the ground.
+        const datum = datumOverride.get(key) ?? ownDatum;
+        const drop = ownDrop + (datum - ownDatum);
         return (
           <group
             key={`${block.id}-${i}`}
@@ -213,7 +238,9 @@ function BlockGroup({
           >
             <FacadeMesh
               params={lot.params}
-              miter={miters.get(`${block.id}:${i}`)}
+              miter={miters.get(key)}
+              massMiter={massMiters.get(key)}
+              roof={!noRoof.has(key)}
             />
             <Basement width={lot.params.width} depth={depth} drop={drop} />
             {/* At a live corner, cornerSides lights both wings and suppresses
@@ -275,6 +302,7 @@ export default function SceneContents({
   selectedIntersection = null,
   onSelectIntersection,
   gridAngleDeg = null,
+  cornerChoices,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -285,6 +313,9 @@ export default function SceneContents({
   /** Rotate the drawn grid to the drawing-grid angle while grid lock is on
    * (plan pane). null → axis-aligned, byte-identical. */
   gridAngleDeg?: number | null;
+  /** Corner mode choices — unified corners merge into one mass with one
+   * L-roof. Absent → no merging (byte-identical). */
+  cornerChoices?: ReadonlyMap<string, CornerChoice>;
   /** Live marquee selection to highlight (blocks/lots via SelectionMarker,
    * nodes via a gold ring). null → no marquee (byte-identical). */
   marquee?: Marquee | null;
@@ -335,6 +366,94 @@ export default function SceneContents({
     }
     return m;
   }, [corners]);
+  // Merged (unified) corners: elbow mass extensions, the shared datum both
+  // wings level to, per-lot roof suppression, and the L-roof plans
+  // (2026-07-17 corner-l-roof spec). Empty maps/sets when no corner is
+  // unified or a precondition fails — every path falls back byte-identical.
+  const cornerMerge = useMemo(() => {
+    const roofs: { key: string; plan: CornerRoofPlan; datum: number; color: string }[] = [];
+    const massMiters = new Map<string, LotMiter>();
+    const noRoof = new Set<string>();
+    const datumOverride = new Map<string, number>();
+    if (!cornerChoices || corners.length === 0)
+      return { roofs, massMiters, noRoof, datumOverride };
+    const byId = new Map(blocks.map((b) => [b.id, b]));
+    for (const c of corners) {
+      const choice = cornerChoice(cornerChoices, c, blocks);
+      if (choice.mode !== "unified") continue;
+      const pSide = c[choice.primary];
+      const oSide = c[choice.primary === "a" ? "b" : "a"];
+      const pBlock = byId.get(pSide.blockId)!;
+      const pLot = pBlock.lots[pSide.lotIndex];
+      const oLot = byId.get(oSide.blockId)!.lots[oSide.lotIndex];
+      const pLayout = computeLayout(pLot.params);
+      const oLayout = computeLayout(oLot.params);
+      const D = pLayout.massingDepth;
+
+      // Elbow fill — every unified corner, flat roofs included. Seed from
+      // the WALL miter so the untouched side keeps its wall extension.
+      const mm = massMiterFor(c, D);
+      for (const [side, e] of [
+        [c.a, mm.a],
+        [c.b, mm.b],
+      ] as const) {
+        if (e === 0) continue;
+        const key = `${side.blockId}:${side.lotIndex}`;
+        const cur =
+          massMiters.get(key) ??
+          { ...(miters.get(key) ?? { left: 0, right: 0 }) };
+        massMiters.set(key, { ...cur, [side.lotSide]: e });
+      }
+
+      // Shared datum: both wings level where the PRIMARY corner lot stands,
+      // so the merged mass (and its roof) can't tear on a slope. Flat
+      // ground: every datum is equal anyway — byte-identical.
+      const placement = lotPlacements(pBlock)[pSide.lotIndex];
+      const { datum } = levelingFor(
+        placement.position[0],
+        placement.position[2],
+        pLot.params.width,
+        D,
+        placement.rotationY,
+        ground,
+      );
+      datumOverride.set(`${c.a.blockId}:${c.a.lotIndex}`, datum);
+      datumOverride.set(`${c.b.blockId}:${c.b.lotIndex}`, datum);
+
+      // One L-roof only when every precondition holds; otherwise the wings
+      // keep their independent tents exactly as today.
+      if (!pLayout.roof) continue; // flat — the fill above still applies
+      if ((pLot.params.roofOrientation ?? "parallel") !== "parallel") continue;
+      if ((oLot.params.roofOrientation ?? "parallel") !== "parallel") continue;
+      if (oLayout.massingDepth !== D) continue;
+      if (oLayout.wallTop !== pLayout.wallTop) continue;
+      const frame = cornerFrame(c, blocks);
+      const plan = cornerRoofPlan({
+        V: frame.V,
+        uA: frame.uA,
+        uB: frame.uB,
+        nA: frame.nA,
+        nB: frame.nB,
+        D,
+        Wa: frame.Wa,
+        Wb: frame.Wb,
+        convex: c.convex,
+        type: pLayout.roof.type,
+        eaveY: pLayout.wallTop,
+        roofHeight: pLayout.roof.ridgeY - pLayout.roof.eaveY,
+      });
+      if (!plan) continue;
+      roofs.push({
+        key: c.key,
+        plan,
+        datum,
+        color: ROOF_COLORS[pLot.params.roofColor ?? "slate"],
+      });
+      noRoof.add(`${c.a.blockId}:${c.a.lotIndex}`);
+      noRoof.add(`${c.b.blockId}:${c.b.lotIndex}`);
+    }
+    return { roofs, massMiters, noRoof, datumOverride };
+  }, [cornerChoices, corners, blocks, miters, ground]);
   // Both corner-side lots to highlight when a corner is selected. Null when
   // no corner is selected OR the selected corner has dissolved (angle change
   // / node drag) — the marker condition falls back to the plain lot marker.
@@ -402,7 +521,15 @@ export default function SceneContents({
           ground={ground}
           cornerSides={cornerSides}
           marqueeLots={marqueeLotsByBlock?.get(block.id) ?? null}
+          massMiters={cornerMerge.massMiters}
+          noRoof={cornerMerge.noRoof}
+          datumOverride={cornerMerge.datumOverride}
         />
+      ))}
+      {/* Merged corner L-roofs — one hip/valley surface per unified corner,
+       * replacing the two suppressed per-wing tents. */}
+      {cornerMerge.roofs.map((r) => (
+        <CornerRoofMesh key={r.key} plan={r.plan} datum={r.datum} color={r.color} />
       ))}
       {/* Scene-wide window glass + frames as two InstancedMeshes (perf). The
        * per-block FacadeMesh skips WindowFill under USE_INSTANCING. */}
