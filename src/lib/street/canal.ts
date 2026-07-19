@@ -7,7 +7,8 @@ import type { Intersection } from "./intersections";
 /** Canal cross-section constants (metres). */
 export const CANAL_QUAY = 0.5;        // quay-wall thickness
 export const CANAL_SIDEWALK = 3;      // walkable band each bank
-export const CANAL_WATER_DEPTH = 1.2; // min water depth below the lowest bank
+export const CANAL_WATER_DEPTH = 2.5; // water level below the lowest bank (real quays read deep)
+export const CANAL_BED_DEPTH = 1.2;   // visible bed below the water surface
 export const BRIDGE_DECK_WIDTH = 3;   // footbridge breadth (along the canal)
 export const BRIDGE_RISE = 1.5;       // arch apex above bank grade
 
@@ -33,6 +34,22 @@ export function canalWaterY(centreline: Vec2[], width: number, ground: Ground): 
     if (g < minG) minG = g;
   }
   return minG - CANAL_WATER_DEPTH;
+}
+
+/** The closed plan outline of a canal's cut through the ground plane: the
+ * BANK ribbon (outer sidewalk edge) as one loop — left side out, right side
+ * back. The ground punches this as a hole (the sidewalks re-cover the rim,
+ * so the seam hides); the quay walls + bed line the cut. Uses the same
+ * fillet the canal mesh renders with so hole and masonry coincide. null for
+ * degenerate polylines. */
+export function canalHoleOutline(
+  centreline: Vec2[],
+  width: number,
+): Vec2[] | null {
+  if (centreline.length < 2) return null;
+  const { bank } = canalOffsets(centreline, width);
+  if (bank.left.length < 2) return null;
+  return [...bank.left, ...[...bank.right].reverse()];
 }
 
 /** Ground rise along a canal beyond this is called out — the level pool sits

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { canalOffsets, canalWaterY, canalGradeAdvisory, CANAL_WATER_DEPTH, bridgesFor, bridgeArch } from "./canal";
+import { canalOffsets, canalWaterY, canalGradeAdvisory, canalHoleOutline, CANAL_WATER_DEPTH, bridgesFor, bridgeArch } from "./canal";
 import { STREET_SPECS } from "./types";
 import type { Street, Vec2, StreetNetwork } from "./types";
 import { groundHeightAt } from "@/lib/facade/terrain";
@@ -119,5 +119,24 @@ describe("canalGradeAdvisory", () => {
         { slope: 0.1, azimuth: 0 },
       ),
     ).toBeNull();
+  });
+});
+
+describe("canalHoleOutline", () => {
+  it("closes the bank ribbon into one loop (left out, right back)", () => {
+    const out = canalHoleOutline([[0, 0], [40, 0]], 14)!;
+    expect(out).not.toBeNull();
+    const { bank } = canalOffsets([[0, 0], [40, 0]], 14);
+    expect(out.length).toBe(bank.left.length + bank.right.length);
+    expect(out[0]).toEqual(bank.left[0]);
+    expect(out[out.length - 1]).toEqual(bank.right[0]);
+    // straight canal: the loop spans the full bank width (14/2 + 0.5 + 3)
+    const zs = out.map((p) => p[1]);
+    expect(Math.max(...zs)).toBeCloseTo(10.5);
+    expect(Math.min(...zs)).toBeCloseTo(-10.5);
+  });
+
+  it("null for a degenerate polyline", () => {
+    expect(canalHoleOutline([[0, 0]], 14)).toBeNull();
   });
 });

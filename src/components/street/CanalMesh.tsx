@@ -4,7 +4,7 @@ import * as THREE from "three";
 import type { Street } from "@/lib/street/types";
 import { effectiveWidth, minRadiusOf } from "@/lib/street/types";
 import { filletCentreline } from "@/lib/street/geometry";
-import { canalOffsets, canalWaterY } from "@/lib/street/canal";
+import { canalOffsets, canalWaterY, CANAL_BED_DEPTH } from "@/lib/street/canal";
 import { groundHeightAt, type Ground } from "@/lib/facade/terrain";
 
 const WATER = "#2f6b8f";
@@ -32,6 +32,8 @@ export default function CanalMesh({
     const waterPos: number[] = [];
     const quayPos: number[] = [];
     const walkPos: number[] = [];
+    const bedPos: number[] = [];
+    const bedY = waterY - CANAL_BED_DEPTH;
     const quad = (arr: number[], a: number[], b: number[], c: number[], d: number[]) =>
       arr.push(...a, ...b, ...c, ...a, ...c, ...d);
 
@@ -42,14 +44,19 @@ export default function CanalMesh({
       quad(waterPos,
         [wl0[0], waterY, wl0[1]], [wr0[0], waterY, wr0[1]],
         [wr1[0], waterY, wr1[1]], [wl1[0], waterY, wl1[1]]);
+      // bed: an opaque floor under the transparent water
+      quad(bedPos,
+        [wl0[0], bedY, wl0[1]], [wr0[0], bedY, wr0[1]],
+        [wr1[0], bedY, wr1[1]], [wl1[0], bedY, wl1[1]]);
 
       for (const side of ["left", "right"] as const) {
         const we0 = water[side][i], we1 = water[side][i + 1];
         const qf0 = quayFoot[side][i], qf1 = quayFoot[side][i + 1];
         const be0 = bank[side][i], be1 = bank[side][i + 1];
-        // quay inner wall: water edge from waterY up to draped bank grade
+        // quay inner wall: water edge from the BED up to draped bank grade —
+        // the submerged stretch shows through the transparent water.
         quad(quayPos,
-          [we0[0], waterY, we0[1]], [we1[0], waterY, we1[1]],
+          [we0[0], bedY, we0[1]], [we1[0], bedY, we1[1]],
           [we1[0], gy(we1), we1[1]], [we0[0], gy(we0), we0[1]]);
         // quay top cap: water edge → quay foot at grade
         quad(quayPos,
@@ -67,11 +74,16 @@ export default function CanalMesh({
       g.computeVertexNormals();
       return g;
     };
-    return { water: mk(waterPos), quay: mk(quayPos), walk: mk(walkPos) };
+    return { water: mk(waterPos), quay: mk(quayPos), walk: mk(walkPos), bed: mk(bedPos) };
   }, [street, ground]);
 
   useEffect(
-    () => () => { geos?.water.dispose(); geos?.quay.dispose(); geos?.walk.dispose(); },
+    () => () => {
+      geos?.water.dispose();
+      geos?.quay.dispose();
+      geos?.walk.dispose();
+      geos?.bed.dispose();
+    },
     [geos],
   );
   if (!geos) return null;
@@ -88,6 +100,11 @@ export default function CanalMesh({
       </mesh>
       <mesh geometry={geos.quay} castShadow receiveShadow>
         <meshStandardMaterial color={stone} roughness={0.95} side={THREE.DoubleSide} />
+      </mesh>
+      {/* Opaque bed under the transparent water — gives the channel real
+       * depth instead of a bottomless void. */}
+      <mesh geometry={geos.bed}>
+        <meshStandardMaterial color="#3d453f" roughness={1} side={THREE.DoubleSide} />
       </mesh>
       <mesh geometry={geos.water}>
         <meshStandardMaterial

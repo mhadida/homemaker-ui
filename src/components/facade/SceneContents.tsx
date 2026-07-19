@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { Environment, ContactShadows, Grid } from "@react-three/drei";
 import * as THREE from "three";
 import FacadeMesh from "./FacadeMesh";
@@ -10,6 +10,9 @@ import { isWebGPUPath } from "./webgpu";
 import InstancedFacadeBoxes from "./InstancedFacadeBoxes";
 import StreetNetworkView from "@/components/street/StreetNetworkView";
 import type { StreetNetwork } from "@/lib/street/types";
+import { effectiveWidth, minRadiusOf } from "@/lib/street/types";
+import { canalHoleOutline } from "@/lib/street/canal";
+import { filletCentreline } from "@/lib/street/geometry";
 import type { FacadeParams } from "@/lib/facade/types";
 import type { ViewSettings } from "@/lib/building/types";
 import {
@@ -87,36 +90,37 @@ function sunPositionFromAngles(
   return [x, y, z];
 }
 
-/** Copied from BuildingViewer — radially fading ground plane. */
-function useGroundGeometry() {
-  return useMemo(() => {
-    const geo = new THREE.PlaneGeometry(200, 200, 96, 96);
-    const base = new THREE.Color("#a59e95");
-    const pos = geo.attributes.position;
-    const colors = new Float32Array(pos.count * 4);
-    const SOLID_HALF = 15;
-    const FADE_END = 70;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i);
-      const y = pos.getY(i);
-      const d = Math.max(Math.abs(x), Math.abs(y));
-      let alpha: number;
-      if (d <= SOLID_HALF) {
-        alpha = 1;
-      } else if (d >= FADE_END) {
-        alpha = 0;
-      } else {
-        const t = (d - SOLID_HALF) / (FADE_END - SOLID_HALF);
-        alpha = 1 - t * t * (3 - 2 * t);
-      }
-      colors[i * 4] = base.r;
-      colors[i * 4 + 1] = base.g;
-      colors[i * 4 + 2] = base.b;
-      colors[i * 4 + 3] = alpha;
+/** Half-extent of the "infinite" ground plane — far past the fog of any
+ * practical scene, so the world never visibly ends. */
+const GROUND_HALF = 2000;
+
+/** One simple opaque plane out to the horizon (replaces the old radially
+ * fading 200 m patch), with a REAL hole punched for every canal: the cut's
+ * rim hides under the canal's own sidewalks and the quay walls + bed line
+ * the channel. The same holes-in-terrain shape is where future cuts
+ * (sunken plazas, stairs) will go. */
+function useGroundGeometry(streetNetwork?: StreetNetwork) {
+  const geo = useMemo(() => {
+    const shape = new THREE.Shape([
+      new THREE.Vector2(-GROUND_HALF, -GROUND_HALF),
+      new THREE.Vector2(GROUND_HALF, -GROUND_HALF),
+      new THREE.Vector2(GROUND_HALF, GROUND_HALF),
+      new THREE.Vector2(-GROUND_HALF, GROUND_HALF),
+    ]);
+    for (const s of streetNetwork?.streets ?? []) {
+      if (s.type !== "canal") continue;
+      const cl = filletCentreline(s.points, minRadiusOf(s), 8, s.closed);
+      const outline = canalHoleOutline(cl, effectiveWidth(s));
+      if (!outline) continue;
+      // The plane is rotated −90° about X: plane (x, y) → world (x, −z).
+      shape.holes.push(
+        new THREE.Path(outline.map(([x, z]) => new THREE.Vector2(x, -z))),
+      );
     }
-    geo.setAttribute("color", new THREE.BufferAttribute(colors, 4));
-    return geo;
-  }, []);
+    return new THREE.ShapeGeometry(shape);
+  }, [streetNetwork]);
+  useEffect(() => () => geo.dispose(), [geo]);
+  return geo;
 }
 
 /** The 12 edges of a centred w×h×d box as segment endpoint pairs — what
@@ -331,7 +335,7 @@ export default function SceneContents({
   /** Undefined → intersections aren't selectable. */
   onSelectIntersection?: (key: string) => void;
 }) {
-  const groundGeo = useGroundGeometry();
+  const groundGeo = useGroundGeometry(streetNetwork);
   const groundQuat = useMemo(() => {
     const q = new THREE.Quaternion();
     q.setFromUnitVectors(
@@ -565,8 +569,7 @@ export default function SceneContents({
       <group quaternion={groundQuat}>
         <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow geometry={groundGeo}>
           <meshStandardMaterial
-            vertexColors
-            transparent
+            color="#a59e95"
             roughness={0.95}
             metalness={0}
             polygonOffset
