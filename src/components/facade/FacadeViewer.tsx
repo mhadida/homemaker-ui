@@ -8,15 +8,17 @@ import {
   useRef,
   useState,
 } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import {
   View,
   OrbitControls,
   MapControls,
   OrthographicCamera,
   PerspectiveCamera,
+  PointerLockControls,
   Stats,
 } from "@react-three/drei";
+import type { PointerLockControls as PointerLockControlsImpl } from "three-stdlib";
 import * as THREE from "three";
 import SceneContents from "./SceneContents";
 import Line from "./NodeLine";
@@ -36,6 +38,8 @@ import {
 } from "@/lib/facade/blocks";
 import type { Corner } from "@/lib/facade/corners";
 import type { Ground } from "@/lib/facade/terrain";
+import { groundHeightAt } from "@/lib/facade/terrain";
+import { walkStep, EYE_HEIGHT, type WalkKeys } from "@/lib/facade/walk";
 import { marqueeEmpty, type Marquee } from "@/lib/facade/marquee";
 import {
   streetLines,
@@ -1366,6 +1370,106 @@ function PlanPane({
   );
 }
 
+/** First-person walk: pointer-lock mouse-look + WASD at eye height. Mounted
+ * INSTEAD of the pane's OrbitControls while walking. Esc leaves pointer lock
+ * → onExit (with a look-at point a few metres ahead so the returning orbit
+ * controls don't lurch to the scene origin). Movement math is the pure
+ * walkStep; the camera pins to the ground surface each frame (slope-follow).
+ * v1 is deliberately walk-through — no collision. */
+function WalkControls({
+  ground,
+  onExit,
+}: {
+  ground: Ground;
+  onExit: (lookAt: [number, number, number]) => void;
+}) {
+  const camera = useThree((s) => s.camera);
+  const controlsRef = useRef<PointerLockControlsImpl | null>(null);
+  const keys = useRef<WalkKeys>({
+    forward: false,
+    back: false,
+    left: false,
+    right: false,
+  });
+  // Kept fresh so the unlock handler (fired by the browser on Esc) reports
+  // the camera's final heading without a stale closure.
+  const exitRef = useRef(onExit);
+  useEffect(() => {
+    exitRef.current = onExit;
+  });
+
+  // lock() must run inside the Walk button's user activation window — mount
+  // happens synchronously with that click, so it does. The drop to eye
+  // height happens on the first frame callback below (the immutability lint
+  // bars mutating the useThree camera in an effect). If the browser refuses
+  // pointer lock (headless, iframe policy), leave walk mode instead of
+  // sticking in a mode that can't move or look.
+  useEffect(() => {
+    const doc = document;
+    const failed = () =>
+      exitRef.current([camera.position.x, camera.position.y, camera.position.z - 8]);
+    doc.addEventListener("pointerlockerror", failed);
+    controlsRef.current?.lock();
+    return () => doc.removeEventListener("pointerlockerror", failed);
+  }, [camera]);
+  const placed = useRef(false);
+
+  useEffect(() => {
+    const set = (code: string, on: boolean) => {
+      if (code === "KeyW" || code === "ArrowUp") keys.current.forward = on;
+      else if (code === "KeyS" || code === "ArrowDown") keys.current.back = on;
+      else if (code === "KeyA" || code === "ArrowLeft") keys.current.left = on;
+      else if (code === "KeyD" || code === "ArrowRight") keys.current.right = on;
+    };
+    const down = (e: KeyboardEvent) => set(e.code, true);
+    const up = (e: KeyboardEvent) => set(e.code, false);
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+    };
+  }, []);
+
+  const fwd = useRef(new THREE.Vector3());
+  // The camera is mutated through useFrame's state (not the useThree value)
+  // — the render-phase immutability lint allows frame-callback mutation.
+  useFrame((state, dt) => {
+    const cam = state.camera;
+    if (!placed.current) {
+      // Drop from the orbit position to eye height where the camera stood.
+      placed.current = true;
+      cam.position.y =
+        groundHeightAt(cam.position.x, cam.position.z, ground) + EYE_HEIGHT;
+    }
+    if (!controlsRef.current?.isLocked) return;
+    cam.getWorldDirection(fwd.current);
+    const [x, z] = walkStep(
+      [cam.position.x, cam.position.z],
+      [fwd.current.x, fwd.current.z],
+      keys.current,
+      Math.min(dt, 0.1), // clamp tab-switch time spikes
+    );
+    cam.position.x = x;
+    cam.position.z = z;
+    cam.position.y = groundHeightAt(x, z, ground) + EYE_HEIGHT;
+  });
+
+  return (
+    <PointerLockControls
+      ref={controlsRef}
+      onUnlock={() => {
+        camera.getWorldDirection(fwd.current);
+        exitRef.current([
+          camera.position.x + fwd.current.x * 8,
+          camera.position.y + fwd.current.y * 8,
+          camera.position.z + fwd.current.z * 8,
+        ]);
+      }}
+    />
+  );
+}
+
 function PerspectivePane({
   blocks,
   selected,
@@ -1379,6 +1483,8 @@ function PerspectivePane({
   onSelectStreet,
   selectedIntersection,
   onSelectIntersection,
+  walk,
+  onExitWalk,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -1392,7 +1498,14 @@ function PerspectivePane({
   onSelectStreet: (id: string) => void;
   selectedIntersection: string | null;
   onSelectIntersection: (key: string) => void;
+  walk: boolean;
+  onExitWalk: () => void;
 }) {
+  // Where the orbit controls look after a walk ends — the walker's last
+  // heading, so the view doesn't snap back to the scene origin.
+  const [orbitTarget, setOrbitTarget] = useState<[number, number, number]>([
+    0, 4, 0,
+  ]);
   return (
     <>
       <SceneContents
@@ -1416,25 +1529,35 @@ function PerspectivePane({
         near={0.1}
         far={2000}
       />
-      <OrbitControls
-        makeDefault
-        enableDamping
-        dampingFactor={0.08}
-        target={[0, 4, 0]}
-        minDistance={3}
-        maxDistance={600}
-        maxPolarAngle={Math.PI / 2.05}
-        enablePan
-        panSpeed={0.8}
-        rotateSpeed={0.5}
-        zoomSpeed={1.0}
-        touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
-        mouseButtons={{
-          LEFT: THREE.MOUSE.ROTATE,
-          MIDDLE: THREE.MOUSE.DOLLY,
-          RIGHT: THREE.MOUSE.PAN,
-        }}
-      />
+      {walk ? (
+        <WalkControls
+          ground={ground}
+          onExit={(lookAt) => {
+            setOrbitTarget(lookAt);
+            onExitWalk();
+          }}
+        />
+      ) : (
+        <OrbitControls
+          makeDefault
+          enableDamping
+          dampingFactor={0.08}
+          target={orbitTarget}
+          minDistance={3}
+          maxDistance={600}
+          maxPolarAngle={Math.PI / 2.05}
+          enablePan
+          panSpeed={0.8}
+          rotateSpeed={0.5}
+          zoomSpeed={1.0}
+          touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
+          mouseButtons={{
+            LEFT: THREE.MOUSE.ROTATE,
+            MIDDLE: THREE.MOUSE.DOLLY,
+            RIGHT: THREE.MOUSE.PAN,
+          }}
+        />
+      )}
     </>
   );
 }
@@ -1634,6 +1757,8 @@ export default function FacadeViewer({
   };
 
   const [maximized, setMaximized] = useState<PaneId | null>(null);
+  // First-person walk in the 3D pane (WASD + mouse-look, Esc exits).
+  const [walkMode, setWalkMode] = useState(false);
   // Tool starts idle; the effect below arms the pen only on a TRULY empty
   // world (no blocks AND no streets). A streets-only scene must stay idle so
   // its ribbons are clickable — the armed pen's full-screen click-catcher
@@ -1809,6 +1934,8 @@ export default function FacadeViewer({
             onSelectStreet={onSelectStreet}
             selectedIntersection={selectedIntersection}
             onSelectIntersection={onSelectIntersection}
+            walk={walkMode}
+            onExitWalk={() => setWalkMode(false)}
           />
         );
       case "overview":
@@ -1893,6 +2020,24 @@ export default function FacadeViewer({
             <div className="absolute top-1.5 left-2 text-[10px] font-mono text-white/70 bg-black/40 rounded px-1.5 py-0.5 pointer-events-none">
               {p.label}
             </div>
+            {p.id === "perspective" && (
+              <button
+                type="button"
+                onClick={() => setWalkMode((w) => !w)}
+                className={`absolute top-1 left-12 h-7 rounded-full px-3 text-[12px] font-medium shadow-lg transition-colors ${
+                  walkMode
+                    ? "bg-[#2f855a] text-white"
+                    : "bg-white/90 text-zinc-900 hover:bg-white"
+                }`}
+                title={
+                  walkMode
+                    ? "Walking — WASD to move, mouse to look, Esc to exit"
+                    : "Walk this street in first person"
+                }
+              >
+                {walkMode ? "🚶 Walking — Esc to exit" : "🚶 Walk"}
+              </button>
+            )}
             {p.id === "plan" && (drawMode || selectMode || streetDrawMode) && (
               /* Uniform mode frame: the plan pane is the live drawing surface
                * while the pen is armed, the marquee surface while the Select
