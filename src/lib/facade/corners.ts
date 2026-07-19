@@ -194,6 +194,9 @@ function syncedParams(
     dormers: source.dormers,
     gableStyle: source.gableStyle,
     gableHeight: source.gableHeight,
+    // One corner mass has one depth — the L-roof's four planes need a single
+    // gradient (2026-07-17 corner-l-roof spec).
+    massingDepth: source.massingDepth,
   };
   if (unified) {
     const rhythm = source.width / source.bays;
@@ -227,6 +230,7 @@ function syncedParams(
     next.dormers === target.dormers &&
     next.gableStyle === target.gableStyle &&
     next.gableHeight === target.gableHeight &&
+    next.massingDepth === target.massingDepth &&
     (!unified ||
       (next.bays === target.bays &&
         next.windowWidthRatio === target.windowWidthRatio &&
