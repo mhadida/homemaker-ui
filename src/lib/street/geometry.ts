@@ -106,6 +106,63 @@ export function snapStreetPoint(
   return best;
 }
 
+/** A plan point projected onto a street centreline. */
+export interface StreetProjection {
+  streetId: string;
+  /** The projected point — always ON a centreline. */
+  point: Vec2;
+  /** Unit direction of travel along the segment it landed on. */
+  tangent: Vec2;
+  /** Distance from the query point to that centreline. */
+  dist: number;
+}
+
+/** Nearest point on ANY street centreline to `p`.
+ *
+ * Deliberately UNBOUNDED — unlike `snapStreetPoint` there is no radius, so
+ * the nearest street always wins and a pick can never land off-street. That
+ * is the point: it's what lets the walk-start picker guarantee "on a street"
+ * without dead clicks. It also projects onto segments rather than preferring
+ * vertices, so a mid-block pick stays mid-block.
+ *
+ * Walks the raw drawn polyline (the filleted centreline is a documented
+ * deferral), including a closed loop's implicit closing segment — without
+ * that wrap a ring's final stretch would be unpickable.
+ *
+ * Returns null when no street has a usable segment (empty network, or
+ * single-vertex stubs only). Pure. */
+export function nearestPointOnStreets(
+  p: Vec2,
+  network: StreetNetwork,
+): StreetProjection | null {
+  let best: StreetProjection | null = null;
+  for (const s of network.streets) {
+    const n = s.points.length;
+    if (n < 2) continue;
+    // `points` never repeats the first vertex, so a closed ring has one more
+    // segment than an open polyline of the same length.
+    const segCount = s.closed && n >= 3 ? n : n - 1;
+    for (let i = 0; i < segCount; i++) {
+      const a = s.points[i];
+      const b = s.points[(i + 1) % n];
+      const dx = b[0] - a[0];
+      const dz = b[1] - a[1];
+      const len = Math.hypot(dx, dz);
+      if (len < 1e-9) continue; // duplicate vertices carry no direction
+      const c = closestPointOnSegment(p, a, b);
+      if (!best || c.dist < best.dist) {
+        best = {
+          streetId: s.id,
+          point: c.point,
+          tangent: [dx / len, dz / len],
+          dist: c.dist,
+        };
+      }
+    }
+  }
+  return best;
+}
+
 /** Uniform Catmull-Rom through the vertices, sampling each segment.
  * Endpoints are duplicated so the curve passes through the first and last
  * vertex. ≤ 2 points → straight (returned unchanged). */

@@ -8,6 +8,7 @@ import {
   cornerFit,
   filletCentreline,
   closestPointOnSegment,
+  nearestPointOnStreets,
 } from "./geometry";
 import type { Street, StreetNetwork, Vec2 } from "./types";
 
@@ -317,3 +318,130 @@ describe("filletCentreline / streetRibbon — closed loops", () => {
     expect(right[0][1]).toBeCloseTo(right[right.length - 1][1], 6);
   });
 })
+
+describe("nearestPointOnStreets", () => {
+  const net = (streets: Street[]): StreetNetwork => ({
+    streets,
+    roundabouts: [],
+    squares: [],
+  });
+  // a straight street along +x at z = 0
+  const straight: Street = {
+    id: "s1",
+    type: "street",
+    points: [
+      [0, 0],
+      [100, 0],
+    ],
+  };
+
+  it("projects a point onto the centreline and reports the offset", () => {
+    const r = nearestPointOnStreets([40, 12], net([straight]));
+    expect(r).not.toBeNull();
+    expect(r!.streetId).toBe("s1");
+    expect(r!.point[0]).toBeCloseTo(40);
+    expect(r!.point[1]).toBeCloseTo(0);
+    expect(r!.dist).toBeCloseTo(12);
+  });
+
+  it("is UNBOUNDED — a far-off pick still lands on the street", () => {
+    // snapStreetPoint would return the raw point here (outside any radius);
+    // this must snap regardless, so a walk start can never be off-street.
+    const r = nearestPointOnStreets([50, 5000], net([straight]));
+    expect(r!.point[0]).toBeCloseTo(50);
+    expect(r!.point[1]).toBeCloseTo(0);
+  });
+
+  it("stays mid-segment instead of jumping to a vertex", () => {
+    // 6 m from the centreline at x=45 — nearer to the x=100 vertex in
+    // snapStreetPoint's vertex-first ordering, but the projection wins here.
+    const r = nearestPointOnStreets([45, 6], net([straight]));
+    expect(r!.point[0]).toBeCloseTo(45);
+  });
+
+  it("reports the unit tangent as the direction of travel", () => {
+    const diagonal: Street = {
+      id: "d",
+      type: "street",
+      points: [
+        [0, 0],
+        [10, 10],
+      ],
+    };
+    const r = nearestPointOnStreets([5, 5], net([diagonal]));
+    expect(r!.tangent[0]).toBeCloseTo(Math.SQRT1_2);
+    expect(r!.tangent[1]).toBeCloseTo(Math.SQRT1_2);
+    expect(Math.hypot(...r!.tangent)).toBeCloseTo(1);
+  });
+
+  it("picks the closest street when several compete", () => {
+    const far: Street = {
+      id: "far",
+      type: "street",
+      points: [
+        [0, 200],
+        [100, 200],
+      ],
+    };
+    expect(nearestPointOnStreets([50, 10], net([straight, far]))!.streetId).toBe("s1");
+    expect(nearestPointOnStreets([50, 190], net([straight, far]))!.streetId).toBe("far");
+  });
+
+  it("covers a closed loop's implicit closing segment", () => {
+    const ring: Street = {
+      id: "ring",
+      type: "street",
+      points: [
+        [0, 0],
+        [60, 0],
+        [60, 60],
+        [0, 60],
+      ],
+      closed: true,
+    };
+    // The x=0 edge exists ONLY as the wrap segment [0,60] → [0,0].
+    const r = nearestPointOnStreets([-5, 30], net([ring]));
+    expect(r!.point[0]).toBeCloseTo(0);
+    expect(r!.point[1]).toBeCloseTo(30);
+    expect(r!.dist).toBeCloseTo(5);
+  });
+
+  it("does NOT invent a closing segment for an open polyline", () => {
+    const open: Street = {
+      id: "o",
+      type: "street",
+      points: [
+        [0, 0],
+        [60, 0],
+        [60, 60],
+        [0, 60],
+      ],
+    };
+    // Same probe as the ring test: with no wrap the nearest real point is the
+    // [0,0] / [0,60] endpoint, ~30 m away, not a 5 m projection.
+    const r = nearestPointOnStreets([-5, 30], net([open]));
+    expect(r!.dist).toBeGreaterThan(29);
+  });
+
+  it("returns null for an empty network or single-vertex stubs", () => {
+    expect(nearestPointOnStreets([0, 0], net([]))).toBeNull();
+    expect(
+      nearestPointOnStreets([0, 0], net([{ id: "p", type: "street", points: [[5, 5]] }])),
+    ).toBeNull();
+  });
+
+  it("ignores zero-length segments rather than emitting a NaN tangent", () => {
+    const dup: Street = {
+      id: "dup",
+      type: "street",
+      points: [
+        [10, 0],
+        [10, 0],
+        [20, 0],
+      ],
+    };
+    const r = nearestPointOnStreets([15, 3], net([dup]));
+    expect(Number.isFinite(r!.tangent[0])).toBe(true);
+    expect(Math.hypot(...r!.tangent)).toBeCloseTo(1);
+  });
+});

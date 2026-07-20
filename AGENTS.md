@@ -231,6 +231,20 @@ NOT involved; every edit is live (no Update button). Spec:
   needs the viewport Y-flip shim in `FacadeViewer` (WebGPU origin is
   top-left); Save-image grabs WebGPU frames via captureStream+ImageCapture.
   Spec: `docs/superpowers/specs/2026-07-18-webgpu-migration-design.md`.
+- **First-person walk**: a **Walk** toggle on the 3D pane drops into
+  first-person (WASD + pointer-lock mouse-look, 1.75 m eye height, walking
+  speed, slope-follow, walk-through — no collision; `src/lib/facade/walk.ts`
+  pure `walkStep`). Entering is a **two-step pick**: Walk arms a plan-pane
+  picker (the whole pane becomes a modal catcher floating at `y=50`, above all
+  geometry, so every click wins over lot/street selection), the cursor projects
+  onto the **nearest street centreline** (`nearestPointOnStreets` in
+  `src/lib/street/geometry.ts` — unbounded, so a pick can never land off-street;
+  walks the raw polyline incl. a closed loop's wrap segment), a green disc +
+  facing arrow preview where you'll stand and face, and the click commits that
+  pose. `WalkControls` places the camera on the picked point facing along the
+  street tangent. The button is disabled with no streets (nothing to stand on);
+  Esc or re-clicking Walk cancels an armed pick. Spec:
+  `docs/superpowers/specs/2026-07-18-fpv-walk-design.md`.
 - **AI prompt**: `/api/facade-prompt` (flat fully-required zod spec — OpenAI
   structured output rejects optionals) targets the selected lot, plus an
   instant local keyword parser.

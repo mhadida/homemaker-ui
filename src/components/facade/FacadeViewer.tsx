@@ -47,7 +47,12 @@ import {
   streetAwareFlipped,
   type StreetRef,
 } from "@/lib/facade/street";
-import { filletCentreline, snapStreetPoint } from "@/lib/street/geometry";
+import {
+  filletCentreline,
+  snapStreetPoint,
+  nearestPointOnStreets,
+  type StreetProjection,
+} from "@/lib/street/geometry";
 import { STREET_SPECS } from "@/lib/street/types";
 import type { StreetNetwork, StreetType, Vec2 } from "@/lib/street/types";
 
@@ -1060,6 +1065,9 @@ function NodeHandles({
 
 const STREET_NODE_COLOR = "#2f855a"; // the Roads-tool green
 const STREET_NODE_HOVER = "#5cbf8a";
+/** Walk-start pick marker — brighter than the street nodes so the standing
+ * spot and facing arrow read on top of the ribbon they sit on. */
+const WALK_PICK_COLOR = "#7ee2a8";
 
 /** Draggable vertices for the SELECTED street — the street-network analog of
  * NodeHandles. Same ref-driven drag lifecycle (a pointerup can land in the
@@ -1224,6 +1232,8 @@ function PlanPane({
   drawMode,
   selectMode,
   streetDrawMode,
+  walkArming,
+  onPickWalkStart,
   activeStreetType,
   onCommitStreet,
   onCommitLine,
@@ -1262,6 +1272,9 @@ function PlanPane({
   drawMode: boolean;
   selectMode: boolean;
   streetDrawMode: boolean;
+  /** Walk-start picker armed — plan pane projects clicks onto streets. */
+  walkArming: boolean;
+  onPickWalkStart: (p: StreetProjection) => void;
   activeStreetType: StreetType;
   onCommitStreet: (type: StreetType, points: Vec2[], closed?: boolean) => void;
   onCommitLine: (
@@ -1420,9 +1433,14 @@ function PlanPane({
         gridSnap={gridSnap}
         gridAngle={gridAngle}
       />
+      <WalkStartSurface
+        active={walkArming}
+        network={streetNetwork}
+        onPick={onPickWalkStart}
+      />
       <NodeHandles
         blocks={blocks}
-        interactive={!drawMode && !selectMode && !streetDrawMode}
+        interactive={!drawMode && !selectMode && !streetDrawMode && !walkArming}
         onMoveNode={onMoveNode}
         onDraggingChange={handleDraggingChange}
         corners={corners}
@@ -1431,7 +1449,7 @@ function PlanPane({
       <StreetNodeHandles
         network={streetNetwork}
         selectedStreet={selectedStreet}
-        interactive={!drawMode && !selectMode && !streetDrawMode}
+        interactive={!drawMode && !selectMode && !streetDrawMode && !walkArming}
         onMoveStreetNode={onMoveStreetNode}
         onDraggingChange={handleDraggingChange}
       />
@@ -1461,6 +1479,98 @@ function PlanPane({
   );
 }
 
+/** Walk-start picker: while the Walk button is ARMED, the plan pane becomes a
+ * click surface that projects the pointer onto the nearest street centreline
+ * and previews where the walker will stand (a disc) and which way they'll face
+ * (an arrow along the street). Clicking commits that spot and enters walk mode.
+ *
+ * The projection is unbounded, so every click lands on a street — there are no
+ * dead clicks, and the walker can never start inside a building or in mid-air.
+ * Mirrors the other plan tools' invisible catcher + render-time reset. */
+function WalkStartSurface({
+  active,
+  network,
+  onPick,
+}: {
+  active: boolean;
+  network: StreetNetwork;
+  onPick: (p: StreetProjection) => void;
+}) {
+  const [preview, setPreview] = useState<StreetProjection | null>(null);
+
+  // Drop the stale preview when the tool switches off (render-time reset,
+  // matching PenSurface / StreetDrawSurface).
+  const [wasActive, setWasActive] = useState(active);
+  if (active !== wasActive) {
+    setWasActive(active);
+    if (!active) setPreview(null);
+  }
+
+  if (!active) return null;
+  const heading = preview ? Math.atan2(preview.tangent[0], preview.tangent[1]) : 0;
+  return (
+    <>
+      {/* The catcher floats HIGH (just under the plan camera at y=60, above
+       * every building/roof/turret) so in the top-down ortho view it is the
+       * nearest interactive hit for every click — its stopPropagation then
+       * wins over lot/street selection, making the whole plan pane a modal
+       * pick surface. Rays are vertical, so the reported x/z are unaffected
+       * by the height. */}
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, 50, 0]}
+        onPointerMove={(e) => {
+          e.stopPropagation();
+          setPreview(nearestPointOnStreets([e.point.x, e.point.z], network));
+        }}
+        // Claim the whole gesture so nothing beneath (lots, ribbons) is
+        // selected by the same click. The pick fires on CLICK, not
+        // pointer-down: firing on down unmounts this surface mid-gesture, and
+        // the trailing click then falls through to the lot underneath. onClick
+        // keeps the surface mounted until it consumes the click itself.
+        onPointerDown={(e) => e.stopPropagation()}
+        onPointerUp={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          const p = nearestPointOnStreets([e.point.x, e.point.z], network);
+          if (p) onPick(p);
+        }}
+      >
+        <planeGeometry args={[4000, 4000]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+      {preview && (
+        <group
+          position={[preview.point[0], 0.14, preview.point[1]]}
+          rotation={[0, heading, 0]}
+        >
+          {/* where you'll stand */}
+          <mesh rotation={[-Math.PI / 2, 0, 0]}>
+            <circleGeometry args={[1.1, 24]} />
+            <meshBasicMaterial
+              color={WALK_PICK_COLOR}
+              transparent
+              opacity={0.95}
+              depthWrite={false}
+            />
+          </mesh>
+          {/* which way you'll face — a cone points +Y, so rotate it onto +Z
+           * and let the group's Y-rotation aim it along the street tangent */}
+          <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 2.6]}>
+            <coneGeometry args={[0.85, 2.2, 3]} />
+            <meshBasicMaterial
+              color={WALK_PICK_COLOR}
+              transparent
+              opacity={0.95}
+              depthWrite={false}
+            />
+          </mesh>
+        </group>
+      )}
+    </>
+  );
+}
+
 /** First-person walk: pointer-lock mouse-look + WASD at eye height. Mounted
  * INSTEAD of the pane's OrbitControls while walking. Esc leaves pointer lock
  * → onExit (with a look-at point a few metres ahead so the returning orbit
@@ -1469,9 +1579,14 @@ function PlanPane({
  * v1 is deliberately walk-through — no collision. */
 function WalkControls({
   ground,
+  start,
   onExit,
 }: {
   ground: Ground;
+  /** Where the walk begins — a point on a street centreline plus the street's
+   * direction. Null falls back to dropping in place at the orbit camera's
+   * position (the pre-picker behaviour, kept as a safety net). */
+  start: StreetProjection | null;
   onExit: (lookAt: [number, number, number]) => void;
 }) {
   const camera = useThree((s) => s.camera);
@@ -1489,12 +1604,14 @@ function WalkControls({
     exitRef.current = onExit;
   });
 
-  // lock() must run inside the Walk button's user activation window — mount
-  // happens synchronously with that click, so it does. The drop to eye
-  // height happens on the first frame callback below (the immutability lint
-  // bars mutating the useThree camera in an effect). If the browser refuses
-  // pointer lock (headless, iframe policy), leave walk mode instead of
-  // sticking in a mode that can't move or look.
+  // lock() must run inside the user-activation window of the click that
+  // entered walk mode — the street-start pick in the plan pane, or the Walk
+  // button's drop-in-place fallback. WalkControls mounts synchronously with
+  // that click's setState, so it does. The drop to eye height happens on the
+  // first frame callback below (the immutability lint bars mutating the
+  // useThree camera in an effect). If the browser refuses pointer lock
+  // (headless, iframe policy), leave walk mode instead of sticking in a mode
+  // that can't move or look.
   useEffect(() => {
     const doc = document;
     const failed = () =>
@@ -1528,8 +1645,22 @@ function WalkControls({
   useFrame((state, dt) => {
     const cam = state.camera;
     if (!placed.current) {
-      // Drop from the orbit position to eye height where the camera stood.
       placed.current = true;
+      if (start) {
+        // Stand on the picked street point, facing along the street. The
+        // camera looks down -Z at yaw 0, so aim the look direction at the
+        // tangent and let PointerLockControls read that heading.
+        cam.position.x = start.point[0];
+        cam.position.z = start.point[1];
+        const [tx, tz] = start.tangent;
+        cam.lookAt(
+          start.point[0] + tx,
+          groundHeightAt(start.point[0], start.point[1], ground) + EYE_HEIGHT,
+          start.point[1] + tz,
+        );
+      }
+      // Drop to eye height at wherever we now stand (picked spot, or the
+      // orbit camera's position when no pick was made).
       cam.position.y =
         groundHeightAt(cam.position.x, cam.position.z, ground) + EYE_HEIGHT;
     }
@@ -1578,6 +1709,7 @@ function PerspectivePane({
   selectedSquare,
   onSelectSquare,
   walk,
+  walkStart,
   onExitWalk,
 }: {
   blocks: FacadeBlock[];
@@ -1596,6 +1728,8 @@ function PerspectivePane({
   selectedSquare: string | null;
   onSelectSquare: (streetId: string) => void;
   walk: boolean;
+  /** The picked start pose (street point + facing); null → drop in place. */
+  walkStart: StreetProjection | null;
   onExitWalk: () => void;
 }) {
   // Where the orbit controls look after a walk ends — the walker's last
@@ -1632,6 +1766,7 @@ function PerspectivePane({
       {walk ? (
         <WalkControls
           ground={ground}
+          start={walkStart}
           onExit={(lookAt) => {
             setOrbitTarget(lookAt);
             onExitWalk();
@@ -1871,8 +2006,15 @@ export default function FacadeViewer({
   };
 
   const [maximized, setMaximized] = useState<PaneId | null>(null);
-  // First-person walk in the 3D pane (WASD + mouse-look, Esc exits).
+  // First-person walk in the 3D pane (WASD + mouse-look, Esc exits). Entered
+  // in two steps: ARM (the plan pane becomes a street picker) → PICK a start
+  // point on a street → walk. `walkStart` carries the picked pose into
+  // WalkControls; null means "drop in place" (the pre-picker fallback).
   const [walkMode, setWalkMode] = useState(false);
+  const [walkArming, setWalkArming] = useState(false);
+  const [walkStart, setWalkStart] = useState<StreetProjection | null>(null);
+  // Walks must start on a street — no street, nothing to pick.
+  const hasStreets = streetNetwork.streets.length > 0;
   // Tool starts idle; the effect below arms the pen only on a TRULY empty
   // world (no blocks AND no streets). A streets-only scene must stay idle so
   // its ribbons are clickable — the armed pen's full-screen click-catcher
@@ -1914,17 +2056,56 @@ export default function FacadeViewer({
     setDrawMode((d) => !d);
     setSelectMode(false);
     setStreetDrawMode(false);
+    setWalkArming(false);
   }, []);
   const toggleSelect = useCallback(() => {
     setDrawMode(false);
     setSelectMode((s) => !s);
     setStreetDrawMode(false);
+    setWalkArming(false);
   }, []);
   const toggleStreetDraw = useCallback(() => {
     setDrawMode(false);
     setSelectMode(false);
     setStreetDrawMode((s) => !s);
+    setWalkArming(false);
   }, []);
+  // The Walk button is a small state machine: walking → exit; arming → cancel;
+  // idle → arm the picker (and stand down the other plan tools so their
+  // full-screen click-catchers don't intercept the pick).
+  const onWalkButton = useCallback(() => {
+    if (walkMode) {
+      setWalkMode(false);
+      return;
+    }
+    if (walkArming) {
+      setWalkArming(false);
+      return;
+    }
+    setDrawMode(false);
+    setSelectMode(false);
+    setStreetDrawMode(false);
+    setWalkArming(true);
+    // The picker lives in the plan pane; if the perspective pane is maximized
+    // (the only state where its Walk button is both visible and covers the
+    // plan), drop back to quad so the street is pickable.
+    setMaximized((m) => (m === "perspective" ? null : m));
+  }, [walkMode, walkArming]);
+  // A pick on a street centreline commits the start pose and begins the walk.
+  const onPickWalkStart = useCallback((p: StreetProjection) => {
+    setWalkStart(p);
+    setWalkArming(false);
+    setWalkMode(true);
+  }, []);
+  // Escape cancels an armed (not-yet-picked) walk, matching the other tools.
+  useEffect(() => {
+    if (!walkArming) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setWalkArming(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [walkArming]);
   // Tool-off clears the selection (matches Escape). Fires on mount too, where
   // the marquee is already null (no-op).
   useEffect(() => {
@@ -2017,6 +2198,8 @@ export default function FacadeViewer({
             drawMode={drawMode}
             selectMode={selectMode}
             streetDrawMode={streetDrawMode}
+            walkArming={walkArming}
+            onPickWalkStart={onPickWalkStart}
             activeStreetType={activeStreetType}
             onCommitStreet={onCommitStreet}
             onCommitLine={onCommitLine}
@@ -2067,7 +2250,11 @@ export default function FacadeViewer({
         selectedSquare={selectedSquare}
         onSelectSquare={onSelectSquare}
             walk={walkMode}
-            onExitWalk={() => setWalkMode(false)}
+            walkStart={walkStart}
+            onExitWalk={() => {
+              setWalkMode(false);
+              setWalkStart(null);
+            }}
           />
         );
       case "overview":
@@ -2161,37 +2348,52 @@ export default function FacadeViewer({
             {p.id === "perspective" && (
               <button
                 type="button"
-                onClick={() => setWalkMode((w) => !w)}
+                onClick={onWalkButton}
+                disabled={!walkMode && !walkArming && !hasStreets}
                 className={`absolute top-1 left-12 h-7 rounded-full px-3 text-[12px] font-medium shadow-lg transition-colors ${
                   walkMode
                     ? "bg-[#2f855a] text-white"
-                    : "bg-white/90 text-zinc-900 hover:bg-white"
+                    : walkArming
+                      ? "bg-[#7ee2a8] text-zinc-900"
+                      : "bg-white/90 text-zinc-900 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed"
                 }`}
                 title={
                   walkMode
                     ? "Walking — WASD to move, mouse to look, Esc to exit"
-                    : "Walk this street in first person"
+                    : walkArming
+                      ? "Click a point on a street to start walking (Esc or click Walk to cancel)"
+                      : hasStreets
+                        ? "Walk in first person — pick a spot on a street to start"
+                        : "Draw a street first — walks start on a street"
                 }
               >
-                {walkMode ? "🚶 Walking — Esc to exit" : "🚶 Walk"}
+                {walkMode
+                  ? "🚶 Walking — Esc to exit"
+                  : walkArming
+                    ? "📍 Click a street to start"
+                    : "🚶 Walk"}
               </button>
             )}
-            {p.id === "plan" && (drawMode || selectMode || streetDrawMode) && (
-              /* Uniform mode frame: the plan pane is the live drawing surface
-               * while the pen is armed, the marquee surface while the Select
-               * tool is active (gold), or the road-network surface while the
-               * street tool is active (green) — one colour per tool. */
-              <div
-                aria-hidden
-                className={`absolute inset-0 pointer-events-none border-[3px] z-10 ${
-                  drawMode
-                    ? "border-[var(--accent)]"
-                    : selectMode
-                      ? "border-[#d4a017]"
-                      : "border-[#2f855a]"
-                }`}
-              />
-            )}
+            {p.id === "plan" &&
+              (drawMode || selectMode || streetDrawMode || walkArming) && (
+                /* Uniform mode frame: the plan pane is the live drawing surface
+                 * while the pen is armed, the marquee surface while the Select
+                 * tool is active (gold), the road-network surface while the
+                 * street tool is active (green), or the walk-start picker while
+                 * arming a walk (bright green) — one colour per tool. */
+                <div
+                  aria-hidden
+                  className={`absolute inset-0 pointer-events-none border-[3px] z-10 ${
+                    drawMode
+                      ? "border-[var(--accent)]"
+                      : selectMode
+                        ? "border-[#d4a017]"
+                        : walkArming
+                          ? "border-[#7ee2a8]"
+                          : "border-[#2f855a]"
+                  }`}
+                />
+              )}
             {p.id === "plan" && (
               <div className="absolute top-1.5 left-16 z-20 flex flex-wrap gap-1.5">
                 <button
