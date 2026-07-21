@@ -4,7 +4,9 @@ import type { StreetNetwork, Monument } from "@/lib/street/types";
 import { ROUNDABOUT_OUTER_R } from "@/lib/street/types";
 import { deriveIntersections } from "@/lib/street/intersections";
 import { deriveSquares } from "@/lib/street/squares";
-import StreetRibbonMesh from "./StreetRibbonMesh";
+import { deriveJunctionPads, streetSpans } from "@/lib/street/junctionPad";
+import StreetRibbonMesh, { pavingOf } from "./StreetRibbonMesh";
+import JunctionPadMesh from "./JunctionPadMesh";
 import CanalMesh from "./CanalMesh";
 import RoundaboutMesh from "./RoundaboutMesh";
 import IntersectionMarker from "./IntersectionMarker";
@@ -47,6 +49,12 @@ export default function StreetNetworkView({
 }) {
   const roundabouts = useMemo(() => new Map(network.roundabouts), [network.roundabouts]);
   const intersections = useMemo(() => deriveIntersections(network), [network]);
+  const spans = useMemo(() => streetSpans(network), [network]);
+  const pads = useMemo(() => deriveJunctionPads(network), [network]);
+  const streetsById = useMemo(
+    () => new Map(network.streets.map((s) => [s.id, s])),
+    [network.streets],
+  );
   const bridges = useMemo(() => bridgesFor(network, intersections), [network, intersections]);
   const squares = useMemo(() => deriveSquares(network), [network]);
   const squareMonuments = useMemo(
@@ -71,9 +79,25 @@ export default function StreetNetworkView({
             selected={selectedStreet === s.id}
             onSelect={onSelectStreet ? () => onSelectStreet(s.id) : undefined}
             ground={ground}
+            spans={spans.get(s.id)}
           />
         ),
       )}
+      {/* Junction pads: pave each node/T/X so clipped ribbons meet one squared
+       * surface instead of z-fighting. Roundabout/canal junctions emit none. */}
+      {pads.map((pad) => {
+        const dominant = streetsById.get(pad.dominantStreetId);
+        if (!dominant) return null;
+        return (
+          <JunctionPadMesh
+            key={`pad-${pad.key}`}
+            polygon={pad.polygon}
+            pos={pad.pos}
+            color={pavingOf(dominant)}
+            ground={ground}
+          />
+        );
+      })}
       {intersections.map((it) => {
         const m: Monument | undefined = roundabouts.get(it.key);
         return (

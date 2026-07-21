@@ -310,10 +310,23 @@ NOT involved; every edit is live (no Update button). Spec:
   skin` mode — wall+openings+ornament only, windows filled inline since
   the instancer only walks front placements); a clickable centre marker
   opens the Square inspector (fountain/obelisk/none). Block/plot/building
-  derivation beyond frontages and mid-span crossings stay deferred. Specs:
+  derivation beyond frontages and mid-span crossings stay deferred.
+  **Junction pads**: every node/T/X junction is paved by a derived
+  star-polygon so overlapping ribbons stop z-fighting
+  (`src/lib/street/junctionPad.ts` pure — `clipCentreline` trims each incident
+  ribbon back `CLIP_K×` the widest half-width, `mouthsAt`+`deriveJunctionPads`
+  walk the mouths in angular order and emit their ribbon cap edges as one
+  polygon that tiles exactly with the clipped ribbons; the lib is color-free,
+  returning `dominantStreetId`). `StreetRibbonMesh` takes clipped `spans` (the
+  no-span path is byte-identical), `JunctionPadMesh` fans the polygon from the
+  junction centre on the ribbon plane, `StreetNetworkView` resolves the color
+  via `pavingOf`. Roundabouts clip to the ring (`ROUNDABOUT_OUTER_R`, now in
+  `types.ts`) which then sits in a clean gap; canal/bridge junctions are
+  excluded; a junction-free network is byte-identical. Specs:
   `docs/superpowers/specs/2026-07-15-street-network-design.md` (network) +
   `docs/superpowers/specs/2026-07-16-street-realism-design.md` (SP-2a:
-  radius-limited fillet + topography draping).
+  radius-limited fillet + topography draping) +
+  `docs/superpowers/specs/2026-07-21-junction-pad-design.md` (trim + pad).
 
 ## Tailwind v4
 
