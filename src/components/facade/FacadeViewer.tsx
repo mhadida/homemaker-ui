@@ -40,7 +40,7 @@ import type { Corner, CornerChoice } from "@/lib/facade/corners";
 import type { Ground } from "@/lib/facade/terrain";
 import { groundHeightAt } from "@/lib/facade/terrain";
 import { walkStep, EYE_HEIGHT, type WalkKeys } from "@/lib/facade/walk";
-import { snapToGrid } from "@/lib/facade/grid";
+import { snapToGridAxis } from "@/lib/facade/grid";
 import { marqueeEmpty, type Marquee } from "@/lib/facade/marquee";
 import {
   streetLines,
@@ -55,6 +55,7 @@ import {
 } from "@/lib/street/geometry";
 import { STREET_SPECS } from "@/lib/street/types";
 import type { StreetNetwork, StreetType, Vec2 } from "@/lib/street/types";
+import { MIN_STREET_SEG } from "@/lib/street/intersections";
 
 interface FacadeViewerProps {
   blocks: FacadeBlock[];
@@ -344,7 +345,7 @@ function PenSurface({
         onPointerDown={(e) => {
           e.stopPropagation();
           const raw: [number, number] = gridSnap
-            ? snapToGrid([e.point.x, e.point.z], gridAngle)
+            ? snapToGridAxis([e.point.x, e.point.z], last ?? null, gridAngle)
             : [e.point.x, e.point.z];
           const p = snapPoint(raw, blocks);
           if (path.length === 0) {
@@ -377,7 +378,7 @@ function PenSurface({
           setCursor(
             snapPoint(
               gridSnap
-                ? snapToGrid([e.point.x, e.point.z], gridAngle)
+                ? snapToGridAxis([e.point.x, e.point.z], last ?? null, gridAngle)
                 : [e.point.x, e.point.z],
               blocks,
             ),
@@ -517,8 +518,9 @@ function StreetDrawSurface({
         position={[0, 0.02, 0]}
         onPointerDown={(e) => {
           e.stopPropagation();
+          const prev = path[path.length - 1] ?? null;
           const raw: Vec2 = gridSnap
-            ? snapToGrid([e.point.x, e.point.z], gridAngle)
+            ? snapToGridAxis([e.point.x, e.point.z], prev, gridAngle)
             : [e.point.x, e.point.z];
           const p = snapStreetPoint(raw, network, 1);
           if (path.length === 0) {
@@ -535,11 +537,21 @@ function StreetDrawSurface({
             resetPath();
             return;
           }
+          // Drop a click that lands on the previous vertex — it would append a
+          // duplicate and leave a zero-length segment. Easy to hit under the
+          // grid's 90° lock, which collapses onto the anchor within half a
+          // cell. Mirrors the block pen's MIN_BLOCK_LENGTH guard.
+          if (prev && Math.hypot(p[0] - prev[0], p[1] - prev[1]) < MIN_STREET_SEG)
+            return;
           setPath([...path, p]);
         }}
         onPointerMove={(e) => {
           const raw: Vec2 = gridSnap
-            ? snapToGrid([e.point.x, e.point.z], gridAngle)
+            ? snapToGridAxis(
+                [e.point.x, e.point.z],
+                path[path.length - 1] ?? null,
+                gridAngle,
+              )
             : [e.point.x, e.point.z];
           const snappedPoint = snapStreetPoint(raw, network, 1);
           setCursor(snappedPoint);
@@ -2567,7 +2579,7 @@ export default function FacadeViewer({
                   type="button"
                   onClick={() => setGridSnap((g) => !g)}
                   aria-pressed={gridSnap}
-                  title="Lock drawing to a rectilinear 5 m grid"
+                  title="Lock drawing to a rectilinear 5 m grid — segments run along the grid axes only"
                   className={`flex h-7 items-center gap-1.5 rounded-full px-3 text-[11px] font-medium shadow-lg transition-colors ${
                     gridSnap
                       ? "bg-zinc-700 text-white"

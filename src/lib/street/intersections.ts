@@ -142,14 +142,16 @@ export function pruneRoundabouts(net: StreetNetwork): StreetNetwork {
   return { ...net, roundabouts: net.roundabouts.filter(([k]) => valid.has(k)) };
 }
 
-/** A drag that leaves any affected segment shorter than this is rejected —
- * a (near-)zero-length segment degenerates the ribbon offset math. */
-const MIN_SEG = 1;
+/** The shortest legal street segment (m). A drag that leaves any affected
+ * segment shorter than this is rejected, and the street pen refuses to append a
+ * vertex this close to the previous one — a (near-)zero-length segment
+ * degenerates the ribbon offset math. */
+export const MIN_STREET_SEG = 1;
 
 /** Move every street vertex sitting EXACTLY at `from` to `to` — a shared
  * endpoint (a welded junction) moves as one, mirroring how block nodes move.
  * Returns null (reject) when no vertex sits at `from`, or when the move
- * would leave a segment touching the moved point shorter than MIN_SEG.
+ * would leave a segment touching the moved point shorter than MIN_STREET_SEG.
  * Roundabout entries keyed at the old position follow the junction (an entry
  * already present at the destination wins), and entries the move un-derives
  * are pruned. Pure. */
@@ -181,7 +183,7 @@ export function moveStreetNode(
       const a = s.points[i];
       const b = s.points[(i + 1) % n];
       if (!at(a, to) && !at(b, to)) continue;
-      if (Math.hypot(a[0] - b[0], a[1] - b[1]) < MIN_SEG) return null;
+      if (Math.hypot(a[0] - b[0], a[1] - b[1]) < MIN_STREET_SEG) return null;
     }
   }
 

@@ -83,6 +83,7 @@ src/
       nodes.ts         — derived nodes (coincidence welds), moveNode + refit ripple
       corners.ts       — corner detection (turn/convexity), shell sync, miters
       sections.ts      — facade-section edit helpers (canonical writes, AI patterns)
+      grid.ts          — rectilinear drawing grid: lattice snap + 90° axis lock
   types/
     mapbox-gl-draw.d.ts — Type declarations (legacy; no map UI currently exists)
 python/
@@ -115,6 +116,20 @@ NOT involved; every edit is live (no Update button). Spec:
   `generate.ts` — absorb at the moved end, split at lotWidth.max+min,
   remove below min). Width edits ripple through welds the same way. Hand
   edits pin lots against reroll.
+- **Drawing grid**: the plan pane's **⌗ Grid** toggle constrains BOTH pens
+  (blocks and roads) to a square `GRID_SPACING` (5 m) lattice rotated
+  `gridAngle` degrees from north, and locks every segment to **90° increments
+  of the grid direction** — `snapToGridAxis` in `src/lib/facade/grid.ts` (pure)
+  pulls the cursor onto the grid axis through the previous vertex, keeping the
+  dominant component and rounding it to whole cells. The offset is measured
+  from that ANCHOR, not the world origin, so a segment leaving a welded
+  (off-lattice) vertex still runs exactly along the grid. Weld / street-endpoint
+  snapping runs AFTER and still wins — joining existing geometry beats the grid,
+  so a weld may pull a segment off-axis. A chain's first vertex has no anchor
+  and falls back to plain `snapToGrid`. Within half a cell the result collapses
+  onto the anchor, so both pens reject the degenerate segment
+  (`MIN_BLOCK_LENGTH`; `MIN_STREET_SEG` from `street/intersections.ts`). Grid
+  off = byte-identical.
 - **Corner buildings**: welded two-block junctions turning ≤ the global max
   angle merge into one building (`src/lib/facade/corners.ts`): shells
   (storeys/colors/ornament/glazing, incl. `massingDepth`) sync through the
