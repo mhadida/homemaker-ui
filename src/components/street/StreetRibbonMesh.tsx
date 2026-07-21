@@ -1,7 +1,7 @@
 "use client";
 import { useMemo, useEffect, useState } from "react";
 import * as THREE from "three";
-import type { Street } from "@/lib/street/types";
+import type { Street, Vec2 } from "@/lib/street/types";
 import { effectiveWidth, minRadiusOf, resolveTraffic } from "@/lib/street/types";
 import { filletCentreline, streetRibbon } from "@/lib/street/geometry";
 import { groundHeightAt, type Ground } from "@/lib/facade/terrain";
@@ -23,7 +23,7 @@ const TRAFFIC_PAVING = {
   peds: "#9c9489",
 } as const;
 
-function pavingOf(street: Street): string {
+export function pavingOf(street: Street): string {
   if (street.type === "canal") return PAVING.canal;
   const traffic = resolveTraffic(street);
   return traffic === "cars" ? PAVING[street.type] : TRAFFIC_PAVING[traffic];
@@ -36,6 +36,7 @@ export default function StreetRibbonMesh({
   selected = false,
   onSelect,
   ground,
+  spans,
 }: {
   street: Street;
   /** Selection highlight — tints the paving toward the accent color. */
@@ -45,24 +46,37 @@ export default function StreetRibbonMesh({
   onSelect?: () => void;
   /** Tilted ground plane — each vertex lifts to the surface height. */
   ground: Ground;
+  /** Junction-trimmed centreline spans. Undefined → render the whole street
+   * from its own filleted centreline (byte-identical to before junction pads);
+   * defined → one OPEN ribbon per span. */
+  spans?: Vec2[][];
 }) {
   const [hover, setHover] = useState(false);
   const geo = useMemo(() => {
-    const cl = filletCentreline(street.points, minRadiusOf(street), 8, street.closed);
-    if (cl.length < 2) return null;
-    const { left, right } = streetRibbon(cl, effectiveWidth(street), street.closed);
+    // Undefined spans → the original single, closed-aware centreline (unchanged
+    // geometry). Clipped spans always render open (the loop is broken at the
+    // junction).
+    const centrelines = spans ?? [
+      filletCentreline(street.points, minRadiusOf(street), 8, street.closed),
+    ];
+    const closed = spans ? false : street.closed;
     const pos: number[] = [];
     const yAt = (x: number, z: number) => groundHeightAt(x, z, ground) + 0.02;
-    for (let i = 0; i < cl.length - 1; i++) {
-      const l0 = left[i], l1 = left[i + 1], r0 = right[i], r1 = right[i + 1];
-      pos.push(l0[0], yAt(l0[0], l0[1]), l0[1], r0[0], yAt(r0[0], r0[1]), r0[1], r1[0], yAt(r1[0], r1[1]), r1[1]);
-      pos.push(l0[0], yAt(l0[0], l0[1]), l0[1], r1[0], yAt(r1[0], r1[1]), r1[1], l1[0], yAt(l1[0], l1[1]), l1[1]);
+    for (const cl of centrelines) {
+      if (cl.length < 2) continue;
+      const { left, right } = streetRibbon(cl, effectiveWidth(street), closed);
+      for (let i = 0; i < cl.length - 1; i++) {
+        const l0 = left[i], l1 = left[i + 1], r0 = right[i], r1 = right[i + 1];
+        pos.push(l0[0], yAt(l0[0], l0[1]), l0[1], r0[0], yAt(r0[0], r0[1]), r0[1], r1[0], yAt(r1[0], r1[1]), r1[1]);
+        pos.push(l0[0], yAt(l0[0], l0[1]), l0[1], r1[0], yAt(r1[0], r1[1]), r1[1], l1[0], yAt(l1[0], l1[1]), l1[1]);
+      }
     }
+    if (pos.length === 0) return null;
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
     g.computeVertexNormals();
     return g;
-  }, [street, ground]);
+  }, [street, ground, spans]);
   useEffect(() => () => geo?.dispose(), [geo]);
   if (!geo) return null;
   return (
