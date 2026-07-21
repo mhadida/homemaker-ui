@@ -1,6 +1,7 @@
 "use client";
 import { useMemo } from "react";
 import type { StreetNetwork, Monument } from "@/lib/street/types";
+import { ROUNDABOUT_OUTER_R } from "@/lib/street/types";
 import { deriveIntersections } from "@/lib/street/intersections";
 import { deriveSquares } from "@/lib/street/squares";
 import StreetRibbonMesh from "./StreetRibbonMesh";
@@ -12,7 +13,6 @@ import { bridgesFor } from "@/lib/street/canal";
 import MonumentMesh from "./MonumentMesh";
 import { groundHeightAt, type Ground } from "@/lib/facade/terrain";
 
-const ROUNDABOUT_OUTER_R = 9;
 const ROUNDABOUT_ISLAND_R = 3;
 /** Clickable radius at a plain (no roundabout) junction — generous enough to
  * hit without precision, small enough not to blanket nearby geometry. */

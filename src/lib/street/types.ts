@@ -41,6 +41,10 @@ export interface Monument {
   kind: "obelisk" | "fountain";
 }
 
+/** Roundabout ring outer radius (m). Single source of truth — used by the
+ * roundabout mesh and by junctionPad's clip radius at roundabout junctions. */
+export const ROUNDABOUT_OUTER_R = 9;
+
 export interface StreetNetwork {
   streets: Street[];
   /** roundabout choices: [derived intersection key, monument]. Sparse. */
