@@ -158,10 +158,10 @@ export function streetSpans(net: StreetNetwork): Map<string, Vec2[][]> {
   return out;
 }
 
-/** One mouth: a clipped ribbon end at a junction. */
+/** One mouth: a clipped ribbon end at a junction. `left`/`right` are the ribbon
+ * end-cap corners (`M ± h·n`); the pad is built from these. */
 export interface Mouth {
   centre: Vec2;
-  angle: number;
   left: Vec2;
   right: Vec2;
 }
@@ -192,7 +192,6 @@ export function mouthsAt(street: Street, pos: Vec2, clipR: number): Mouth[] {
       const nz = ux;
       mouths.push({
         centre: [M[0], M[1]],
-        angle: Math.atan2(M[1] - pos[1], M[0] - pos[0]),
         left: [M[0] + nx * h, M[1] + nz * h],
         right: [M[0] - nx * h, M[1] - nz * h],
       });
@@ -230,12 +229,21 @@ export function deriveJunctionPads(net: StreetNetwork): JunctionPad[] {
     const mouths: Mouth[] = [];
     for (const s of streets) mouths.push(...mouthsAt(s, it.pos, clipR));
     if (mouths.length < 2) continue;
-    mouths.sort((a, b) => a.angle - b.angle);
-    const polygon: Vec2[] = [];
-    for (const m of mouths) {
-      polygon.push([m.right[0], m.right[1]]);
-      polygon.push([m.left[0], m.left[1]]);
-    }
+    // Sort the cap CORNERS (not the mouths) by angle around pos and connect in
+    // that order. A polygon whose vertices are angle-sorted around an interior
+    // point is star-shaped, hence ALWAYS simple — so even when two mouths meet
+    // at an acute angle and their caps would otherwise cross, the pad never
+    // self-intersects (which would fold the fan triangulation and reintroduce
+    // the overlap this feature removes). For well-separated mouths each mouth's
+    // two corners stay adjacent, so the cap edge — and exact ribbon tiling — is
+    // preserved; acute mouths degrade gracefully to a simple polygon.
+    const polygon: Vec2[] = mouths
+      .flatMap((m): Vec2[] => [[m.right[0], m.right[1]], [m.left[0], m.left[1]]])
+      .sort(
+        (a, b) =>
+          Math.atan2(a[1] - it.pos[1], a[0] - it.pos[0]) -
+          Math.atan2(b[1] - it.pos[1], b[0] - it.pos[0]),
+      );
     const dominant = streets.reduce((best, s) => {
       const bw = effectiveWidth(best);
       const sw = effectiveWidth(s);

@@ -155,6 +155,20 @@ describe("mouthsAt", () => {
   });
 });
 
+// A polygon whose vertices are sorted by angle around an interior point is
+// star-shaped w.r.t. that point → simple (no self-intersection). Assert the
+// vertices' bearings around `pos` are strictly monotonic once (a single wrap).
+function isStarSimple(polygon: Vec2[], pos: Vec2): boolean {
+  const angs = polygon.map((p) => Math.atan2(p[1] - pos[1], p[0] - pos[0]));
+  let wraps = 0;
+  for (let i = 0; i < angs.length; i++) {
+    const a = angs[i];
+    const b = angs[(i + 1) % angs.length];
+    if (b < a) wraps++; // angle decreased → one wrap allowed
+  }
+  return wraps <= 1;
+}
+
 describe("deriveJunctionPads", () => {
   it("an X crossing → one pad, 8 vertices, contains the centre, right dominant id", () => {
     const a = S("a", "road", [[-30, 0], [30, 0]]);
@@ -174,6 +188,29 @@ describe("deriveJunctionPads", () => {
     expect(pads).toHaveLength(1);
     expect(pads[0].polygon).toHaveLength(6);
     expect(inPoly([0, 0], pads[0].polygon)).toBe(true);
+  });
+
+  it("an ACUTE crossing still yields a SIMPLE (star-shaped) pad that contains the centre", () => {
+    // two roads crossing at 30°, where naive mouth-order emission would make
+    // the caps cross and self-intersect the polygon (regression guard).
+    const a = S("a", "road", [[-30, 0], [30, 0]]);
+    const b = S("b", "road", [[-25.98, -15], [25.98, 15]]); // ~30° off A
+    const pads = deriveJunctionPads(net([a, b]));
+    expect(pads).toHaveLength(1);
+    expect(pads[0].polygon).toHaveLength(8);
+    expect(isStarSimple(pads[0].polygon, pads[0].pos)).toBe(true);
+    expect(inPoly([0, 0], pads[0].polygon)).toBe(true);
+  });
+
+  it("the 90° cross and T stay simple too", () => {
+    const a = S("a", "road", [[-30, 0], [30, 0]]);
+    const b = S("b", "road", [[0, -30], [0, 30]]);
+    const x = deriveJunctionPads(net([a, b]))[0];
+    expect(isStarSimple(x.polygon, x.pos)).toBe(true);
+    const through = S("t", "road", [[-30, 0], [30, 0]]);
+    const branch = S("br", "road", [[0, 0], [0, 30]]);
+    const tPad = deriveJunctionPads(net([through, branch]))[0];
+    expect(isStarSimple(tPad.polygon, tPad.pos)).toBe(true);
   });
 
   it("a canal-incident junction → no pad", () => {
