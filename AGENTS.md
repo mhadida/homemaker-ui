@@ -230,6 +230,13 @@ NOT involved; every edit is live (no Update button). Spec:
   classic-only (it renders through MeshDepthMaterial); the quad `<View>`
   needs the viewport Y-flip shim in `FacadeViewer` (WebGPU origin is
   top-left); Save-image grabs WebGPU frames via captureStream+ImageCapture.
+  The shared `<Canvas>` must stay the **first** child of the viewer container:
+  it is `absolute` with `z-index: auto`, so paint order is tree order and every
+  later sibling (the tracking cells and their HTML overlays — pane labels,
+  maximize buttons, Walk) draws on top without needing a z-index. It formerly
+  sat last, which buried those overlays under the ground plane wherever the
+  render was opaque; they still *worked* only because the canvas is
+  `pointerEvents:none`.
   Spec: `docs/superpowers/specs/2026-07-18-webgpu-migration-design.md`.
 - **First-person walk**: a **Walk** toggle on the 3D pane drops into
   first-person (WASD + pointer-lock mouse-look, 1.75 m eye height, walking

@@ -2319,7 +2319,91 @@ export default function FacadeViewer({
       className="relative w-full h-full"
       style={{ background: SKY_CSS }}
     >
-      {/* Tracking cells — the Views render into the shared canvas below. */}
+      {/* One shared canvas for every pane. It MUST stay the FIRST child: it is
+       * absolutely positioned with `z-index: auto`, so paint order is tree
+       * order — everything after it (the tracking cells and the HTML overlays
+       * inside them) draws on top, and anything before it is buried under the
+       * rendered scene. This used to sit last, which hid the pane labels, the
+       * maximize buttons and the Walk button wherever the ground plane filled
+       * those pixels; they still *worked* only because the canvas is
+       * pointerEvents:none. Overlays therefore need no z-index of their own —
+       * the two on the plan pane use one purely to order against each other. */}
+      <Canvas
+        shadows
+        className="!absolute !inset-0"
+        style={{ pointerEvents: "none" }}
+        eventSource={containerRef}
+        gl={
+          useWebGPU
+            ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (async (props: any) => {
+                const { WebGPURenderer } = await import("three/webgpu");
+                const size = new THREE.Vector2();
+                // drei's <View> places panes with WebGL's bottom-left-origin
+                // viewport/scissor convention; WebGPU's origin is top-left
+                // and three passes the values through unflipped, which
+                // vertically mirrors the quad pane layout. Flip Y at the
+                // renderer boundary so the same View code serves both
+                // backends. Vector4/null forms (full-surface + reset paths)
+                // pass through untouched.
+                class ViewCompatWebGPURenderer extends WebGPURenderer {
+                  setViewport(
+                    x: number | THREE.Vector4,
+                    y?: number,
+                    width?: number,
+                    height?: number,
+                  ) {
+                    if (typeof x === "number") {
+                      this.getSize(size);
+                      super.setViewport(
+                        x,
+                        size.height - (y ?? 0) - (height ?? 0),
+                        width ?? 0,
+                        height ?? 0,
+                      );
+                    } else {
+                      super.setViewport(x as never);
+                    }
+                  }
+                  setScissor(
+                    x: number | THREE.Vector4,
+                    y?: number,
+                    width?: number,
+                    height?: number,
+                  ) {
+                    if (typeof x === "number") {
+                      this.getSize(size);
+                      super.setScissor(
+                        x,
+                        size.height - (y ?? 0) - (height ?? 0),
+                        width ?? 0,
+                        height ?? 0,
+                      );
+                    } else {
+                      super.setScissor(x as never);
+                    }
+                  }
+                }
+                const renderer = new ViewCompatWebGPURenderer({
+                  ...props,
+                  antialias: true,
+                  alpha: true,
+                  forceWebGL: isForcedWebGL2(),
+                });
+                await renderer.init();
+                return renderer;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              }) as any
+            : { alpha: true, antialias: true, preserveDrawingBuffer: true }
+        }
+        dpr={[1, 2]}
+      >
+        <GlobalClear />
+        <View.Port />
+        {showStats && <Stats />}
+      </Canvas>
+
+      {/* Tracking cells — the Views render into the shared canvas above. */}
       <div
         className={`h-full ${
           active
@@ -2523,82 +2607,6 @@ export default function FacadeViewer({
           </div>
         ))}
       </div>
-
-      {/* One shared canvas behind the tracking cells. */}
-      <Canvas
-        shadows
-        className="!absolute !inset-0"
-        style={{ pointerEvents: "none" }}
-        eventSource={containerRef}
-        gl={
-          useWebGPU
-            ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              (async (props: any) => {
-                const { WebGPURenderer } = await import("three/webgpu");
-                const size = new THREE.Vector2();
-                // drei's <View> places panes with WebGL's bottom-left-origin
-                // viewport/scissor convention; WebGPU's origin is top-left
-                // and three passes the values through unflipped, which
-                // vertically mirrors the quad pane layout. Flip Y at the
-                // renderer boundary so the same View code serves both
-                // backends. Vector4/null forms (full-surface + reset paths)
-                // pass through untouched.
-                class ViewCompatWebGPURenderer extends WebGPURenderer {
-                  setViewport(
-                    x: number | THREE.Vector4,
-                    y?: number,
-                    width?: number,
-                    height?: number,
-                  ) {
-                    if (typeof x === "number") {
-                      this.getSize(size);
-                      super.setViewport(
-                        x,
-                        size.height - (y ?? 0) - (height ?? 0),
-                        width ?? 0,
-                        height ?? 0,
-                      );
-                    } else {
-                      super.setViewport(x as never);
-                    }
-                  }
-                  setScissor(
-                    x: number | THREE.Vector4,
-                    y?: number,
-                    width?: number,
-                    height?: number,
-                  ) {
-                    if (typeof x === "number") {
-                      this.getSize(size);
-                      super.setScissor(
-                        x,
-                        size.height - (y ?? 0) - (height ?? 0),
-                        width ?? 0,
-                        height ?? 0,
-                      );
-                    } else {
-                      super.setScissor(x as never);
-                    }
-                  }
-                }
-                const renderer = new ViewCompatWebGPURenderer({
-                  ...props,
-                  antialias: true,
-                  alpha: true,
-                  forceWebGL: isForcedWebGL2(),
-                });
-                await renderer.init();
-                return renderer;
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              }) as any
-            : { alpha: true, antialias: true, preserveDrawingBuffer: true }
-        }
-        dpr={[1, 2]}
-      >
-        <GlobalClear />
-        <View.Port />
-        {showStats && <Stats />}
-      </Canvas>
 
       {/* Mobile pane switcher */}
       <div className="md:hidden absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1">
