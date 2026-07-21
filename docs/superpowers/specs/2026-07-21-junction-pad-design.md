@@ -41,20 +41,33 @@ centre point `M` at distance `clipR` from `pos`, with an outward tangent `t`
 `h` is that street's half-width and `n` is the left-perpendicular of `t` (same
 offset convention as `streetRibbon`).
 
-The pad is the polygon formed by walking the mouths **in angular order around
-`pos`** and, at each mouth, emitting its two cap corners (`M − h·n` then
-`M + h·n`, the CCW winding): `R₀, L₀, R₁, L₁, …`. This is a *star polygon*
-around `pos`, and it tiles exactly with the ribbons **by construction**:
+The pad is the polygon formed by taking **all** cap corners (`M ± h·n`) of every
+mouth and **sorting them by angle around `pos`**. A polygon whose vertices are
+angle-sorted around an interior point is *star-shaped* w.r.t. `pos`, hence
+**always simple** — this is what keeps it robust at acute junctions (see below).
+For well-separated mouths each mouth's two corners are angularly adjacent, so
+the cap edge `[right, left]` survives as a polygon edge and the pad tiles
+exactly with the ribbons **by construction**:
 
 - At each mouth the pad's boundary edge `[R_i, L_i]` **is** the clipped ribbon's
   inner cap — they share that exact edge. Pad and ribbon meet edge-to-edge, no
   overlap and no gap → no z-fight, no sliver. This holds for **any** street
   widths, so a narrow alley meeting a wide boulevard is handled correctly (the
   earlier convex-hull idea would swallow the alley's mouth — rejected).
-- Between adjacent mouths, the edge `[L_i, R_{i+1}]` is a straight chord across
-  the corner the ribbons don't reach → the pad fills it → the squared look.
+- Between adjacent mouths, the boundary is a straight chord across the corner the
+  ribbons don't reach → the pad fills it → the squared look.
 - The pad sits on the **same plane** as the ribbons (`ground + 0.02`, same
   `polygonOffset`) safely, because it never overlaps them.
+
+**Acute junctions.** When two mouths meet at less than ~2·arctan(h/clipR) (≈75°
+for two max-width streets), their caps would overlap in angle. Emitting caps in
+*mouth* order would then make two cap edges cross — a self-intersecting polygon,
+which folds the fan triangulation and reintroduces the overlap. Sorting the
+*corners* by angle (not the mouths) sidesteps this entirely: the result is
+always star-shaped w.r.t. `pos`, so it is always simple. Acute mouths simply
+stop preserving their exact cap edge and degrade to a clean simple polygon
+(acceptable — nearly-parallel ribbons already overlap each other there, so exact
+tiling isn't achievable regardless).
 
 The polygon is **fan-triangulated from `pos`** (which is interior to the star for
 any real junction whose mouths spread around it). `clipR` is chosen large enough
@@ -79,7 +92,6 @@ interface ClipDisc {
 /** One mouth: a clipped ribbon end at a junction. */
 interface Mouth {
   centre: Vec2;   // M, on the clip circle (distance clipR from pos)
-  angle: number;  // atan2 of (M - pos), for angular ordering
   left: Vec2;     // cap corner M + h·n
   right: Vec2;    // cap corner M - h·n
 }
@@ -143,15 +155,16 @@ For each **non-excluded, non-roundabout** junction:
   disc, and for each surviving span whose end sits at distance ≈ `clipR` from
   `pos`, take that end as `M` and the tangent `t` = unit vector from `M` toward
   the span's interior (i.e. pointing away from `pos`). Then `n` = left-perp of
-  `t`, `h = effectiveWidth(street)/2`, `left = M + h·n`, `right = M − h·n`,
-  `angle = atan2(M.z − pos.z, M.x − pos.x)`. A through street yields **two**
-  mouths (both spans have a near-`pos` end), an ending street **one**.
-- Sort all incident mouths by `angle` (CCW around `pos`). The polygon is the
-  concatenation, in that order, of each mouth's `[right, left]` pair:
-  `[R₀, L₀, R₁, L₁, …]`. Because `t` points outward, `n` points CCW, so `right`
-  is the mouth's clockwise corner and `left` its counter-clockwise corner — the
-  boundary enters each mouth at `right`, crosses the cap to `left`, then chords
-  to the next mouth's `right`. No convex hull; the star polygon is exact.
+  `t`, `h = effectiveWidth(street)/2`, `left = M + h·n`, `right = M − h·n`.
+  A through street yields **two** mouths (both spans have a near-`pos` end), an
+  ending street **one**.
+- Collect **all** cap corners of every incident mouth (`right` and `left`) into
+  one list and **sort them by angle around `pos`** (`atan2(c.z − pos.z,
+  c.x − pos.x)`). Connect in that order → the polygon. Sorting the *corners*
+  (not the mouths) makes the result star-shaped w.r.t. `pos` and therefore
+  always simple; for well-separated mouths a mouth's two corners are adjacent so
+  its cap edge is preserved (exact tiling), and acute mouths degrade to a clean
+  simple polygon. No convex hull.
 - A junction with fewer than 2 mouths after this (e.g. all-but-one incident
   street was a canal, or a degenerate clip) emits no pad.
 - `dominantStreetId` = the id of the incident street with the largest
@@ -239,12 +252,15 @@ loop's ring rendering when it has no junctions.
   canal-incident junction contributes no discs; a roundabout junction's discs
   use the ring radius.
 - `deriveJunctionPads`: `+` crossing → one pad whose polygon has 8 vertices
-  (4 mouths × 2 cap corners), **contains the junction centre** (point-in-polygon)
-  and whose winding is CCW; each mouth's two consecutive polygon vertices are
-  `width` apart (the cap edge); T and node likewise (6 and 4 vertices); a
-  canal-incident junction → no pad; a roundabout junction → no pad;
-  `pad.dominantStreetId` equals the widest incident street's id; `pad.pos`
-  equals the junction centre.
+  (4 mouths × 2 cap corners) and **contains the junction centre** (point-in-
+  polygon); T likewise (6 vertices); a canal-incident junction → no pad; a
+  roundabout junction → no pad; `pad.dominantStreetId` equals the widest incident
+  street's id; `pad.pos` equals the junction centre.
+- **Acute-junction regression**: two roads crossing at ~30° → one pad that is
+  **simple / star-shaped around `pos`** (assert vertex bearings around `pos`
+  wrap at most once) and still contains the centre. The 90° cross and T stay
+  simple too. (Guards the corner-sort fix — mouth-order emission self-intersects
+  here.)
 - `streetSpans`: a lone street with no junctions → **absent from the map**;
   a street clipped by one junction → one entry whose span count is right
   (through → 2, ending → 1).
