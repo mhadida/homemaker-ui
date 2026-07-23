@@ -2,6 +2,7 @@ import { computeLayout, MASSING_DEPTH_DEFAULT, type OpeningRect } from "./layout
 import { lotPlacements, type FacadeBlock } from "./blocks";
 import { levelingFor, type Ground } from "./terrain";
 import type { WindowStyleId } from "./types";
+import { windowBarColor } from "./windowBar";
 
 /** Feature flag: when on, windows render as scene-wide `InstancedMesh`
  * (glass + frames) instead of per-window meshes in FacadeMesh. Default on;
@@ -129,7 +130,10 @@ export function sceneWindowInstances(
       const cos = Math.cos(yaw);
       const sin = Math.sin(yaw);
       const layout = computeLayout(lot.params);
-      const { trimColor, windowStyle } = lot.params;
+      const { windowStyle } = lot.params;
+      // Window frames + glazing bars are white or black only (never the pastel
+      // trim), chosen by wall lightness.
+      const barColor = windowBarColor(lot.params.wallColor);
       for (const o of layout.openings) {
         if (o.kind !== "window") continue;
         for (const b of windowInstances(o, windowStyle)) {
@@ -142,7 +146,7 @@ export function sceneWindowInstances(
             yaw,
             size: b.size,
             material: b.material,
-            color: b.material === "trim" ? trimColor : undefined,
+            color: b.material === "trim" ? barColor : undefined,
             plane: b.plane,
           });
         }

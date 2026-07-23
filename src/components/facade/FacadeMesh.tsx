@@ -14,6 +14,7 @@ import {
   type GablePlan,
 } from "@/lib/facade/layout";
 import type { FacadeParams, WindowStyleId } from "@/lib/facade/types";
+import { windowBarColor } from "@/lib/facade/windowBar";
 import type { LotMiter } from "@/lib/facade/corners";
 import { roofTriangles, type RoofPlan, type Dormer } from "@/lib/facade/roof";
 import { USE_INSTANCING } from "@/lib/facade/instancing";
@@ -339,11 +340,12 @@ function MullionBars({
 
 function WindowFill({
   o,
-  trimColor,
+  barColor,
   windowStyle,
 }: {
   o: OpeningRect;
-  trimColor: string;
+  /** Frame + glazing-bar colour — white or black only (windowBarColor). */
+  barColor: string;
   windowStyle: WindowStyleId;
 }) {
   const cx = o.x + o.w / 2;
@@ -354,21 +356,21 @@ function WindowFill({
       {/* frame: top / bottom / left / right */}
       <mesh position={[0, o.h / 2 - FRAME_T / 2, 0]}>
         <boxGeometry args={[o.w, FRAME_T, FRAME_D]} />
-        <Trim color={trimColor} />
+        <Trim color={barColor} />
       </mesh>
       <mesh position={[0, -o.h / 2 + FRAME_T / 2, 0]}>
         <boxGeometry args={[o.w, FRAME_T, FRAME_D]} />
-        <Trim color={trimColor} />
+        <Trim color={barColor} />
       </mesh>
       <mesh position={[-o.w / 2 + FRAME_T / 2, 0, 0]}>
         <boxGeometry args={[FRAME_T, o.h, FRAME_D]} />
-        <Trim color={trimColor} />
+        <Trim color={barColor} />
       </mesh>
       <mesh position={[o.w / 2 - FRAME_T / 2, 0, 0]}>
         <boxGeometry args={[FRAME_T, o.h, FRAME_D]} />
-        <Trim color={trimColor} />
+        <Trim color={barColor} />
       </mesh>
-      <MullionBars w={o.w} h={o.h} style={windowStyle} trimColor={trimColor} />
+      <MullionBars w={o.w} h={o.h} style={windowStyle} trimColor={barColor} />
     </group>
   );
 }
@@ -796,7 +798,7 @@ export default function FacadeMesh({
                       <WindowFill
                         key={key}
                         o={o}
-                        trimColor={params.trimColor}
+                        barColor={windowBarColor(params.wallColor)}
                         windowStyle={params.windowStyle}
                       />
                     );

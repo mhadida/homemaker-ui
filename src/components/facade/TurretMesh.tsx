@@ -2,6 +2,7 @@
 import { useMemo } from "react";
 import * as THREE from "three";
 import { turretWindows, TURRET_RADIUS_DEFAULT } from "@/lib/facade/turret";
+import { windowBarColor } from "@/lib/facade/windowBar";
 
 export const TURRET_RADIUS = TURRET_RADIUS_DEFAULT;
 const CONE_HEIGHT = 3.2;
@@ -11,7 +12,6 @@ const SHAFT_RISE = 0.7;
 /** Height of the corbel taper under a corbelled shaft. */
 const CORBEL_DROP = 1.1;
 const GLASS = "#2b3138"; // dark recessed pane
-const SURROUND = "#f1ece1"; // white window surround
 
 /** Flat rounded-top (semicircular head) window outline, centred on the origin,
  * spanning [-w/2, w/2] wide, ~h tall, as a ShapeGeometry in the XY plane. */
@@ -38,12 +38,14 @@ function TurretWindow({
   width,
   height,
   radius,
+  surround,
 }: {
   angle: number;
   cy: number;
   width: number;
   height: number;
   radius: number;
+  surround: string;
 }) {
   const paneGeo = useMemo(() => archedShape(width, height), [width, height]);
   const surroundGeo = useMemo(
@@ -59,7 +61,7 @@ function TurretWindow({
   return (
     <group position={[px, cy, pz]} rotation={[0, rotY, 0]}>
       <mesh position={[0, 0, 0.01]} geometry={surroundGeo}>
-        <meshStandardMaterial color={SURROUND} roughness={0.8} side={THREE.DoubleSide} />
+        <meshStandardMaterial color={surround} roughness={0.8} side={THREE.DoubleSide} />
       </mesh>
       <mesh position={[0, 0, 0.05]} geometry={paneGeo}>
         <meshStandardMaterial
@@ -108,6 +110,7 @@ export default function TurretMesh({
 }) {
   const topY = wallTop + SHAFT_RISE;
   const shaftH = topY - baseY;
+  const surround = windowBarColor(wallColor); // white/black per the shaft colour
   const windows = useMemo(
     () => turretWindows({ radius, baseY, wallTop, storeyLevels, outwardAngle }),
     [radius, baseY, wallTop, storeyLevels, outwardAngle],
@@ -122,7 +125,7 @@ export default function TurretMesh({
         <meshStandardMaterial color={wallColor} roughness={0.85} />
       </mesh>
       {windows.map((w, i) => (
-        <TurretWindow key={i} {...w} radius={radius + 0.02} />
+        <TurretWindow key={i} {...w} radius={radius + 0.02} surround={surround} />
       ))}
       {corbelled && (
         <mesh position={[0, baseY - CORBEL_DROP / 2, 0]} castShadow>
