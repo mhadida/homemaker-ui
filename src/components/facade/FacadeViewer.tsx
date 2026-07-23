@@ -109,6 +109,10 @@ interface FacadeViewerProps {
   onSelectIntersection: (key: string) => void;
   selectedSquare: string | null;
   onSelectSquare: (streetId: string) => void;
+  /** Drop every kind of selection (lot/corner, street, intersection, square,
+   * marquee) without touching the scene. Called whenever the Select tool goes
+   * off, since nothing may stay selected outside selection mode. */
+  onClearSelection: () => void;
 }
 
 type PaneId = "plan" | "perspective" | "overview" | "detail";
@@ -1658,23 +1662,26 @@ function WalkControls({
     const cam = state.camera;
     if (!placed.current) {
       placed.current = true;
+      // Stand on the picked street point (or hold the orbit camera's x/z when
+      // no pick was made).
       if (start) {
-        // Stand on the picked street point, facing along the street. The
-        // camera looks down -Z at yaw 0, so aim the look direction at the
-        // tangent and let PointerLockControls read that heading.
         cam.position.x = start.point[0];
         cam.position.z = start.point[1];
-        const [tx, tz] = start.tangent;
-        cam.lookAt(
-          start.point[0] + tx,
-          groundHeightAt(start.point[0], start.point[1], ground) + EYE_HEIGHT,
-          start.point[1] + tz,
-        );
       }
-      // Drop to eye height at wherever we now stand (picked spot, or the
-      // orbit camera's position when no pick was made).
+      // Eye height FIRST. lookAt below derives the pitch from the camera's
+      // CURRENT position, so this must be final before it runs — computing it
+      // from the orbit camera's height (default y=5, up to 600 after zooming)
+      // aimed the view steeply down at the ground instead of the horizon.
       cam.position.y =
         groundHeightAt(cam.position.x, cam.position.z, ground) + EYE_HEIGHT;
+      if (start) {
+        // Face along the street, level with the horizon: the look target sits
+        // at exactly the eye's own height, so the initial pitch is zero even
+        // on sloped ground. The camera looks down -Z at yaw 0, so aiming at
+        // the tangent lets PointerLockControls read that heading.
+        const [tx, tz] = start.tangent;
+        cam.lookAt(cam.position.x + tx, cam.position.y, cam.position.z + tz);
+      }
     }
     if (!controlsRef.current?.isLocked) return;
     cam.getWorldDirection(fwd.current);
@@ -1974,7 +1981,12 @@ function ElevationPane({
 export default function FacadeViewer({
   blocks,
   selected,
-  onSelectLot,
+  // Every "select this" callback arrives aliased to raw*, then is re-exported
+  // below under its canonical name wrapped in the Select-tool gate. Doing it
+  // at the single destructuring point means paneContent — and the four panes
+  // it feeds — need no per-call-site guard, and a future selectable thing is
+  // gated the moment it is threaded through here.
+  onSelectLot: rawSelectLot,
   onCommitLine,
   onFlipChain,
   onUndoSegment,
@@ -1984,7 +1996,7 @@ export default function FacadeViewer({
   view = FACADE_DEFAULT_VIEW,
   onDrawModeChange,
   corners,
-  onSelectCorner,
+  onSelectCorner: rawSelectCorner,
   maxCornerAngle,
   cornerChoices,
   ground,
@@ -1999,11 +2011,12 @@ export default function FacadeViewer({
   streetNetwork,
   onCommitStreet,
   selectedStreet,
-  onSelectStreet,
+  onSelectStreet: rawSelectStreet,
   selectedIntersection,
-  onSelectIntersection,
+  onSelectIntersection: rawSelectIntersection,
   selectedSquare,
-  onSelectSquare,
+  onSelectSquare: rawSelectSquare,
+  onClearSelection,
 }: FacadeViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null!);
   const planRef = useRef<HTMLDivElement>(null);
@@ -2035,6 +2048,40 @@ export default function FacadeViewer({
   // The Select tool (marquee). Mutually exclusive with draw mode; off by
   // default so every existing path is byte-identical.
   const [selectMode, setSelectMode] = useState(false);
+  // Selecting is a Select-tool action. With the tool off, a click in ANY pane
+  // selects nothing — the raw* callbacks are re-exported here under their
+  // canonical names behind that gate, so lots, corners, streets, intersections
+  // and squares all obey one rule instead of each pane guarding itself.
+  const onSelectLot = useCallback(
+    (blockId: string, lot: number) => {
+      if (selectMode) rawSelectLot(blockId, lot);
+    },
+    [selectMode, rawSelectLot],
+  );
+  const onSelectCorner = useCallback(
+    (key: string) => {
+      if (selectMode) rawSelectCorner(key);
+    },
+    [selectMode, rawSelectCorner],
+  );
+  const onSelectStreet = useCallback(
+    (id: string) => {
+      if (selectMode) rawSelectStreet(id);
+    },
+    [selectMode, rawSelectStreet],
+  );
+  const onSelectIntersection = useCallback(
+    (key: string) => {
+      if (selectMode) rawSelectIntersection(key);
+    },
+    [selectMode, rawSelectIntersection],
+  );
+  const onSelectSquare = useCallback(
+    (streetId: string) => {
+      if (selectMode) rawSelectSquare(streetId);
+    },
+    [selectMode, rawSelectSquare],
+  );
   // Two-step confirm for the select-mode Clear-all button.
   const [confirmClear, setConfirmClear] = useState(false);
   // The street tool (draws the standalone road network). Mutually exclusive
@@ -2118,11 +2165,14 @@ export default function FacadeViewer({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [walkArming]);
-  // Tool-off clears the selection (matches Escape). Fires on mount too, where
-  // the marquee is already null (no-op).
+  // Nothing is selected outside the Select tool: leaving it drops EVERY kind
+  // of selection — single lot/corner, street, intersection, square, and any
+  // marquee — not just the marquee. Fires on mount too, where all of them are
+  // already null (no-op); selection is UI state and is never restored from the
+  // autosaved document, so this cannot eat a restored selection.
   useEffect(() => {
-    if (!selectMode) onMarqueeClear();
-  }, [selectMode, onMarqueeClear]);
+    if (!selectMode) onClearSelection();
+  }, [selectMode, onClearSelection]);
   const [isDesktop, setIsDesktop] = useState(true);
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 768px)");
@@ -2504,7 +2554,11 @@ export default function FacadeViewer({
                 >
                   {drawMode ? "✏ Drawing — Esc to end" : "✏ Buildings"}
                 </button>
-                {blocks.length > 0 && (
+                {/* Selecting anything now requires this tool, so it must be
+                  * offered whenever ANYTHING is selectable — a streets-only
+                  * scene would otherwise have no way to reach the Street /
+                  * Intersection / Square inspectors. */}
+                {(blocks.length > 0 || hasStreets) && (
                   <button
                     type="button"
                     onClick={toggleSelect}
