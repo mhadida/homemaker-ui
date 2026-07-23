@@ -142,8 +142,8 @@ export const DEFAULT_FACADE: FacadeParams = {
   windowStyle: "sash",
   groundFloor: { treatment: "residential", doorBay: 0, stoop: true },
   ornament: { cornice: true, parapet: false, sills: true, surrounds: false },
-  wallColor: "#c7bca8",
-  trimColor: "#ece8e0",
+  wallColor: "#ebcf88", // scandi yellow
+  trimColor: "#f1ece1", // warm white
   doorColor: "#3d4a42",
 };
 
@@ -182,8 +182,8 @@ export const FACADE_PRESETS: Record<
       windowStyle: "georgian",
       groundFloor: { treatment: "residential", doorBay: 0, stoop: true },
       ornament: { cornice: true, parapet: true, sills: true, surrounds: false },
-      wallColor: "#c7bca8",
-      trimColor: "#ece8e0",
+      wallColor: "#ebcf88", // scandi yellow
+      trimColor: "#f1ece1", // warm white
       doorColor: "#3d4a42",
     },
   },
@@ -199,8 +199,8 @@ export const FACADE_PRESETS: Record<
       windowStyle: "victorian",
       groundFloor: { treatment: "shopfront", doorBay: 1, stoop: false },
       ornament: { cornice: true, parapet: false, sills: true, surrounds: true },
-      wallColor: "#a89c8d",
-      trimColor: "#ddd3c3",
+      wallColor: "#a85748", // barn red
+      trimColor: "#ece3cf", // cream
       doorColor: "#26262a",
     },
   },
@@ -216,8 +216,8 @@ export const FACADE_PRESETS: Record<
       windowStyle: "none",
       groundFloor: { treatment: "residential", doorBay: 1, stoop: false },
       ornament: { cornice: false, parapet: true, sills: false, surrounds: false },
-      wallColor: "#ece8e0",
-      trimColor: "#8e9298",
+      wallColor: "#9fb8c6", // dusty blue
+      trimColor: "#f1ece1", // warm white
       doorColor: "#26262a",
     },
   },

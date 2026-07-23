@@ -43,7 +43,10 @@ describe("parseFacadePromptLocal", () => {
   });
 
   it("parses wall and door colors", () => {
-    expect(parseFacadePromptLocal("white walls").wallColor).toBe("#ece8e0");
+    // last-word match: "yellow" → Scandi Yellow, "red" → Barn Red
+    expect(parseFacadePromptLocal("yellow walls").wallColor).toBe("#ebcf88");
+    expect(parseFacadePromptLocal("barn red walls").wallColor).toBe("#a85748");
+    expect(parseFacadePromptLocal("white walls").wallColor).toBe("#f1ece1"); // warm white
     expect(parseFacadePromptLocal("navy door").doorColor).toBe("#2e3a4d");
   });
 

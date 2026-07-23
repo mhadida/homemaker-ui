@@ -6,14 +6,14 @@ export const runtime = "nodejs";
 
 // Keep in sync with WALL_SWATCHES / DOOR_SWATCHES in the client libs.
 const WALL_COLOR_IDS = [
-  "earthy",
+  "scandi-yellow",
+  "ochre",
+  "sage-green",
+  "barn-red",
+  "salmon",
+  "dusty-blue",
   "cream",
-  "stone",
-  "slate",
-  "linen",
-  "sage",
-  "blush",
-  "white",
+  "warm-white",
 ] as const;
 const DOOR_COLOR_IDS = [
   "racing-green",
@@ -107,7 +107,7 @@ function SYSTEM_PROMPT(current: Partial<FacadeSpec> | undefined): string {
     `- windowSize: ${have.windowSize ?? "medium"}`,
     `- windowStyle: ${have.windowStyle ?? "sash"}`,
     `- sections: ${have.sections ?? 1}, sectionPattern: ${have.sectionPattern ?? "flush"}`,
-    `- colors: wall ${have.wallColor ?? "earthy"}, trim ${have.trimColor ?? "white"}, door ${have.doorColor ?? "racing-green"}`,
+    `- colors: wall ${have.wallColor ?? "cream"}, trim ${have.trimColor ?? "warm-white"}, door ${have.doorColor ?? "racing-green"}`,
     `- preset: ${have.preset ?? "none"}`,
     "",
     "Meanings:",

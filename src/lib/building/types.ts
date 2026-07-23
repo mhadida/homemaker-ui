@@ -146,15 +146,18 @@ export const ROOF_SWATCHES: { id: string; label: string; hex: string }[] = [
 ];
 
 /** Curated wall paint swatches — warm earthy palette, no pure browns. */
+// Scandinavian pastel facades — the Nyhavn/Falu look: warm yellows and ochres,
+// a Falu barn red, soft greens and blues, salmon pink, and two light tones for
+// range and white trim.
 export const WALL_SWATCHES: { id: string; label: string; hex: string }[] = [
-  { id: "earthy", label: "Earthy", hex: "#c7bca8" },
-  { id: "cream", label: "Cream", hex: "#e8dcc4" },
-  { id: "stone", label: "Stone", hex: "#a89c8d" },
-  { id: "slate", label: "Slate", hex: "#8e9298" },
-  { id: "linen", label: "Linen", hex: "#ddd3c3" },
-  { id: "sage", label: "Sage", hex: "#a8b29a" },
-  { id: "blush", label: "Blush", hex: "#c9a89c" },
-  { id: "white", label: "White", hex: "#ece8e0" },
+  { id: "scandi-yellow", label: "Scandi Yellow", hex: "#ebcf88" },
+  { id: "ochre", label: "Ochre", hex: "#e0a566" },
+  { id: "sage-green", label: "Sage Green", hex: "#b3c9a4" },
+  { id: "barn-red", label: "Barn Red", hex: "#a85748" },
+  { id: "salmon", label: "Salmon", hex: "#e6a690" },
+  { id: "dusty-blue", label: "Dusty Blue", hex: "#9fb8c6" },
+  { id: "cream", label: "Cream", hex: "#ece3cf" },
+  { id: "warm-white", label: "Warm White", hex: "#f1ece1" },
 ];
 
 // "framing" and "blank" are hidden from the UI picker — framing has no

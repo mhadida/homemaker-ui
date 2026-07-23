@@ -136,9 +136,15 @@ export function parseFacadePromptLocal(prompt: string): FacadePromptUpdates {
   if (/\basymmetric(?:al)?\b/.test(lower)) updates.sectionsSymmetrical = false;
   else if (/\bsymmetric(?:al)?\b/.test(lower)) updates.sectionsSymmetrical = true;
 
-  // Colors: "<swatch> wall(s)" / "<swatch> door"
+  // Colors: "<swatch> wall(s)" / "<swatch> door". Match the full label OR its
+  // last word, so both "scandi yellow walls" and plain "yellow walls" work
+  // (the swatch last-words — yellow, ochre, green, red, salmon, blue, cream,
+  // white — are all distinct).
   for (const s of WALL_SWATCHES) {
-    if (new RegExp(`\\b${s.label.toLowerCase()}\\b[^.]*\\bwalls?\\b`).test(lower)) {
+    const label = s.label.toLowerCase();
+    const last = label.split(/\s+/).pop()!;
+    const kw = label === last ? label : `(?:${label}|${last})`;
+    if (new RegExp(`\\b${kw}\\b[^.]*\\bwalls?\\b`).test(lower)) {
       updates.wallColor = s.hex;
       break;
     }
