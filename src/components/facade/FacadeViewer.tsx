@@ -180,11 +180,18 @@ function GlobalClear() {
  * onDeviceLost (three calls it from the device.lost promise); on the WebGL
  * fallback it listens for webglcontextlost on the canvas. `onLost` decides
  * whether to remount now or defer (tab hidden). */
-function GpuLossRecovery({ onLost }: { onLost: () => void }) {
+function GpuLossRecovery({
+  onLost,
+  onReady,
+}: {
+  onLost: () => void;
+  onReady: () => void;
+}) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const gl = useThree((s) => s.gl) as any;
   useEffect(() => {
     if (!gl) return;
+    onReady(); // this (possibly freshly remounted) renderer is live
     const cbs: Array<() => void> = [];
     if (typeof gl.onDeviceLost === "function") {
       const prev = gl.onDeviceLost.bind(gl);
@@ -208,8 +215,20 @@ function GpuLossRecovery({ onLost }: { onLost: () => void }) {
       el.addEventListener("webglcontextlost", onCtxLost);
       cbs.push(() => el.removeEventListener("webglcontextlost", onCtxLost));
     }
+    // Backup detector: three sets `_isDeviceLost` when the WebGPU device.lost
+    // promise resolves. Poll it in case the onDeviceLost callback path is
+    // missed (subclassed renderer, timing) — the reported gray persisted past
+    // the event-only fix, so catch the flag directly too.
+    let fired = false;
+    const poll = window.setInterval(() => {
+      if (gl._isDeviceLost && !fired) {
+        fired = true;
+        onLost();
+      }
+    }, 1000);
+    cbs.push(() => window.clearInterval(poll));
     return () => cbs.forEach((c) => c());
-  }, [gl, onLost]);
+  }, [gl, onLost, onReady]);
   return null;
 }
 
@@ -2467,23 +2486,35 @@ export default function FacadeViewer({
   // deferred until it's visible again (a backgrounded GPU would just lose the
   // new device too), and remounts are capped so a genuinely dead GPU can't loop.
   const [canvasKey, setCanvasKey] = useState(0);
+  const [recovering, setRecovering] = useState(false);
   const lossDeferredRef = useRef(false);
-  const remountTimesRef = useRef<number[]>([]);
+  const lastRemountRef = useRef(0);
+  const pendingRemountRef = useRef(false);
+  // Remount the Canvas, throttled to at most once per 2 s so a genuinely dead
+  // GPU can't spin a tight loop — but it NEVER permanently gives up (a Mac GPU
+  // switch can fire several losses in seconds; giving up left them gray). A
+  // loss inside the cooldown schedules one retry at the end of it.
   const remountCanvas = useCallback(() => {
     const now = typeof performance !== "undefined" ? performance.now() : 0;
-    remountTimesRef.current = remountTimesRef.current.filter((t) => now - t < 10000);
-    if (remountTimesRef.current.length >= 3) {
-      // 3 losses in 10 s — the GPU isn't coming back; stop remounting (an
-      // endless loop would be worse). The view stays gray until a reload.
-      console.warn(
-        "[FacadeViewer] GPU device lost repeatedly; giving up recovery. Reload to retry.",
-      );
+    const since = now - lastRemountRef.current;
+    if (since < 2000) {
+      if (!pendingRemountRef.current) {
+        pendingRemountRef.current = true;
+        setTimeout(() => {
+          pendingRemountRef.current = false;
+          remountCanvas();
+        }, 2000 - since);
+      }
       return;
     }
-    remountTimesRef.current.push(now);
+    lastRemountRef.current = now;
     lossDeferredRef.current = false;
+    setRecovering(true);
+    console.warn("[FacadeViewer] GPU render lost — rebuilding the 3D view.");
     setCanvasKey((k) => k + 1);
   }, []);
+  // The fresh Canvas has mounted and wired up — hide the recovery notice.
+  const onCanvasReady = useCallback(() => setRecovering(false), []);
   const onGpuLoss = useCallback(() => {
     if (typeof document !== "undefined" && document.visibilityState !== "visible") {
       lossDeferredRef.current = true; // recover when the tab returns
@@ -2585,7 +2616,7 @@ export default function FacadeViewer({
         dpr={[1, 2]}
       >
         <GlobalClear />
-        <GpuLossRecovery onLost={onGpuLoss} />
+        <GpuLossRecovery onLost={onGpuLoss} onReady={onCanvasReady} />
         <View.Port />
         {showStats && <Stats />}
       </Canvas>
@@ -2824,6 +2855,17 @@ export default function FacadeViewer({
       >
         Save image
       </button>
+
+      {/* Shown while the renderer is being rebuilt after a GPU loss — turns the
+        * silent gray into a visible, self-healing state (and a diagnostic:
+        * "did you see this?" tells a device-loss gray from any other cause). */}
+      {recovering && (
+        <div className="pointer-events-none absolute inset-0 grid place-items-center">
+          <div className="rounded-lg bg-black/70 px-4 py-2 text-[12px] text-white/90 backdrop-blur-md">
+            Recovering 3D view…
+          </div>
+        </div>
+      )}
     </div>
   );
 }
