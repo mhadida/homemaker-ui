@@ -287,6 +287,18 @@ NOT involved; every edit is live (no Update button). Spec:
   defaults null + the tool defaults off so the unused feature is byte-
   identical. Node-merge (welding selected nodes) is deferred — nodes move
   only. Spec: `docs/superpowers/specs/2026-07-14-marquee-selection-design.md`.
+  **Selecting requires the Select tool**: with it OFF, a click in ANY pane
+  selects nothing. Every `onSelect*` callback (lot, corner, street,
+  intersection, square) is re-exported inside `FacadeViewer` under its
+  canonical name wrapped in a `selectMode` gate at the single props-
+  destructuring point, so the panes need no per-call-site guard and a future
+  selectable thing is gated the moment it is threaded through. Leaving the tool
+  fires `onClearSelection`, dropping EVERY kind of selection (single
+  lot/corner, street, intersection, square, marquee) — selection is UI-only and
+  never restored from the autosaved document, so the mount-time clear is a
+  no-op. The Select button shows whenever `blocks.length > 0 || hasStreets`
+  (a streets-only scene must still reach the Street/Intersection/Square
+  inspectors).
 - **Street Network**: a standalone, drawable, typed road network —
   `alley`/`street`/`road`/`boulevard` (`src/lib/street/types.ts` — `Street`,
   `StreetType`, `STREET_SPECS` widths/car flags, `Monument`,

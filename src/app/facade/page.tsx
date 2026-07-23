@@ -602,6 +602,18 @@ export default function FacadePage() {
 
   const handleMarqueeClear = useCallback(() => setMarquee(null), []);
 
+  /** Drop every kind of selection without touching the scene. The viewer calls
+   * this whenever the Select tool goes off — nothing stays selected outside
+   * selection mode. (handleClearAll wipes the scene too; this is selection
+   * only.) */
+  const handleClearSelection = useCallback(() => {
+    setSelected(null);
+    setSelectedStreet(null);
+    setSelectedIntersection(null);
+    setSelectedSquare(null);
+    setMarquee(null);
+  }, []);
+
   const handleMarqueeDelete = useCallback(() => {
     if (!marquee) return;
     const next = syncCorners(
@@ -1272,6 +1284,7 @@ export default function FacadePage() {
             onSelectIntersection={handleSelectIntersection}
             selectedSquare={selectedSquare}
             onSelectSquare={handleSelectSquare}
+            onClearSelection={handleClearSelection}
           />
         </div>
 
