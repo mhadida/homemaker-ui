@@ -41,6 +41,7 @@ import type { Ground } from "@/lib/facade/terrain";
 import { groundHeightAt } from "@/lib/facade/terrain";
 import { walkStep, EYE_HEIGHT, type WalkKeys } from "@/lib/facade/walk";
 import { snapToGridAxis } from "@/lib/facade/grid";
+import { ORBIT_MAX_DISTANCE, PERSPECTIVE_FAR } from "@/lib/facade/clip";
 import { marqueeEmpty, type Marquee } from "@/lib/facade/marquee";
 import {
   streetLines,
@@ -1775,12 +1776,16 @@ function PerspectivePane({
         selectedSquare={selectedSquare}
         onSelectSquare={onSelectSquare}
       />
+      {/* far is DERIVED (clip.ts) to always contain the ground out to its far
+        * corner at full dolly-out; a hardcoded 2000 was smaller than that, so
+        * zooming out sliced the ground and the sky showed through ("gray").
+        * near stays 0.1 for walk mode (eye centimetres from a wall). */}
       <PerspectiveCamera
         makeDefault
         position={[6, 5, 14]}
         fov={40}
         near={0.1}
-        far={2000}
+        far={PERSPECTIVE_FAR}
       />
       {walk ? (
         <WalkControls
@@ -1798,7 +1803,7 @@ function PerspectivePane({
           dampingFactor={0.08}
           target={orbitTarget}
           minDistance={3}
-          maxDistance={600}
+          maxDistance={ORBIT_MAX_DISTANCE}
           maxPolarAngle={Math.PI / 2.05}
           enablePan
           panSpeed={0.8}

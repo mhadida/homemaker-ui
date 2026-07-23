@@ -84,6 +84,7 @@ src/
       corners.ts       — corner detection (turn/convexity), shell sync, miters
       sections.ts      — facade-section edit helpers (canonical writes, AI patterns)
       grid.ts          — rectilinear drawing grid: lattice snap + 90° axis lock
+      clip.ts          — world size (GROUND_HALF) + derived perspective far plane
   types/
     mapbox-gl-draw.d.ts — Type declarations (legacy; no map UI currently exists)
 python/

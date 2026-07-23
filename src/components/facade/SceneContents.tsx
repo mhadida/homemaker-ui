@@ -10,6 +10,9 @@ import { isWebGPUPath } from "./webgpu";
 import InstancedFacadeBoxes from "./InstancedFacadeBoxes";
 import StreetNetworkView from "@/components/street/StreetNetworkView";
 import type { StreetNetwork } from "@/lib/street/types";
+// Ground half-extent's single source of truth — the perspective far plane is
+// derived from it (src/lib/facade/clip.ts) so the two can never drift apart.
+import { GROUND_HALF } from "@/lib/facade/clip";
 import { effectiveWidth, minRadiusOf } from "@/lib/street/types";
 import { canalHoleOutline } from "@/lib/street/canal";
 import { filletCentreline } from "@/lib/street/geometry";
@@ -91,10 +94,6 @@ function sunPositionFromAngles(
   const z = r * Math.cos(alt) * Math.cos(az);
   return [x, y, z];
 }
-
-/** Half-extent of the "infinite" ground plane — far past the fog of any
- * practical scene, so the world never visibly ends. */
-const GROUND_HALF = 2000;
 
 /** One simple opaque plane out to the horizon (replaces the old radially
  * fading 200 m patch), with a REAL hole punched for every canal: the cut's
