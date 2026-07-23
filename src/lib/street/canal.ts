@@ -88,6 +88,7 @@ export interface BridgePlacement {
   pos: Vec2;
   tangent: Vec2;   // unit canal direction at pos
   span: number;    // bank-to-bank crossing length
+  deckWidth: number; // deck breadth = the crossing street's full width
 }
 
 /** Unit canal direction at `pos` — direction of the nearest canal segment
@@ -121,11 +122,23 @@ export function bridgesFor(net: StreetNetwork, intersections: Intersection[]): B
     if (!hasCanal || !hasLand) continue;
     const canalInc = it.incident.find((i) => typeById.get(i.streetId) === "canal")!;
     const canal = streetById.get(canalInc.streetId)!;
+    // The deck carries the land street across the canal, so it is as wide as
+    // that street (the widest, when several land streets meet here) — not a
+    // fixed footbridge breadth.
+    const landStreets = it.incident
+      .filter((i) => {
+        const t = typeById.get(i.streetId);
+        return t !== undefined && t !== "canal";
+      })
+      .map((i) => streetById.get(i.streetId)!)
+      .filter(Boolean);
+    const deckWidth = Math.max(...landStreets.map((s) => effectiveWidth(s)));
     out.push({
       key: it.key,
       pos: it.pos,
       tangent: canalTangentAt(canal, it.pos),
       span: effectiveWidth(canal) + 2 * CANAL_QUAY,
+      deckWidth,
     });
   }
   return out;

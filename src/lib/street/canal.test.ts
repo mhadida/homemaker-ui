@@ -52,6 +52,20 @@ describe("canal bridges", () => {
     expect(b).toHaveLength(1);
     expect(b[0].span).toBeCloseTo(15, 6);            // 14 + 2*0.5
     expect(Math.abs(b[0].tangent[0])).toBeLessThan(1e-6); // canal runs along ±z
+    expect(b[0].deckWidth).toBeCloseTo(9, 6);        // full width of the crossing street
+  });
+
+  it("deck is as wide as the crossing street (widest land street wins)", () => {
+    const net: StreetNetwork = {
+      streets: [
+        { id: "c", type: "canal", points: [[0, -10], [0, 10]] },
+        { id: "r", type: "road", points: [[-10, 0], [10, 0]] }, // road width 14
+      ],
+      roundabouts: [],
+    };
+    const b = bridgesFor(net, deriveIntersections(net));
+    expect(b).toHaveLength(1);
+    expect(b[0].deckWidth).toBeCloseTo(14, 6); // road, not the old fixed 3
   });
 
   it("no bridge at land↔land or canal↔canal", () => {
