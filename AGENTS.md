@@ -303,7 +303,15 @@ NOT involved; every edit is live (no Update button). Spec:
   never restored from the autosaved document, so the mount-time clear is a
   no-op. The Select button shows whenever `blocks.length > 0 || hasStreets`
   (a streets-only scene must still reach the Street/Intersection/Square
-  inspectors).
+  inspectors). Nothing HIGHLIGHTS to advertise selectability outside select
+  mode either: `onSelectStreet`/`onSelectIntersection`/`onSelectSquare` are
+  passed as `undefined` (not a no-op) when the tool is off, so ribbons/canals
+  still render but stop hover-tinting and the invisible-until-hover
+  intersection/square markers stop rendering — leaning on the existing
+  `onSelect === undefined` "not interactive" convention. Lots carry no hover
+  tint (only the `selected`-driven marker, already cleared), and a corner
+  node's disc hover is its DRAG affordance (nodes move outside select mode),
+  so `onSelectLot`/`onSelectCorner` stay defined and gate only the ACTION.
 - **Street Network**: a standalone, drawable, typed road network —
   `alley`/`street`/`road`/`boulevard` (`src/lib/street/types.ts` — `Street`,
   `StreetType`, `STREET_SPECS` widths/car flags, `Monument`,

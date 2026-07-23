@@ -1357,11 +1357,12 @@ function PlanPane({
   onMarqueeMove: (dx: number, dz: number) => void;
   onMarqueeMoveEnd: (dx: number, dz: number) => void;
   selectedStreet: string | null;
-  onSelectStreet: (id: string) => void;
+  /** Undefined outside select mode → ribbons render but don't hover/select. */
+  onSelectStreet?: (id: string) => void;
   selectedIntersection: string | null;
-  onSelectIntersection: (key: string) => void;
+  onSelectIntersection?: (key: string) => void;
   selectedSquare: string | null;
-  onSelectSquare: (streetId: string) => void;
+  onSelectSquare?: (streetId: string) => void;
 }) {
   const [nodeDrag, setNodeDrag] = useState(false);
   const dragEndAt = useRef(0);
@@ -1779,11 +1780,12 @@ function PerspectivePane({
   marquee: Marquee | null;
   streetNetwork: StreetNetwork;
   selectedStreet: string | null;
-  onSelectStreet: (id: string) => void;
+  /** Undefined outside select mode → ribbons render but don't hover/select. */
+  onSelectStreet?: (id: string) => void;
   selectedIntersection: string | null;
-  onSelectIntersection: (key: string) => void;
+  onSelectIntersection?: (key: string) => void;
   selectedSquare: string | null;
-  onSelectSquare: (streetId: string) => void;
+  onSelectSquare?: (streetId: string) => void;
   walk: boolean;
   /** The picked start pose (street point + facing); null → drop in place. */
   walkStart: StreetProjection | null;
@@ -1889,11 +1891,12 @@ function ElevationPane({
   marquee: Marquee | null;
   streetNetwork: StreetNetwork;
   selectedStreet: string | null;
-  onSelectStreet: (id: string) => void;
+  /** Undefined outside select mode → ribbons render but don't hover/select. */
+  onSelectStreet?: (id: string) => void;
   selectedIntersection: string | null;
-  onSelectIntersection: (key: string) => void;
+  onSelectIntersection?: (key: string) => void;
   selectedSquare: string | null;
-  onSelectSquare: (streetId: string) => void;
+  onSelectSquare?: (streetId: string) => void;
 }) {
   // Zero-block world: `block` is undefined. Hooks below must still run
   // unconditionally (Rules of Hooks) — every derived value falls back to a
@@ -2091,9 +2094,21 @@ export default function FacadeViewer({
   // default so every existing path is byte-identical.
   const [selectMode, setSelectMode] = useState(false);
   // Selecting is a Select-tool action. With the tool off, a click in ANY pane
-  // selects nothing — the raw* callbacks are re-exported here under their
-  // canonical names behind that gate, so lots, corners, streets, intersections
-  // and squares all obey one rule instead of each pane guarding itself.
+  // selects nothing, and — just as important — nothing HIGHLIGHTS to advertise
+  // that it could be selected.
+  //
+  // Street/canal/intersection/square objects hover-highlight (and render their
+  // click markers) only when their onSelect callback is DEFINED — that is the
+  // codebase's existing "undefined = not interactive" convention. So outside
+  // select mode we pass `undefined`, not a no-op: the ribbons still render but
+  // stop hovering, and the invisible-until-hover markers stop rendering
+  // entirely. Passing a truthy no-op (the old approach) left them hoverable.
+  //
+  // Lots have no hover state — they highlight only from the persistent
+  // `selected` marker, which onClearSelection wipes on tool-off — and a corner
+  // node's disc hover is its DRAG affordance (node moves live outside select
+  // mode), not a selection cue. Both still call their handler unconditionally
+  // downstream, so those two stay defined and gate the ACTION on selectMode.
   const onSelectLot = useCallback(
     (blockId: string, lot: number) => {
       if (selectMode) rawSelectLot(blockId, lot);
@@ -2106,24 +2121,9 @@ export default function FacadeViewer({
     },
     [selectMode, rawSelectCorner],
   );
-  const onSelectStreet = useCallback(
-    (id: string) => {
-      if (selectMode) rawSelectStreet(id);
-    },
-    [selectMode, rawSelectStreet],
-  );
-  const onSelectIntersection = useCallback(
-    (key: string) => {
-      if (selectMode) rawSelectIntersection(key);
-    },
-    [selectMode, rawSelectIntersection],
-  );
-  const onSelectSquare = useCallback(
-    (streetId: string) => {
-      if (selectMode) rawSelectSquare(streetId);
-    },
-    [selectMode, rawSelectSquare],
-  );
+  const onSelectStreet = selectMode ? rawSelectStreet : undefined;
+  const onSelectIntersection = selectMode ? rawSelectIntersection : undefined;
+  const onSelectSquare = selectMode ? rawSelectSquare : undefined;
   // Two-step confirm for the select-mode Clear-all button.
   const [confirmClear, setConfirmClear] = useState(false);
   // The street tool (draws the standalone road network). Mutually exclusive
