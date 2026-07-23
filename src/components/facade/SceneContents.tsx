@@ -36,6 +36,12 @@ import {
   type LotMiter,
 } from "@/lib/facade/corners";
 import { cornerRoofPlan, type CornerRoofPlan } from "@/lib/facade/cornerRoof";
+import {
+  openFillFor,
+  blockFootprint,
+  type OpenFill,
+} from "@/lib/facade/openBlock";
+import OpenBlockMesh from "./OpenBlockMesh";
 import CornerRoofMesh from "./CornerRoofMesh";
 import TurretMesh from "./TurretMesh";
 import { ROOF_COLORS } from "./FacadeMesh";
@@ -186,6 +192,7 @@ function BlockGroup({
   noRoof,
   datumOverride,
   rearSkin,
+  openFill,
 }: {
   block: FacadeBlock;
   selected: Selection | null;
@@ -204,6 +211,9 @@ function BlockGroup({
   /** This block lines a square's interior — each lot grows a second facade
    * skin on the massing rear, facing the void. */
   rearSkin: boolean;
+  /** Non-null → this frontage is too short for a terrace and renders as open
+   * space (plaza/park) instead of buildings. Null = normal building block. */
+  openFill: OpenFill | null;
 }) {
   const placements = useMemo(() => lotPlacements(block), [block]);
   const frame = useMemo(() => blockFrame(block), [block]);
@@ -218,7 +228,18 @@ function BlockGroup({
   const yaw = Math.atan2(-frame.dir[1], frame.dir[0]);
   return (
     <group>
-      {block.lots.map((lot, i) => {
+      {/* Open block: plaza/park fill replaces the buildings. The frontage line
+        * below still renders (plan view), byte-identical when openFill null. */}
+      {openFill && (
+        <OpenBlockMesh
+          footprint={blockFootprint(frame, MASSING_DEPTH_DEFAULT)}
+          fill={openFill}
+          seed={block.seed}
+          ground={ground}
+        />
+      )}
+      {!openFill &&
+        block.lots.map((lot, i) => {
         const pos = placements[i].position;
         const depth = lot.params.massingDepth ?? MASSING_DEPTH_DEFAULT;
         const key = `${block.id}:${i}`;
@@ -273,12 +294,14 @@ function BlockGroup({
         );
       })}
       {/* Per-block sidewalk strip on the street side of the line */}
-      <group position={mid} rotation={[0, yaw, 0]}>
-        <mesh position={[0, 0.005, 1.25]} receiveShadow>
-          <boxGeometry args={[frame.length, 0.01, 2.5]} />
-          <meshStandardMaterial color="#8f8a80" roughness={0.9} />
-        </mesh>
-      </group>
+      {!openFill && (
+        <group position={mid} rotation={[0, yaw, 0]}>
+          <mesh position={[0, 0.005, 1.25]} receiveShadow>
+            <boxGeometry args={[frame.length, 0.01, 2.5]} />
+            <meshStandardMaterial color="#8f8a80" roughness={0.9} />
+          </mesh>
+        </group>
+      )}
       {/* The block's line — always visible in plan, accented when selected;
        * each endpoint rides the tilted ground so it doesn't float on slopes */}
       <Line
@@ -517,6 +540,21 @@ export default function SceneContents({
       blocks.filter((b) => isSquareFrontingBlock(b, squares)).map((b) => b.id),
     );
   }, [streetNetwork, blocks]);
+  // Open blocks: frontages too short for a terrace render as plaza/park instead
+  // of buildings. Derived from seed + length — sparse, empty for a normal scene
+  // (byte-identical). Excluded below from the window instancer too.
+  const openFills = useMemo(() => {
+    const m = new Map<string, OpenFill>();
+    for (const b of blocks) {
+      const f = openFillFor(blockFrame(b).length, b.seed, b.gen.lotWidth.min);
+      if (f) m.set(b.id, f);
+    }
+    return m;
+  }, [blocks]);
+  const buildingBlocks = useMemo(
+    () => blocks.filter((b) => !openFills.has(b.id)),
+    [blocks, openFills],
+  );
   // Both corner-side lots to highlight when a corner is selected. Null when
   // no corner is selected OR the selected corner has dissolved (angle change
   // / node drag) — the marker condition falls back to the plain lot marker.
@@ -588,6 +626,7 @@ export default function SceneContents({
           noRoof={cornerMerge.noRoof}
           datumOverride={cornerMerge.datumOverride}
           rearSkin={squareFrontingIds.has(block.id)}
+          openFill={openFills.get(block.id) ?? null}
         />
       ))}
       {/* Merged corner L-roofs — one hip/valley surface per unified corner,
@@ -601,7 +640,7 @@ export default function SceneContents({
       ))}
       {/* Scene-wide window glass + frames as two InstancedMeshes (perf). The
        * per-block FacadeMesh skips WindowFill under USE_INSTANCING. */}
-      <InstancedFacadeBoxes blocks={blocks} ground={ground} />
+      <InstancedFacadeBoxes blocks={buildingBlocks} ground={ground} />
       {marquee?.nodes.map(([x, z]) => (
         <mesh
           key={`marquee-node-${x}:${z}`}

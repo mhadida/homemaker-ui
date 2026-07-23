@@ -166,6 +166,20 @@ NOT involved; every edit is live (no Update button). Spec:
   by a per-lot `massingDepth` (clamped 3–20 m in `layout.ts`, default 8, a
   panel Depth slider). Flat-topped; roofs cap it. Spec:
   `docs/superpowers/specs/2026-07-14-massing-design.md`.
+- **Open blocks (plaza / park)**: a frontage too short for a terrace
+  (`frame.length < 2·gen.lotWidth.min`, ~10 m) becomes open space instead of a
+  squished row — DERIVED from the block seed, no stored state (`src/lib/facade/
+  openBlock.ts` pure — `openFillFor` returns `null` for a normal block OR the
+  weighted "single building" outcome, `{kind:"plaza",monument}` or
+  `{kind:"park"}` otherwise; `blockFootprint` extrudes the frontage line back by
+  massing depth along −normal; `parkPlanting` is a deterministic jittered-grid
+  tree scatter; `isOpenSpace`). `SceneContents` renders `OpenBlockMesh` (draped
+  paved/green quad + `MonumentMesh` fountain/obelisk for plazas + `TreeMesh`
+  low-poly trees for parks — the project's first vegetation) in place of the
+  lots, filters open blocks out of `InstancedFacadeBoxes`, and `corners.ts`
+  skips them (no facade to miter). Reroll re-picks the fill; Save/Load and any
+  all-≥10 m scene are byte-identical. Spec:
+  `docs/superpowers/specs/2026-07-23-open-blocks-plaza-park-design.md`.
 - **Roofs**: flat / gable / hip, ridge parallel or perpendicular to street,
   per-lot height (`src/lib/facade/roof.ts`, pure — `resolveRoof` → clamped
   `RoofPlan`, `roofTriangles` → soup the mesh auto-orients by normal).

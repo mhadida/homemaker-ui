@@ -2,6 +2,7 @@ import type { FacadeBlock } from "./blocks";
 import { blockFrame } from "./blocks";
 import { WALL_THICKNESS } from "./layout";
 import { deriveNodes } from "./nodes";
+import { isOpenSpace } from "./openBlock";
 import type { FacadeParams } from "./types";
 
 /** One block's side of a corner. lotSide names which end of that LOT's
@@ -62,6 +63,10 @@ export function detectCorners(
       `${r1.blockId}:${r1.end}` < `${r2.blockId}:${r2.end}` ? [r1, r2] : [r2, r1];
     const A = byId.get(ra.blockId)!;
     const B = byId.get(rb.blockId)!;
+    // An open block (plaza/park) has no facade to miter or shell to sync, so it
+    // never forms a corner — a neighbour must not miter its wall toward empty
+    // space. Building-fill short blocks (isOpenSpace false) corner normally.
+    if (isOpenSpace(A) || isOpenSpace(B)) continue;
     // Continuous-frontage requirement: the two facades only meet as a
     // corner when one block's node-end sits at its frame ORIGIN and the
     // other's at its frame END (opposite atOrigin parity). Same-parity
