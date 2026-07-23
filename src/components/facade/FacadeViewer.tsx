@@ -174,6 +174,45 @@ function GlobalClear() {
   return null;
 }
 
+/** Wires GPU device/context-loss detection to a recovery callback. A child of
+ * the Canvas so it gets the live renderer via useThree (the onCreated prop
+ * proved unreliable on this R3F path). On WebGPU it chains the renderer's
+ * onDeviceLost (three calls it from the device.lost promise); on the WebGL
+ * fallback it listens for webglcontextlost on the canvas. `onLost` decides
+ * whether to remount now or defer (tab hidden). */
+function GpuLossRecovery({ onLost }: { onLost: () => void }) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const gl = useThree((s) => s.gl) as any;
+  useEffect(() => {
+    if (!gl) return;
+    const cbs: Array<() => void> = [];
+    if (typeof gl.onDeviceLost === "function") {
+      const prev = gl.onDeviceLost.bind(gl);
+      // Intentionally reassigning the renderer's loss hook (three calls it on
+      // device.lost) — the immutability lint targets render-time scene edits.
+      // eslint-disable-next-line react-hooks/immutability
+      gl.onDeviceLost = (info: unknown) => {
+        prev(info);
+        onLost();
+      };
+      cbs.push(() => {
+        gl.onDeviceLost = prev;
+      });
+    }
+    const el: HTMLCanvasElement | undefined = gl.domElement;
+    if (el) {
+      const onCtxLost = (e: Event) => {
+        e.preventDefault();
+        onLost();
+      };
+      el.addEventListener("webglcontextlost", onCtxLost);
+      cbs.push(() => el.removeEventListener("webglcontextlost", onCtxLost));
+    }
+    return () => cbs.forEach((c) => c());
+  }, [gl, onLost]);
+  return null;
+}
+
 // ── Pane contents (3D only — rendered inside <View>) ────────────────────────
 
 const MIN_BLOCK_LENGTH = 3;
@@ -2417,6 +2456,48 @@ export default function FacadeViewer({
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).has("stats");
 
+  // ── GPU device / context loss recovery ──────────────────────────────────
+  // The WebGPU device (or a WebGL context) can be lost on tab backgrounding, a
+  // Mac GPU switch, sleep/wake or memory pressure. three logs the loss and then
+  // permanently early-returns from _renderScene (`_isDeviceLost` is never
+  // reset), so the ONE shared renderer stops and all four <View> panes go gray
+  // until reload. A lost WebGPU device can't be re-inited in place, so recovery
+  // = REMOUNT the Canvas (bump its key) to build a fresh renderer + device; the
+  // scene re-renders from React state. A loss while the tab is hidden is
+  // deferred until it's visible again (a backgrounded GPU would just lose the
+  // new device too), and remounts are capped so a genuinely dead GPU can't loop.
+  const [canvasKey, setCanvasKey] = useState(0);
+  const lossDeferredRef = useRef(false);
+  const remountTimesRef = useRef<number[]>([]);
+  const remountCanvas = useCallback(() => {
+    const now = typeof performance !== "undefined" ? performance.now() : 0;
+    remountTimesRef.current = remountTimesRef.current.filter((t) => now - t < 10000);
+    if (remountTimesRef.current.length >= 3) {
+      // 3 losses in 10 s — the GPU isn't coming back; stop remounting (an
+      // endless loop would be worse). The view stays gray until a reload.
+      console.warn(
+        "[FacadeViewer] GPU device lost repeatedly; giving up recovery. Reload to retry.",
+      );
+      return;
+    }
+    remountTimesRef.current.push(now);
+    lossDeferredRef.current = false;
+    setCanvasKey((k) => k + 1);
+  }, []);
+  const onGpuLoss = useCallback(() => {
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+      lossDeferredRef.current = true; // recover when the tab returns
+      return;
+    }
+    remountCanvas();
+  }, [remountCanvas]);
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === "visible" && lossDeferredRef.current) remountCanvas();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [remountCanvas]);
   return (
     <div
       ref={containerRef}
@@ -2433,6 +2514,7 @@ export default function FacadeViewer({
        * pointerEvents:none. Overlays therefore need no z-index of their own —
        * the two on the plan pane use one purely to order against each other. */}
       <Canvas
+        key={canvasKey}
         shadows
         className="!absolute !inset-0"
         style={{ pointerEvents: "none" }}
@@ -2503,6 +2585,7 @@ export default function FacadeViewer({
         dpr={[1, 2]}
       >
         <GlobalClear />
+        <GpuLossRecovery onLost={onGpuLoss} />
         <View.Port />
         {showStats && <Stats />}
       </Canvas>
