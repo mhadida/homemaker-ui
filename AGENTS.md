@@ -151,7 +151,13 @@ NOT involved; every edit is live (no Update button). Spec:
   (`cornerMerge` memo → `CornerRoofMesh`). A unified corner can also carry
   a **corner turret** (`CornerChoice.turret`: none / to-ground / corbelled
   above the first floor — inspector row; `TurretMesh` renders the round
-  shaft + cone straddling the node in the shell's colors). Spec:
+  shaft + cone straddling the node in the shell's colors). The shaft carries
+  **arched windows** on the outward (street-facing ~270°) arc, one row per
+  storey — pure `turretWindows` in `src/lib/facade/turret.ts` (placement +
+  `clampTurretRadius`), the outward angle derived from the two wings' facade
+  normals in `SceneContents`. A **radius slider** (`CornerChoice.turretRadius`,
+  clamped 1–6 m, sparse → default 2.2 = byte-identical) in the inspector's
+  turret row scales the shaft, cone, corbel and window count. Specs:
   `docs/superpowers/specs/2026-07-17-corner-l-roof-design.md`.
 - **Sections**: one lot's facade divides into vertical strips of whole bays
   with ±15 cm perpendicular relief (`FacadeParams.sections`, sparse — absent

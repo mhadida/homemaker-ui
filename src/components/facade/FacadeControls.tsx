@@ -17,6 +17,12 @@ import type { ViewSettings } from "@/lib/building/types";
 import { WALL_SWATCHES, classicalStoreyHeights } from "@/lib/building/types";
 import type { Selection, FacadeBlock, BlockGenSettings } from "@/lib/facade/blocks";
 import type { Corner, CornerChoice } from "@/lib/facade/corners";
+import {
+  clampTurretRadius,
+  TURRET_RADIUS_DEFAULT,
+  TURRET_RADIUS_MIN,
+  TURRET_RADIUS_MAX,
+} from "@/lib/facade/turret";
 import type { Marquee } from "@/lib/facade/marquee";
 import {
   resolveSections,
@@ -808,6 +814,22 @@ function CornerInspector({
                 }
               />
             </div>
+            {(choice.turret === "ground" || choice.turret === "corbel") && (
+              <SliderRow
+                label="Turret radius"
+                value={choice.turretRadius ?? TURRET_RADIUS_DEFAULT}
+                display={`${(choice.turretRadius ?? TURRET_RADIUS_DEFAULT).toFixed(1)} m`}
+                min={TURRET_RADIUS_MIN}
+                max={TURRET_RADIUS_MAX}
+                step={0.1}
+                onChange={(v) =>
+                  onCornerChoice(data.key, {
+                    ...choice,
+                    turretRadius: clampTurretRadius(v),
+                  })
+                }
+              />
+            )}
           </>
         )}
       </Section>

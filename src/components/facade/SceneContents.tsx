@@ -42,6 +42,7 @@ import {
   type OpenFill,
 } from "@/lib/facade/openBlock";
 import OpenBlockMesh from "./OpenBlockMesh";
+import { clampTurretRadius, TURRET_RADIUS_DEFAULT } from "@/lib/facade/turret";
 import CornerRoofMesh from "./CornerRoofMesh";
 import TurretMesh from "./TurretMesh";
 import { ROOF_COLORS } from "./FacadeMesh";
@@ -424,7 +425,10 @@ export default function SceneContents({
       datum: number;
       baseY: number;
       wallTop: number;
+      radius: number;
       corbelled: boolean;
+      storeyLevels: number[];
+      outwardAngle: number;
       wallColor: string;
       trimColor: string;
       roofColor: string;
@@ -481,6 +485,12 @@ export default function SceneContents({
       // preconditions (a flat-roofed corner can still carry one).
       const turret = choice.turret ?? "none";
       if (turret !== "none") {
+        // Windows face the streets: the outward direction is the sum of the two
+        // wings' facade normals (each points toward its street). angle over
+        // plan (x,z) with radial = [cos, sin].
+        const tf = cornerFrame(c, blocks);
+        const ox = tf.nA[0] + tf.nB[0];
+        const oz = tf.nA[1] + tf.nB[1];
         turrets.push({
           key: c.key,
           x: c.node[0],
@@ -488,7 +498,10 @@ export default function SceneContents({
           datum,
           baseY: turret === "corbel" ? (pLayout.storeyLevels[1] ?? 0) : 0,
           wallTop: pLayout.wallTop,
+          radius: clampTurretRadius(choice.turretRadius ?? TURRET_RADIUS_DEFAULT),
           corbelled: turret === "corbel",
+          storeyLevels: pLayout.storeyLevels,
+          outwardAngle: Math.atan2(oz, ox),
           wallColor: pLot.params.wallColor,
           trimColor: pLot.params.trimColor,
           roofColor: ROOF_COLORS[pLot.params.roofColor ?? "slate"],

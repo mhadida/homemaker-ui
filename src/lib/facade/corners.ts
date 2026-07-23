@@ -104,6 +104,9 @@ export interface CornerChoice {
    * full-height ("ground") or corbelled out above the first floor
    * ("corbel"). Sparse; absent = "none" (byte-identical). */
   turret?: "none" | "ground" | "corbel";
+  /** Turret shaft radius (m), clamped [TURRET_RADIUS_MIN, MAX]. Sparse; absent
+   * = TURRET_RADIUS_DEFAULT (byte-identical). */
+  turretRadius?: number;
 }
 
 /** The shared shell — the single source of truth for what "one building"
