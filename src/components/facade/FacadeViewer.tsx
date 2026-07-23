@@ -188,6 +188,12 @@ const DRAG_THRESHOLD = 0.3; // metres — clicks with sub-threshold jitter selec
 const FACING_COLOR = "#22c55e";
 /** Length of the facing tick, metres. */
 const FACING_TICK = 2.5;
+/** Transient drawing guides (pen/street preview line, facing tick, snap and
+ * closing markers) render on top of the world — depthTest off + this
+ * renderOrder — so a taller building the line crosses, or ground risen above
+ * the guide's flat y≈0.08 in the top-down plan view, can't occlude the guide
+ * you are actively drawing. */
+const GUIDE_RENDER_ORDER = 10;
 
 function PenSurface({
   blocks,
@@ -404,18 +410,34 @@ function PenSurface({
           dashed
           dashSize={0.5}
           gapSize={0.3}
+          depthTest={false}
+          depthWrite={false}
+          renderOrder={GUIDE_RENDER_ORDER}
         />
       )}
       {facingTick && (
-        <Line points={facingTick} color={FACING_COLOR} lineWidth={4} />
+        <Line
+          points={facingTick}
+          color={FACING_COLOR}
+          lineWidth={4}
+          depthTest={false}
+          depthWrite={false}
+          renderOrder={GUIDE_RENDER_ORDER}
+        />
       )}
       {path.length >= 2 && (
         <mesh
           position={[first[0], 0.09, first[1]]}
           rotation={[-Math.PI / 2, 0, 0]}
+          renderOrder={GUIDE_RENDER_ORDER}
         >
           <ringGeometry args={[0.5, 0.7, 24]} />
-          <meshBasicMaterial color="#3b82f6" transparent opacity={0.9} />
+          <meshBasicMaterial
+            color="#3b82f6"
+            transparent
+            opacity={0.9}
+            depthTest={false}
+          />
         </mesh>
       )}
     </>
@@ -574,24 +596,39 @@ function StreetDrawSurface({
           dashed
           dashSize={0.6}
           gapSize={0.35}
+          depthTest={false}
+          depthWrite={false}
+          renderOrder={GUIDE_RENDER_ORDER}
         />
       )}
       {path.length >= 2 && (
         <mesh
           position={[first[0], 0.09, first[1]]}
           rotation={[-Math.PI / 2, 0, 0]}
+          renderOrder={GUIDE_RENDER_ORDER}
         >
           <ringGeometry args={[0.5, 0.7, 24]} />
-          <meshBasicMaterial color={color} transparent opacity={0.9} />
+          <meshBasicMaterial
+            color={color}
+            transparent
+            opacity={0.9}
+            depthTest={false}
+          />
         </mesh>
       )}
       {cursor && snapped && (
         <mesh
           position={[cursor[0], 0.09, cursor[1]]}
           rotation={[-Math.PI / 2, 0, 0]}
+          renderOrder={GUIDE_RENDER_ORDER}
         >
           <ringGeometry args={[0.5, 0.8, 20]} />
-          <meshBasicMaterial color={color} transparent opacity={0.9} />
+          <meshBasicMaterial
+            color={color}
+            transparent
+            opacity={0.9}
+            depthTest={false}
+          />
         </mesh>
       )}
     </>

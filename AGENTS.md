@@ -241,7 +241,11 @@ NOT involved; every edit is live (no Update button). Spec:
   `?webgl2` forces the fallback backend, `?stats` shows an FPS panel.
   Renderer-dependent pieces route through `src/components/facade/webgpu.ts`
   (the flag choke point), `NodeLine.tsx` (fat lines: drei `<Line>` on
-  classic, `Line2NodeMaterial` on WebGPU — never mount one empty), and
+  classic, `Line2NodeMaterial` on WebGPU — never mount one empty; optional
+  `depthTest`/`depthWrite`/`renderOrder` so transient drawing GUIDES can render
+  on top of the world — a flat preview line at y≈0.08 is otherwise occluded
+  wherever it crosses a taller building or risen ground in the top-down plan
+  view), and
   `NodeGrid.tsx` (TSL port of drei's Grid). drei `ContactShadows` is
   classic-only (it renders through MeshDepthMaterial); the quad `<View>`
   needs the viewport Y-flip shim in `FacadeViewer` (WebGPU origin is

@@ -18,6 +18,16 @@ export interface NodeLineProps {
   dashed?: boolean;
   dashSize?: number;
   gapSize?: number;
+  /** Draw on top of the scene regardless of depth (default true = normal
+   * depth test). Transient drawing GUIDES pass false so the world can't
+   * occlude them — a flat preview line at y≈0.08 is otherwise hidden wherever
+   * it crosses a taller building or ground risen above it in the top-down
+   * plan view. */
+  depthTest?: boolean;
+  depthWrite?: boolean;
+  /** Higher = drawn later. Overlays pair a high value with depthTest={false}
+   * so they sort above ordinary geometry. */
+  renderOrder?: number;
 }
 
 interface LinesModule {
@@ -59,6 +69,9 @@ function GPULine({
   dashed = false,
   dashSize = 1,
   gapSize = 1,
+  depthTest = true,
+  depthWrite = true,
+  renderOrder = 0,
 }: NodeLineProps) {
   const [mod, setMod] = useState<LinesModule | null>(linesModule);
   useEffect(() => {
@@ -83,9 +96,11 @@ function GPULine({
             dashed,
             dashSize,
             gapSize,
+            depthTest,
+            depthWrite,
           })
         : null,
-    [mod, color, lineWidth, dashed, dashSize, gapSize],
+    [mod, color, lineWidth, dashed, dashSize, gapSize, depthTest, depthWrite],
   );
 
   // The line is built fully populated INSIDE the memo: mounting a Line2 with
@@ -99,8 +114,9 @@ function GPULine({
       : new mod.Line2(undefined, material);
     l.geometry.setPositions(points.flatMap((p) => [p[0], p[1], p[2] ?? 0]));
     if (dashed) l.computeLineDistances();
+    l.renderOrder = renderOrder;
     return l;
-  }, [mod, material, segments, points, dashed]);
+  }, [mod, material, segments, points, dashed, renderOrder]);
 
   useEffect(
     () => () => {
