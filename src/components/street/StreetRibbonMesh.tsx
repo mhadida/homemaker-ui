@@ -61,14 +61,20 @@ export default function StreetRibbonMesh({
     ];
     const closed = spans ? false : street.closed;
     const pos: number[] = [];
-    const yAt = (x: number, z: number) => groundHeightAt(x, z, ground) + 0.02;
     for (const cl of centrelines) {
       if (cl.length < 2) continue;
       const { left, right } = streetRibbon(cl, effectiveWidth(street), closed);
+      // A road is FLAT across its width: both edges of each cross-section take
+      // the CENTRELINE's ground height, so the ribbon tilts only ALONG its
+      // length (down the fall line) and never banks side-to-side. Draping each
+      // edge to its own ground height would cross-tilt the road where the slope
+      // runs across it. Flat ground → all heights 0 → byte-identical.
+      const yc = cl.map((c) => groundHeightAt(c[0], c[1], ground) + 0.02);
       for (let i = 0; i < cl.length - 1; i++) {
         const l0 = left[i], l1 = left[i + 1], r0 = right[i], r1 = right[i + 1];
-        pos.push(l0[0], yAt(l0[0], l0[1]), l0[1], r0[0], yAt(r0[0], r0[1]), r0[1], r1[0], yAt(r1[0], r1[1]), r1[1]);
-        pos.push(l0[0], yAt(l0[0], l0[1]), l0[1], r1[0], yAt(r1[0], r1[1]), r1[1], l1[0], yAt(l1[0], l1[1]), l1[1]);
+        const y0 = yc[i], y1 = yc[i + 1];
+        pos.push(l0[0], y0, l0[1], r0[0], y0, r0[1], r1[0], y1, r1[1]);
+        pos.push(l0[0], y0, l0[1], r1[0], y1, r1[1], l1[0], y1, l1[1]);
       }
     }
     if (pos.length === 0) return null;

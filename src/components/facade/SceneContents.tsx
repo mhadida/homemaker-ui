@@ -22,6 +22,7 @@ import type { ViewSettings } from "@/lib/building/types";
 import {
   blockFrame,
   lotPlacements,
+  type BlockFrame,
   type FacadeBlock,
   type Selection,
 } from "@/lib/facade/blocks";
@@ -182,6 +183,39 @@ function SelectionMarker({ params }: { params: FacadeParams }) {
   );
 }
 
+/** The per-block sidewalk strip, DRAPED to follow the landscape: its four
+ * corners (the frontage line and the same line pushed 2.5 m to the street side)
+ * each ride the tilted ground, so the strip lies flush with the slope instead
+ * of a horizontal box that floats/cuts in at its ends. Flat ground → all four
+ * corners at y=0 → the same flat strip as before (byte-identical). */
+const SIDEWALK_WIDTH = 2.5;
+function DrapedSidewalk({ frame, ground }: { frame: BlockFrame; ground: Ground }) {
+  const geo = useMemo(() => {
+    const { origin: o, dir: d, normal: n, length: L } = frame;
+    const W = SIDEWALK_WIDTH;
+    const y = (x: number, z: number): [number, number, number] => [
+      x,
+      groundHeightAt(x, z, ground) + 0.005,
+      z,
+    ];
+    const iA = y(o[0], o[1]);
+    const iB = y(o[0] + d[0] * L, o[1] + d[1] * L);
+    const oA = y(o[0] + n[0] * W, o[1] + n[1] * W);
+    const oB = y(o[0] + d[0] * L + n[0] * W, o[1] + d[1] * L + n[1] * W);
+    const pos = [...iA, ...iB, ...oB, ...iA, ...oB, ...oA];
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.computeVertexNormals();
+    return g;
+  }, [frame, ground]);
+  useEffect(() => () => geo.dispose(), [geo]);
+  return (
+    <mesh geometry={geo} receiveShadow>
+      <meshStandardMaterial color="#8f8a80" roughness={0.9} side={THREE.DoubleSide} />
+    </mesh>
+  );
+}
+
 function BlockGroup({
   block,
   selected,
@@ -220,14 +254,6 @@ function BlockGroup({
   const placements = useMemo(() => lotPlacements(block), [block]);
   const frame = useMemo(() => blockFrame(block), [block]);
   const isSelectedBlock = selected?.blockId === block.id;
-  const midX = frame.origin[0] + (frame.dir[0] * frame.length) / 2;
-  const midZ = frame.origin[1] + (frame.dir[1] * frame.length) / 2;
-  const mid: [number, number, number] = [
-    midX,
-    groundHeightAt(midX, midZ, ground), // sit the sidewalk on the tilted ground
-    midZ,
-  ];
-  const yaw = Math.atan2(-frame.dir[1], frame.dir[0]);
   return (
     <group>
       {/* Open block: plaza/park fill replaces the buildings. The frontage line
@@ -295,15 +321,9 @@ function BlockGroup({
           </group>
         );
       })}
-      {/* Per-block sidewalk strip on the street side of the line */}
-      {!openFill && (
-        <group position={mid} rotation={[0, yaw, 0]}>
-          <mesh position={[0, 0.005, 1.25]} receiveShadow>
-            <boxGeometry args={[frame.length, 0.01, 2.5]} />
-            <meshStandardMaterial color="#8f8a80" roughness={0.9} />
-          </mesh>
-        </group>
-      )}
+      {/* Per-block sidewalk strip on the street side of the line, draped to
+        * follow the tilted ground. */}
+      {!openFill && <DrapedSidewalk frame={frame} ground={ground} />}
       {/* The block's line — always visible in plan, accented when selected;
        * each endpoint rides the tilted ground so it doesn't float on slopes */}
       <Line
