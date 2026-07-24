@@ -54,7 +54,9 @@ import {
   levelingFor,
   groundNormal,
   groundHeightAt,
+  sampleHF,
   type Ground,
+  type Heightfield,
 } from "@/lib/facade/terrain";
 
 const BASEMENT_MIN = 0.3; // no sliver plinths below this drop
@@ -107,17 +109,19 @@ function sunPositionFromAngles(
 
 /** A world-oriented (XZ, +Y up) plane over ±GROUND_HALF, each vertex displaced
  * to the real ground height. Resolution tracks the heightfield spacing (the
- * bbox gets detail; the clamp-to-edge far field stays coarse & flat). */
-function displacedGroundGeometry(ground: Ground): THREE.BufferGeometry {
+ * bbox gets detail; the clamp-to-edge far field stays coarse & flat). Takes
+ * the `Heightfield` directly (not the enclosing `Ground`) so the memo above
+ * that calls this only reads `ground.hf` — matching its declared dep array. */
+function displacedGroundGeometry(hf: Heightfield): THREE.BufferGeometry {
   const seg = Math.max(
     64,
-    Math.min(400, Math.round((2 * GROUND_HALF) / ground.hf!.spacing)),
+    Math.min(400, Math.round((2 * GROUND_HALF) / hf.spacing)),
   );
   const g = new THREE.PlaneGeometry(2 * GROUND_HALF, 2 * GROUND_HALF, seg, seg);
   g.rotateX(-Math.PI / 2); // bake lie-flat: geometry now spans XZ, +Y up
   const pos = g.attributes.position;
   for (let i = 0; i < pos.count; i++) {
-    pos.setY(i, groundHeightAt(pos.getX(i), pos.getZ(i), ground));
+    pos.setY(i, sampleHF(hf, pos.getX(i), pos.getZ(i)));
   }
   pos.needsUpdate = true;
   g.computeVertexNormals();
@@ -131,7 +135,7 @@ function displacedGroundGeometry(ground: Ground): THREE.BufferGeometry {
  * (sunken plazas, stairs) will go. */
 function useGroundGeometry(streetNetwork: StreetNetwork | undefined, ground: Ground) {
   const geo = useMemo(() => {
-    if (ground.hf) return displacedGroundGeometry(ground);
+    if (ground.hf) return displacedGroundGeometry(ground.hf);
     const shape = new THREE.Shape([
       new THREE.Vector2(-GROUND_HALF, -GROUND_HALF),
       new THREE.Vector2(GROUND_HALF, -GROUND_HALF),
