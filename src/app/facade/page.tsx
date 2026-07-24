@@ -1265,7 +1265,10 @@ export default function FacadePage() {
           <span className="mx-1 h-4 w-px bg-[var(--border)]" aria-hidden />
           <button
             type="button"
-            onClick={() => setPickerOpen(true)}
+            onClick={() => {
+              setTerrainError(null);
+              setPickerOpen(true);
+            }}
             className="text-[11px] px-2 py-0.5 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30 transition-colors"
           >
             Load place

@@ -410,4 +410,24 @@ describe("document terrain round-trip", () => {
     if (!back.ok) return;
     expect(back.scene.ground.hf).toBeUndefined();
   });
+
+  it("drops a degenerate heightfield (cols:0, rows:0, spacing:0) rather than loading a zero-area grid", () => {
+    const doc = {
+      version: 1,
+      blocks: [],
+      cornerChoices: [],
+      ground: {
+        slope: 0,
+        azimuth: 0,
+        hf: { originX: 0, originZ: 0, spacing: 0, cols: 0, rows: 0, data: [] },
+      },
+      streetWidth: 14,
+      maxCornerAngle: 60,
+      streetNetwork: { streets: [], roundabouts: [], squares: [] },
+    };
+    const back = deserializeScene(doc);
+    expect(back.ok).toBe(true);
+    if (!back.ok) return;
+    expect(back.scene.ground.hf).toBeUndefined();
+  });
 });

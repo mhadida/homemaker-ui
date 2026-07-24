@@ -146,15 +146,24 @@ function validRoundabout(r: unknown): r is [string, Monument] {
 
 /** A heightfield: finite grid scalars plus a data array whose length matches
  * cols·rows, every entry finite. Defensive guard for a loaded `ground.hf` —
- * malformed terrain is STRIPPED (not trusted, not thrown on). */
+ * malformed terrain is STRIPPED (not trusted, not thrown on). cols/rows must
+ * be at least 2 (a grid needs two points per axis to span anything) and
+ * spacing must be positive — otherwise `cols:0,rows:0,spacing:0,data:[]`
+ * passes the finite + length checks below (0 is finite, [].length === 0×0)
+ * and a corrupt/degenerate save would load a zero-area grid instead of being
+ * stripped. */
 export function validHeightfield(v: unknown): v is Heightfield {
   if (typeof v !== "object" || v === null) return false;
   const h = v as Record<string, unknown>;
   const nums = ["originX", "originZ", "spacing", "cols", "rows"];
   if (!nums.every((k) => isFiniteNumber(h[k]))) return false;
+  const cols = h.cols as number;
+  const rows = h.rows as number;
+  const spacing = h.spacing as number;
+  if (cols < 2 || rows < 2 || spacing <= 0) return false;
   return (
     Array.isArray(h.data) &&
-    h.data.length === (h.cols as number) * (h.rows as number) &&
+    h.data.length === cols * rows &&
     (h.data as unknown[]).every((n) => isFiniteNumber(n))
   );
 }
