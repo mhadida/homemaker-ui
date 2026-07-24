@@ -32,7 +32,14 @@ export default function PlacePicker({
         style: "https://tiles.openfreemap.org/styles/liberty",
         center: [4.9041, 52.3676], // Amsterdam
         zoom: 14,
+        // readBBox assumes a north-up, pitch-0 map (it unprojects the static
+        // framing box's screen corners directly) — lock out every rotate/
+        // pitch gesture so that assumption always holds.
+        dragRotate: false,
+        pitchWithRotate: false,
+        touchPitch: false,
       });
+      m.touchZoomRotate.disableRotation();
       mapRef.current = m as unknown as typeof mapRef.current;
       map = m;
     })();
