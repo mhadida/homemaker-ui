@@ -18,6 +18,7 @@
     "ai": "^6.0.185",
     "maplibre-gl": "^5.21.1",
     "next": "16.2.1",
+    "pngjs": "^7.0.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "three": "^0.184.0",
@@ -26,6 +27,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/pngjs": "^6.0.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
