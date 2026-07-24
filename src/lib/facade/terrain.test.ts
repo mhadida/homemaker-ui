@@ -73,3 +73,61 @@ describe("groundNormal", () => {
     expect(n[2]).toBeLessThan(0); // tilts toward −z (downhill, since +z uphill)
   });
 });
+
+import {
+  sampleHF,
+  groundNormalAt,
+  type Heightfield,
+} from "./terrain";
+
+// 3×3 ramp rising along +x: h = 10·(x/20), flat in z. spacing 10.
+const RAMP: Heightfield = {
+  originX: 0,
+  originZ: 0,
+  spacing: 10,
+  cols: 3,
+  rows: 3,
+  data: [0, 10, 20, 0, 10, 20, 0, 10, 20],
+};
+
+describe("sampleHF", () => {
+  it("is exact at grid nodes", () => {
+    expect(sampleHF(RAMP, 0, 0)).toBeCloseTo(0, 9);
+    expect(sampleHF(RAMP, 10, 0)).toBeCloseTo(10, 9);
+    expect(sampleHF(RAMP, 20, 20)).toBeCloseTo(20, 9);
+  });
+  it("bilinearly interpolates between nodes", () => {
+    expect(sampleHF(RAMP, 5, 0)).toBeCloseTo(5, 9);
+    expect(sampleHF(RAMP, 15, 12)).toBeCloseTo(15, 9);
+  });
+  it("clamps to the edge outside the grid", () => {
+    expect(sampleHF(RAMP, -100, 0)).toBeCloseTo(0, 9);
+    expect(sampleHF(RAMP, 999, 0)).toBeCloseTo(20, 9);
+  });
+});
+
+describe("groundHeightAt with a heightfield", () => {
+  it("routes to the sampler when hf is present", () => {
+    expect(groundHeightAt(5, 0, { slope: 0.2, azimuth: 33, hf: RAMP })).toBeCloseTo(5, 9);
+  });
+  it("stays plane-identical when hf is absent (byte-identical guard)", () => {
+    expect(groundHeightAt(5, 0, { slope: 0, azimuth: 0 })).toBe(0);
+    expect(groundHeightAt(0, 10, { slope: 0.1, azimuth: 0 })).toBeCloseTo(1, 9);
+  });
+});
+
+describe("groundNormalAt", () => {
+  it("is +y over a flat heightfield", () => {
+    const flat: Heightfield = { ...RAMP, data: [5, 5, 5, 5, 5, 5, 5, 5, 5] };
+    expect(groundNormalAt(10, 10, { slope: 0, azimuth: 0, hf: flat })).toEqual([0, 1, 0]);
+  });
+  it("is a unit vector that tilts toward downhill (−x) on the ramp", () => {
+    const n = groundNormalAt(10, 10, { slope: 0, azimuth: 0, hf: RAMP });
+    expect(Math.hypot(...n)).toBeCloseTo(1, 9);
+    expect(n[0]).toBeLessThan(0); // uphill is +x ⇒ normal leans −x
+    expect(n[1]).toBeCloseTo(1 / Math.sqrt(2), 1); // 45-degree slope
+  });
+  it("falls back to the plane normal when hf is absent", () => {
+    expect(groundNormalAt(0, 0, { slope: 0, azimuth: 0 })).toEqual([0, 1, 0]);
+  });
+});
