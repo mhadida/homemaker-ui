@@ -56,6 +56,11 @@ export interface Selection {
   cornerKey?: string;
 }
 
+/** How buildings render in the 3D scene. `full` = detailed facades (default);
+ * `massing` = plain volume boxes, no windows/ornament; `outline` = wireframe
+ * lot volumes; `off` = buildings hidden (streets/ground/lot lines remain). */
+export type BuildingDisplay = "full" | "massing" | "outline" | "off";
+
 export interface BlockFrame {
   origin: [number, number];
   /** Unit vector along the effective line. */

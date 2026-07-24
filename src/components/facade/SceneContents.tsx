@@ -23,6 +23,7 @@ import {
   blockFrame,
   lotPlacements,
   type BlockFrame,
+  type BuildingDisplay,
   type FacadeBlock,
   type Selection,
 } from "@/lib/facade/blocks";
@@ -183,6 +184,37 @@ function SelectionMarker({ params }: { params: FacadeParams }) {
   );
 }
 
+/** A lot's plain massing volume — one wall-coloured box, no facade detail —
+ * for the "massing" display mode. Footprint + height from the layout; sits
+ * behind the facade line like the real StripMass. */
+function MassingBox({ params }: { params: FacadeParams }) {
+  const l = useMemo(() => computeLayout(params), [params]);
+  return (
+    <mesh
+      position={[0, l.totalHeight / 2, -l.massingDepth / 2]}
+      castShadow
+      receiveShadow
+    >
+      <boxGeometry args={[params.width, l.totalHeight, l.massingDepth]} />
+      <meshStandardMaterial color={params.wallColor} roughness={0.9} />
+    </mesh>
+  );
+}
+
+/** A lot's volume as a wireframe outline — the "outline" display mode. */
+function OutlineBox({ params }: { params: FacadeParams }) {
+  const l = useMemo(() => computeLayout(params), [params]);
+  const edges = useMemo(
+    () => boxEdgePoints(params.width, l.totalHeight, l.massingDepth),
+    [params.width, l.totalHeight, l.massingDepth],
+  );
+  return (
+    <group position={[0, l.totalHeight / 2, -l.massingDepth / 2]}>
+      <Line segments points={edges} color="#6b7482" lineWidth={1.5} />
+    </group>
+  );
+}
+
 /** The per-block sidewalk strip, DRAPED to follow the landscape: its four
  * corners (the frontage line and the same line pushed 2.5 m to the street side)
  * each ride the tilted ground, so the strip lies flush with the slope instead
@@ -229,6 +261,7 @@ function BlockGroup({
   datumOverride,
   rearSkin,
   openFill,
+  display,
 }: {
   block: FacadeBlock;
   selected: Selection | null;
@@ -250,6 +283,8 @@ function BlockGroup({
   /** Non-null → this frontage is too short for a terrace and renders as open
    * space (plaza/park) instead of buildings. Null = normal building block. */
   openFill: OpenFill | null;
+  /** Building render mode (full / massing / outline / off). */
+  display: BuildingDisplay;
 }) {
   const placements = useMemo(() => lotPlacements(block), [block]);
   const frame = useMemo(() => blockFrame(block), [block]);
@@ -267,6 +302,7 @@ function BlockGroup({
         />
       )}
       {!openFill &&
+        display !== "off" &&
         block.lots.map((lot, i) => {
         const pos = placements[i].position;
         const depth = lot.params.massingDepth ?? MASSING_DEPTH_DEFAULT;
@@ -294,21 +330,27 @@ function BlockGroup({
               onSelectLot(block.id, i);
             }}
           >
-            <FacadeMesh
-              params={lot.params}
-              miter={miters.get(key)}
-              massMiter={massMiters.get(key)}
-              roof={!noRoof.has(key)}
-            />
-            {/* Second facade on the massing rear, facing the square void —
-             * wall + openings + ornament only (skin mode); the front's
-             * massing and roof already span the depth. */}
-            {rearSkin && (
-              <group position={[0, 0, -depth]} rotation={[0, Math.PI, 0]}>
-                <FacadeMesh params={lot.params} skin />
-              </group>
+            {display === "massing" && <MassingBox params={lot.params} />}
+            {display === "outline" && <OutlineBox params={lot.params} />}
+            {display === "full" && (
+              <>
+                <FacadeMesh
+                  params={lot.params}
+                  miter={miters.get(key)}
+                  massMiter={massMiters.get(key)}
+                  roof={!noRoof.has(key)}
+                />
+                {/* Second facade on the massing rear, facing the square void —
+                 * wall + openings + ornament only (skin mode); the front's
+                 * massing and roof already span the depth. */}
+                {rearSkin && (
+                  <group position={[0, 0, -depth]} rotation={[0, Math.PI, 0]}>
+                    <FacadeMesh params={lot.params} skin />
+                  </group>
+                )}
+                <Basement width={lot.params.width} depth={depth} drop={drop} />
+              </>
             )}
-            <Basement width={lot.params.width} depth={depth} drop={drop} />
             {/* At a live corner, cornerSides lights both wings and suppresses
              * the single-lot marker. When no corner resolves (lot/block level,
              * or a dissolved corner), fall back to the plain selected-lot
@@ -367,6 +409,7 @@ export default function SceneContents({
   onSelectSquare,
   gridAngleDeg = null,
   cornerChoices,
+  display = "full",
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -397,6 +440,8 @@ export default function SceneContents({
   /** Selected square (loop id) + selection callback. */
   selectedSquare?: string | null;
   onSelectSquare?: (streetId: string) => void;
+  /** Building render mode. Default "full" (byte-identical). */
+  display?: BuildingDisplay;
 }) {
   const groundGeo = useGroundGeometry(streetNetwork);
   const groundQuat = useMemo(() => {
@@ -657,6 +702,7 @@ export default function SceneContents({
           datumOverride={cornerMerge.datumOverride}
           rearSkin={squareFrontingIds.has(block.id)}
           openFill={openFills.get(block.id) ?? null}
+          display={display}
         />
       ))}
       {/* Merged corner L-roofs — one hip/valley surface per unified corner,
@@ -670,7 +716,10 @@ export default function SceneContents({
       ))}
       {/* Scene-wide window glass + frames as two InstancedMeshes (perf). The
        * per-block FacadeMesh skips WindowFill under USE_INSTANCING. */}
-      <InstancedFacadeBoxes blocks={buildingBlocks} ground={ground} />
+      {/* Scene-wide window glass/frames — only in the detailed "full" mode. */}
+      {display === "full" && (
+        <InstancedFacadeBoxes blocks={buildingBlocks} ground={ground} />
+      )}
       {marquee?.nodes.map(([x, z]) => (
         <mesh
           key={`marquee-node-${x}:${z}`}

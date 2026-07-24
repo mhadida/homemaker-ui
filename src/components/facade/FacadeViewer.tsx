@@ -34,6 +34,7 @@ import {
   lotPlacements,
   totalLotsWidth,
   type FacadeBlock,
+  type BuildingDisplay,
   type Selection,
 } from "@/lib/facade/blocks";
 import type { Corner, CornerChoice } from "@/lib/facade/corners";
@@ -1340,6 +1341,7 @@ function PlanPane({
   selected,
   onSelectLot,
   view,
+  display,
   size,
   drawMode,
   selectMode,
@@ -1380,6 +1382,7 @@ function PlanPane({
   selected: Selection | null;
   onSelectLot: (blockId: string, lot: number) => void;
   view: ViewSettings;
+  display: BuildingDisplay;
   size: { w: number; h: number };
   drawMode: boolean;
   selectMode: boolean;
@@ -1502,6 +1505,7 @@ function PlanPane({
         selected={selected}
         onSelectLot={guardedSelectLot}
         view={view}
+        display={display}
         maxCornerAngle={maxCornerAngle}
         cornerChoices={cornerChoices}
         ground={ground}
@@ -1813,6 +1817,7 @@ function PerspectivePane({
   selected,
   onSelectLot,
   view,
+  display,
   maxCornerAngle,
   cornerChoices,
   ground,
@@ -1832,6 +1837,7 @@ function PerspectivePane({
   selected: Selection | null;
   onSelectLot: (blockId: string, lot: number) => void;
   view: ViewSettings;
+  display: BuildingDisplay;
   maxCornerAngle: number;
   cornerChoices?: ReadonlyMap<string, CornerChoice>;
   ground: Ground;
@@ -1861,6 +1867,7 @@ function PerspectivePane({
         selected={selected}
         onSelectLot={onSelectLot}
         view={view}
+        display={display}
         maxCornerAngle={maxCornerAngle}
         cornerChoices={cornerChoices}
         ground={ground}
@@ -1923,6 +1930,7 @@ function ElevationPane({
   selected,
   onSelectLot,
   view,
+  display,
   size,
   mode,
   maxCornerAngle,
@@ -1941,6 +1949,7 @@ function ElevationPane({
   selected: Selection | null;
   onSelectLot: (blockId: string, lot: number) => void;
   view: ViewSettings;
+  display: BuildingDisplay;
   size: { w: number; h: number };
   mode: "overview" | "detail";
   maxCornerAngle: number;
@@ -2046,6 +2055,7 @@ function ElevationPane({
         selected={selected}
         onSelectLot={onSelectLot}
         view={view}
+        display={display}
         maxCornerAngle={maxCornerAngle}
         cornerChoices={cornerChoices}
         ground={ground}
@@ -2134,6 +2144,9 @@ export default function FacadeViewer({
   };
 
   const [maximized, setMaximized] = useState<PaneId | null>(null);
+  // Building render mode — pure view state (not persisted). full = detailed
+  // facades; massing = plain volume boxes; outline = wireframe; off = hidden.
+  const [display, setDisplay] = useState<BuildingDisplay>("full");
   // First-person walk in the 3D pane (WASD + mouse-look, Esc exits). Entered
   // in two steps: ARM (the plan pane becomes a street picker) → PICK a start
   // point on a street → walk. `walkStart` carries the picked pose into
@@ -2356,6 +2369,7 @@ export default function FacadeViewer({
             selected={selected}
             onSelectLot={onSelectLot}
             view={view}
+            display={display}
             size={planSize}
             drawMode={drawMode}
             selectMode={selectMode}
@@ -2400,6 +2414,7 @@ export default function FacadeViewer({
             selected={selected}
             onSelectLot={onSelectLot}
             view={view}
+            display={display}
             maxCornerAngle={maxCornerAngle}
         cornerChoices={cornerChoices}
             ground={ground}
@@ -2426,6 +2441,7 @@ export default function FacadeViewer({
             selected={selected}
             onSelectLot={onSelectLot}
             view={view}
+            display={display}
             size={overviewSize}
             mode="overview"
             maxCornerAngle={maxCornerAngle}
@@ -2448,6 +2464,7 @@ export default function FacadeViewer({
             selected={selected}
             onSelectLot={onSelectLot}
             view={view}
+            display={display}
             size={detailSize}
             mode="detail"
             maxCornerAngle={maxCornerAngle}
@@ -2844,6 +2861,31 @@ export default function FacadeViewer({
             }`}
           >
             {p.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Building display mode — pure view state. */}
+      <div className="absolute top-3 left-1/2 -translate-x-1/2 flex gap-0.5 rounded-lg bg-black/55 p-0.5 text-[11px] backdrop-blur-md">
+        {(
+          [
+            ["full", "Full"],
+            ["massing", "Massing"],
+            ["outline", "Outline"],
+            ["off", "Buildings off"],
+          ] as const
+        ).map(([mode, label]) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => setDisplay(mode)}
+            className={`rounded-md px-2.5 py-1 transition-colors ${
+              display === mode
+                ? "bg-white/90 text-zinc-900"
+                : "text-white/80 hover:bg-white/10"
+            }`}
+          >
+            {label}
           </button>
         ))}
       </div>

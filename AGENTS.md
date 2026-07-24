@@ -109,6 +109,13 @@ NOT involved; every edit is live (no Update button). Spec:
 - **Quad workspace**: plan / perspective / elevation overview / detail as
   drei `<View>` viewports over one Canvas (`FacadeViewer.tsx`); elevation
   cameras always aim along the facade normal (`src/lib/facade/camera.ts`).
+- **Display modes**: a `BuildingDisplay` (`blocks.ts`) view mode — `full`
+  (detailed facades, default), `massing` (plain wall-colored volume boxes,
+  `MassingBox`), `outline` (wireframe lot volumes, `OutlineBox`), `off`
+  (buildings hidden; streets/sidewalks/lot lines remain). Internal
+  `FacadeViewer` state (a segmented selector, not persisted) threaded to
+  `SceneContents`/`BlockGroup`; `full` skips nothing and gates the window
+  instancer, so it is byte-identical.
 - **Blocks & streets**: pen-tool drawing in the plan pane — click chains
   nodes into welded segments (Escape ends, clicking the first node closes
   the loop); every segment is a generated block (`src/lib/facade/blocks.ts`
