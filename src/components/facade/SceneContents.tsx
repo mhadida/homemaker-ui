@@ -105,13 +105,33 @@ function sunPositionFromAngles(
   return [x, y, z];
 }
 
+/** A world-oriented (XZ, +Y up) plane over ±GROUND_HALF, each vertex displaced
+ * to the real ground height. Resolution tracks the heightfield spacing (the
+ * bbox gets detail; the clamp-to-edge far field stays coarse & flat). */
+function displacedGroundGeometry(ground: Ground): THREE.BufferGeometry {
+  const seg = Math.max(
+    64,
+    Math.min(400, Math.round((2 * GROUND_HALF) / ground.hf!.spacing)),
+  );
+  const g = new THREE.PlaneGeometry(2 * GROUND_HALF, 2 * GROUND_HALF, seg, seg);
+  g.rotateX(-Math.PI / 2); // bake lie-flat: geometry now spans XZ, +Y up
+  const pos = g.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    pos.setY(i, groundHeightAt(pos.getX(i), pos.getZ(i), ground));
+  }
+  pos.needsUpdate = true;
+  g.computeVertexNormals();
+  return g;
+}
+
 /** One simple opaque plane out to the horizon (replaces the old radially
  * fading 200 m patch), with a REAL hole punched for every canal: the cut's
  * rim hides under the canal's own sidewalks and the quay walls + bed line
  * the channel. The same holes-in-terrain shape is where future cuts
  * (sunken plazas, stairs) will go. */
-function useGroundGeometry(streetNetwork?: StreetNetwork) {
+function useGroundGeometry(streetNetwork: StreetNetwork | undefined, ground: Ground) {
   const geo = useMemo(() => {
+    if (ground.hf) return displacedGroundGeometry(ground);
     const shape = new THREE.Shape([
       new THREE.Vector2(-GROUND_HALF, -GROUND_HALF),
       new THREE.Vector2(GROUND_HALF, -GROUND_HALF),
@@ -129,7 +149,7 @@ function useGroundGeometry(streetNetwork?: StreetNetwork) {
       );
     }
     return new THREE.ShapeGeometry(shape);
-  }, [streetNetwork]);
+  }, [streetNetwork, ground.hf]);
   useEffect(() => () => geo.dispose(), [geo]);
   return geo;
 }
@@ -443,9 +463,10 @@ export default function SceneContents({
   /** Building render mode. Default "full" (byte-identical). */
   display?: BuildingDisplay;
 }) {
-  const groundGeo = useGroundGeometry(streetNetwork);
+  const groundGeo = useGroundGeometry(streetNetwork, ground);
   const groundQuat = useMemo(() => {
     const q = new THREE.Quaternion();
+    if (ground.hf) return q; // identity — displacement IS the terrain
     q.setFromUnitVectors(
       new THREE.Vector3(0, 1, 0),
       new THREE.Vector3(...groundNormal(ground)),
@@ -751,7 +772,11 @@ export default function SceneContents({
        * their datums. polygonOffset keeps the sidewalk/road/grid winning
        * the depth test. */}
       <group quaternion={groundQuat}>
-        <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow geometry={groundGeo}>
+        <mesh
+          rotation={ground.hf ? [0, 0, 0] : [-Math.PI / 2, 0, 0]}
+          receiveShadow
+          geometry={groundGeo}
+        >
           <meshStandardMaterial
             color="#a59e95"
             roughness={0.95}
@@ -765,46 +790,51 @@ export default function SceneContents({
         {/* drei's Grid is a GLSL ShaderMaterial the node renderer can't
          * compile; NodeGrid is its TSL port with identical parameters. The
          * wrapper group spins the grid to the drawing-grid angle while grid
-         * lock is on (5 m sections = the snap spacing). */}
-        <group rotation={[0, ((gridAngleDeg ?? 0) * Math.PI) / 180, 0]}>
-          {isWebGPUPath() ? (
-            <NodeGrid
-              position={[0, 0, 0]}
-              args={[60, 60]}
-              cellSize={1}
-              cellThickness={0.7}
-              cellColor="#1f1d1b"
-              sectionSize={5}
-              sectionThickness={1.4}
-              sectionColor="#0d0c0b"
-              fadeDistance={70}
-              fadeStrength={1.2}
-              infiniteGrid
-            />
-          ) : (
-            <Grid
-              position={[0, 0, 0]}
-              args={[60, 60]}
-              cellSize={1}
-              cellThickness={0.7}
-              cellColor="#1f1d1b"
-              sectionSize={5}
-              sectionThickness={1.4}
-              sectionColor="#0d0c0b"
-              fadeDistance={70}
-              fadeStrength={1.2}
-              infiniteGrid
-            />
-          )}
-        </group>
+         * lock is on (5 m sections = the snap spacing). Real terrain has no
+         * flat plane for an infinite grid to ride on, so it's suppressed. */}
+        {!ground.hf && (
+          <group rotation={[0, ((gridAngleDeg ?? 0) * Math.PI) / 180, 0]}>
+            {isWebGPUPath() ? (
+              <NodeGrid
+                position={[0, 0, 0]}
+                args={[60, 60]}
+                cellSize={1}
+                cellThickness={0.7}
+                cellColor="#1f1d1b"
+                sectionSize={5}
+                sectionThickness={1.4}
+                sectionColor="#0d0c0b"
+                fadeDistance={70}
+                fadeStrength={1.2}
+                infiniteGrid
+              />
+            ) : (
+              <Grid
+                position={[0, 0, 0]}
+                args={[60, 60]}
+                cellSize={1}
+                cellThickness={0.7}
+                cellColor="#1f1d1b"
+                sectionSize={5}
+                sectionThickness={1.4}
+                sectionColor="#0d0c0b"
+                fadeDistance={70}
+                fadeStrength={1.2}
+                infiniteGrid
+              />
+            )}
+          </group>
+        )}
       </group>
 
       {/* drei's ContactShadows renders the scene through a MeshDepthMaterial,
        * which the WebGPU node renderer can't compile (it was the spike's
        * stubborn "MeshDepthMaterial is not compatible" error — not the sun's
        * shadow map). On the WebGPU path the real sun shadow covers the ground
-       * contact; WebGL keeps the soft blob unchanged. */}
-      {!isWebGPUPath() && (
+       * contact; WebGL keeps the soft blob unchanged. Real terrain gets its
+       * contact cues from the sun's own shadow map, so the blob is suppressed
+       * too (it also assumes a flat ground plane at y≈0). */}
+      {!isWebGPUPath() && !ground.hf && (
         <ContactShadows
           position={[0, 0.005, 0]}
           opacity={0.45}
