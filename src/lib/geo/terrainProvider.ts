@@ -18,6 +18,14 @@ export interface TerrainProvider {
 
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
+// Max bbox span (degrees, either axis) accepted by this public,
+// unauthenticated route — ≈55 km at the equator, far larger than any real
+// city-district pick at the picker's zoom, but small enough to keep
+// tilesForBBox's tile count (and the concurrent fetches it drives) bounded.
+// A world/huge bbox — reachable by zooming out in the picker, or a direct
+// API POST — must 400 here rather than reach the tile fetcher.
+export const MAX_SPAN_DEG = 0.5;
+
 /** Validate an untrusted request body. Exported so the route and its test share
  * one definition. */
 export function parseTerrainRequest(
@@ -29,6 +37,10 @@ export function parseTerrainRequest(
   if (!b || !a) return null;
   if (!isNum(b.west) || !isNum(b.south) || !isNum(b.east) || !isNum(b.north)) return null;
   if (!isNum(a.lat0) || !isNum(a.lon0)) return null;
+  // Reject inverted/degenerate bboxes (west>=east or south>=north) and
+  // anything wider than MAX_SPAN_DEG on either axis.
+  if (!(b.west < b.east && b.south < b.north)) return null;
+  if (b.east - b.west > MAX_SPAN_DEG || b.north - b.south > MAX_SPAN_DEG) return null;
   return {
     bbox: { west: b.west, south: b.south, east: b.east, north: b.north },
     anchor: { lat0: a.lat0, lon0: a.lon0 },

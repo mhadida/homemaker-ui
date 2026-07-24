@@ -28,6 +28,12 @@ describe("lonLatToTile / tilesForBBox", () => {
     expect(tiles.length).toBeGreaterThanOrEqual(1);
     expect(tiles.every((t) => t.z === 13)).toBe(true);
   });
+  it("throws before building the tile array when the bbox needs more than MAX_TILES tiles", () => {
+    // A near-whole-world bbox at z13 would otherwise push tens of millions
+    // of entries; the count must be rejected up front instead.
+    const huge = { west: -179.9, south: -85, east: 179.9, north: 85 };
+    expect(() => tilesForBBox(huge, 13)).toThrow(/tiles/i);
+  });
 });
 
 describe("elevAtFromTiles", () => {

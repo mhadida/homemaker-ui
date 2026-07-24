@@ -22,6 +22,36 @@ describe("parseTerrainRequest", () => {
     expect(parseTerrainRequest("nope")).toBeNull();
     expect(parseTerrainRequest(null)).toBeNull();
   });
+  it("rejects an inverted bbox (west > east)", () => {
+    expect(
+      parseTerrainRequest({
+        ...good,
+        bbox: { ...good.bbox, west: good.bbox.east, east: good.bbox.west },
+      }),
+    ).toBeNull();
+  });
+  it("rejects an inverted bbox (south > north)", () => {
+    expect(
+      parseTerrainRequest({
+        ...good,
+        bbox: { ...good.bbox, south: good.bbox.north, north: good.bbox.south },
+      }),
+    ).toBeNull();
+  });
+  it("rejects an oversized-span bbox (5°×5°)", () => {
+    expect(
+      parseTerrainRequest({
+        bbox: { west: 4.9, south: 52.36, east: 9.9, north: 57.36 },
+        anchor: good.anchor,
+      }),
+    ).toBeNull();
+  });
+  it("accepts a normal city bbox (~0.02° span)", () => {
+    // Same shape as `good` — pinned down explicitly so this test keeps
+    // failing on its own if a future span/order guard gets too strict.
+    expect(good.bbox.east - good.bbox.west).toBeCloseTo(0.02, 6);
+    expect(parseTerrainRequest(good)).toEqual(good);
+  });
 });
 
 /** Encode a uniform size×size terrarium PNG at the given elevation (metres),
@@ -88,5 +118,19 @@ describe("OpenTerrainProvider (mocked tile source)", () => {
     await expect(
       new OpenTerrainProvider().fetchHeightfield(bbox, anchor),
     ).rejects.toThrow(/HTTP 404/);
+  });
+
+  it("rejects an over-cap bbox via tilesForBBox's tile-count guard before fetching anything", async () => {
+    // Belt-and-suspenders: even though parseTerrainRequest's MAX_SPAN_DEG
+    // check is the primary guard, fetchHeightfield must never reach `fetch`
+    // for a bbox whose tile count exceeds MAX_TILES.
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const huge = { west: -179.9, south: -85, east: 179.9, north: 85 };
+
+    await expect(
+      new OpenTerrainProvider().fetchHeightfield(huge, anchor),
+    ).rejects.toThrow(/tiles/i);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
