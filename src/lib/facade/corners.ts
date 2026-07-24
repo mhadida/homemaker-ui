@@ -143,7 +143,11 @@ export function cornerChoice(
   if (existing) return existing;
   const wa = lotOf(blocks, corner.a).params.width;
   const wb = lotOf(blocks, corner.b).params.width;
-  return { mode: "two-facades", primary: wa >= wb ? "a" : "b" };
+  // Default UNIFIED: a welded corner is one building turning the corner, so it
+  // reads as one coherent mass with one L-roof (no overlapping tents, no torn
+  // frontage on a slope). Set an explicit "two-facades" choice per corner to
+  // keep two independent buildings meeting at the node.
+  return { mode: "unified", primary: wa >= wb ? "a" : "b" };
 }
 
 const clamp = (v: number, min: number, max: number) =>

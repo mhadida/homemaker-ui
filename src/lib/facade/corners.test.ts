@@ -149,11 +149,11 @@ const rightAngle = () => {
 };
 
 describe("cornerChoice", () => {
-  it("defaults to two-facades with the wider frontage as primary", () => {
+  it("defaults to UNIFIED with the wider frontage as primary", () => {
     const { A, B } = rightAngle(); // A end lot 5m, B end lot 4m
     const [c] = detectCorners([A, B], 150);
     expect(cornerChoice(new Map(), c, [A, B])).toEqual({
-      mode: "two-facades",
+      mode: "unified",
       primary: "a",
     });
   });
@@ -162,12 +162,17 @@ describe("cornerChoice", () => {
 describe("syncCorners", () => {
   it("copies the shell from the edited side; face fields stay per-side", () => {
     const { A, B } = rightAngle();
-    const out = syncCorners([A, B], new Map(), 150, "A");
+    const [c] = detectCorners([A, B], 150);
+    // explicit two-facades (the default is now unified, which WOULD merge faces)
+    const twoFacades = new Map<string, CornerChoice>([
+      [c.key, { mode: "two-facades", primary: "a" }],
+    ]);
+    const out = syncCorners([A, B], twoFacades, 150, "A");
     const bLot = out[1].lots[0].params;
     expect(bLot.storeys).toBe(4);
     expect(bLot.wallColor).toBe("#111111");
     expect(bLot.ornament).toEqual(A.lots[1].params.ornament);
-    // face untouched (two-facades default)
+    // face untouched (two-facades)
     expect(bLot.bays).toBe(B.lots[0].params.bays);
     expect(bLot.groundFloor).toEqual(B.lots[0].params.groundFloor);
     expect(bLot.width).toBe(4); // width never copied
@@ -237,7 +242,11 @@ describe("syncCorners", () => {
     // Give every optional shell field a real value on the source side so the
     // per-field assertions can't pass vacuously on undefined === undefined.
     A.lots[1].params = { ...A.lots[1].params, massingDepth: 12 };
-    const out = syncCorners([A, B], new Map(), 150, "A");
+    const [c] = detectCorners([A, B], 150);
+    const twoFacades = new Map<string, CornerChoice>([
+      [c.key, { mode: "two-facades", primary: "a" }],
+    ]);
+    const out = syncCorners([A, B], twoFacades, 150, "A");
     const src = out[0].lots[1].params;
     const dst = out[1].lots[0].params;
     for (const f of SHELL_FIELDS) {
