@@ -43,6 +43,7 @@ import {
 } from "@/lib/facade/openBlock";
 import OpenBlockMesh from "./OpenBlockMesh";
 import { clampTurretRadius, TURRET_RADIUS_DEFAULT } from "@/lib/facade/turret";
+import { cornerDatumOverrides } from "@/lib/facade/cornerDatum";
 import CornerRoofMesh from "./CornerRoofMesh";
 import TurretMesh from "./TurretMesh";
 import { ROOF_COLORS } from "./FacadeMesh";
@@ -439,8 +440,17 @@ export default function SceneContents({
     if (!cornerChoices || corners.length === 0)
       return { roofs, turrets, massMiters, noRoof, datumOverride };
     const byId = new Map(blocks.map((b) => [b.id, b]));
+    // Shared corner datums for EVERY corner (unified OR two-facades): the two
+    // welded wings meet at the shared node, so their corner lots must level to
+    // ONE height — otherwise on a slope each wing levels to its own ground
+    // height and the frontage tears at the corner (walls/roofs at different
+    // heights, self-intersecting). Flat ground → all 0 → byte-identical.
+    for (const [k, v] of cornerDatumOverrides(corners, cornerChoices, blocks, ground))
+      datumOverride.set(k, v);
     for (const c of corners) {
       const choice = cornerChoice(cornerChoices, c, blocks);
+      // Everything below is the unified merge (elbow fill, L-roof, turret);
+      // two-facades corners only needed the shared datum, seeded above.
       if (choice.mode !== "unified") continue;
       const pSide = c[choice.primary];
       const oSide = c[choice.primary === "a" ? "b" : "a"];
@@ -450,6 +460,8 @@ export default function SceneContents({
       const pLayout = computeLayout(pLot.params);
       const oLayout = computeLayout(oLot.params);
       const D = pLayout.massingDepth;
+      // The shared corner datum (seeded above) — both corner-lot keys map to it.
+      const datum = datumOverride.get(`${c.a.blockId}:${c.a.lotIndex}`)!;
 
       // Elbow fill — every unified corner, flat roofs included. Seed from
       // the WALL miter so the untouched side keeps its wall extension.
@@ -465,21 +477,6 @@ export default function SceneContents({
           { ...(miters.get(key) ?? { left: 0, right: 0 }) };
         massMiters.set(key, { ...cur, [side.lotSide]: e });
       }
-
-      // Shared datum: both wings level where the PRIMARY corner lot stands,
-      // so the merged mass (and its roof) can't tear on a slope. Flat
-      // ground: every datum is equal anyway — byte-identical.
-      const placement = lotPlacements(pBlock)[pSide.lotIndex];
-      const { datum } = levelingFor(
-        placement.position[0],
-        placement.position[2],
-        pLot.params.width,
-        D,
-        placement.rotationY,
-        ground,
-      );
-      datumOverride.set(`${c.a.blockId}:${c.a.lotIndex}`, datum);
-      datumOverride.set(`${c.b.blockId}:${c.b.lotIndex}`, datum);
 
       // Corner turret — straddles the node; independent of the roof
       // preconditions (a flat-roofed corner can still carry one).

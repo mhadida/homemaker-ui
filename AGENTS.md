@@ -198,8 +198,14 @@ NOT involved; every edit is live (no Update button). Spec:
   front-centre ground height and grows a stone basement (thin horizontal
   windows) down to the lowest footprint corner; the ground plane + grid
   tilt to the slope. `slope 0` = flat = byte-identical. Per-node/heightfield
-  "arbitrary" topography deferred. Spec:
-  `docs/superpowers/specs/2026-07-14-topography-design.md`.
+  "arbitrary" topography deferred. **Corner leveling**: leveling is per-lot,
+  so on a slope two welded wings would level to different heights and TEAR at
+  the shared node. `cornerDatumOverrides` (`src/lib/facade/cornerDatum.ts`,
+  pure) forces both corner lots of EVERY corner (unified OR two-facades) to the
+  primary/wider side's datum, applied via `datumOverride` in `SceneContents`;
+  flat ground → all 0 → byte-identical. (Pitched roofs at a two-facades corner
+  still overlap two independent tents — the unified L-roof is the full fix.)
+  Spec: `docs/superpowers/specs/2026-07-14-topography-design.md`.
 - **Street awareness**: a centreline + mirror (far-frontage) derive live from
   the first block's facade normal (`src/lib/facade/street.ts` pure —
   `streetRefOf`, `streetLines`, `streetAwareFlipped`; width a page-state
