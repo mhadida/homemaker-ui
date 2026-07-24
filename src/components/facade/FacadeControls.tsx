@@ -81,6 +81,9 @@ interface FacadeControlsProps {
   onMaxCornerAngle: (deg: number) => void;
   ground: Ground;
   onGroundChange: (g: Ground) => void;
+  /** true once a real-terrain heightfield is loaded (Ground.hf) — hides the
+   * manual Slope/Azimuth sliders, which no longer drive the ground. */
+  terrainImported?: boolean;
   streetWidth: number;
   onStreetWidth: (w: number) => void;
 }
@@ -228,6 +231,7 @@ export default function FacadeControls({
   onMaxCornerAngle,
   ground,
   onGroundChange,
+  terrainImported,
   streetWidth,
   onStreetWidth,
 }: FacadeControlsProps) {
@@ -695,7 +699,9 @@ export default function FacadeControls({
         </>
       )}
 
-      {/* Street + Topography are world state — always reachable. */}
+      {/* Street + Topography are world state — always reachable. Topography
+       * hides once real terrain is imported (Ground.hf drives the ground
+       * instead of these sliders). */}
       <Section title="Street">
         <SliderRow
           label="Street width"
@@ -714,26 +720,28 @@ export default function FacadeControls({
         </p>
       </Section>
 
-      <Section title="Topography">
-        <SliderRow
-          label="Ground slope"
-          value={ground.slope}
-          display={`${Math.round(ground.slope * 100)}%`}
-          min={0}
-          max={GROUND_SLOPE_MAX}
-          step={0.01}
-          onChange={(slope) => onGroundChange({ ...ground, slope })}
-        />
-        <SliderRow
-          label="Slope direction"
-          value={ground.azimuth}
-          display={`${Math.round(ground.azimuth)}°`}
-          min={0}
-          max={360}
-          step={5}
-          onChange={(azimuth) => onGroundChange({ ...ground, azimuth })}
-        />
-      </Section>
+      {!terrainImported && (
+        <Section title="Topography">
+          <SliderRow
+            label="Ground slope"
+            value={ground.slope}
+            display={`${Math.round(ground.slope * 100)}%`}
+            min={0}
+            max={GROUND_SLOPE_MAX}
+            step={0.01}
+            onChange={(slope) => onGroundChange({ ...ground, slope })}
+          />
+          <SliderRow
+            label="Slope direction"
+            value={ground.azimuth}
+            display={`${Math.round(ground.azimuth)}°`}
+            min={0}
+            max={360}
+            step={5}
+            onChange={(azimuth) => onGroundChange({ ...ground, azimuth })}
+          />
+        </Section>
+      )}
     </div>
   );
 }

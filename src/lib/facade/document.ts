@@ -1,13 +1,14 @@
 import type { FacadeBlock } from "./blocks";
 import type { CornerChoice } from "./corners";
 import { DEFAULT_MAX_CORNER_ANGLE } from "./corners";
-import type { Ground } from "./terrain";
+import type { Ground, Heightfield } from "./terrain";
 import { DEFAULT_GROUND } from "./terrain";
 import { STREET_WIDTH_DEFAULT } from "./street";
 import type { FacadeParams } from "./types";
 import { DEFAULT_FACADE } from "./types";
 import type { Monument, Street, StreetNetwork } from "@/lib/street/types";
 import { EMPTY_NETWORK, STREET_SPECS } from "@/lib/street/types";
+import type { GeoAnchor } from "@/lib/geo/project";
 
 /** Bump when the on-disk shape changes incompatibly. Loaders reject unknown
  * versions rather than silently mis-reading (beta data-preservation rule). */
@@ -22,6 +23,7 @@ export interface SceneState {
   streetWidth: number;
   maxCornerAngle: number;
   streetNetwork: StreetNetwork;
+  anchor: GeoAnchor | null;
 }
 
 /** JSON-native form. `cornerChoices` is a Map in memory → entries on disk
@@ -34,6 +36,7 @@ export interface FacadeDocument {
   streetWidth: number;
   maxCornerAngle: number;
   streetNetwork: StreetNetwork;
+  anchor?: GeoAnchor;
 }
 
 export type LoadResult =
@@ -50,6 +53,7 @@ export function serializeScene(s: SceneState): FacadeDocument {
     streetWidth: s.streetWidth,
     maxCornerAngle: s.maxCornerAngle,
     streetNetwork: s.streetNetwork,
+    anchor: s.anchor ?? undefined,
   };
 }
 
@@ -140,6 +144,21 @@ function validRoundabout(r: unknown): r is [string, Monument] {
   );
 }
 
+/** A heightfield: finite grid scalars plus a data array whose length matches
+ * cols·rows, every entry finite. Defensive guard for a loaded `ground.hf` —
+ * malformed terrain is STRIPPED (not trusted, not thrown on). */
+export function validHeightfield(v: unknown): v is Heightfield {
+  if (typeof v !== "object" || v === null) return false;
+  const h = v as Record<string, unknown>;
+  const nums = ["originX", "originZ", "spacing", "cols", "rows"];
+  if (!nums.every((k) => isFiniteNumber(h[k]))) return false;
+  return (
+    Array.isArray(h.data) &&
+    h.data.length === (h.cols as number) * (h.rows as number) &&
+    (h.data as unknown[]).every((n) => isFiniteNumber(n))
+  );
+}
+
 /** Normalize every lot's params so the loaded blocks are render-safe. */
 function normalizeBlocks(blocks: Record<string, unknown>[]): FacadeBlock[] {
   return blocks.map((b) => ({
@@ -179,12 +198,17 @@ export function deserializeScene(raw: unknown): LoadResult {
     return { ok: false, error: "Malformed cornerChoices." };
   }
 
+  const rawGround = doc.ground as (Ground & { hf?: unknown }) | undefined;
   const ground: Ground =
-    typeof doc.ground === "object" &&
-    doc.ground !== null &&
-    isFiniteNumber((doc.ground as Ground).slope) &&
-    isFiniteNumber((doc.ground as Ground).azimuth)
-      ? (doc.ground as Ground)
+    typeof rawGround === "object" &&
+    rawGround !== null &&
+    isFiniteNumber(rawGround.slope) &&
+    isFiniteNumber(rawGround.azimuth)
+      ? {
+          slope: rawGround.slope,
+          azimuth: rawGround.azimuth,
+          ...(validHeightfield(rawGround.hf) ? { hf: rawGround.hf } : {}),
+        }
       : DEFAULT_GROUND;
 
   // Additive (older saves have no field at all) — also tolerate a malformed
@@ -213,6 +237,13 @@ export function deserializeScene(raw: unknown): LoadResult {
         }
       : EMPTY_NETWORK;
 
+  // Additive (older saves have no field at all → null, flat/manual ground).
+  const rawAnchor = doc.anchor as Partial<GeoAnchor> | undefined;
+  const anchor: GeoAnchor | null =
+    rawAnchor && isFiniteNumber(rawAnchor.lat0) && isFiniteNumber(rawAnchor.lon0)
+      ? { lat0: rawAnchor.lat0, lon0: rawAnchor.lon0 }
+      : null;
+
   return {
     ok: true,
     scene: {
@@ -226,6 +257,7 @@ export function deserializeScene(raw: unknown): LoadResult {
         ? doc.maxCornerAngle
         : DEFAULT_MAX_CORNER_ANGLE,
       streetNetwork,
+      anchor,
     },
   };
 }

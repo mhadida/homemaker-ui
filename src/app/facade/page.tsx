@@ -38,8 +38,9 @@ import {
 import { syncStreetBlocks } from "@/lib/facade/streetBlocks";
 import { rerollBlock, generateBlock, deleteLot } from "@/lib/facade/generate";
 import { moveNode, deriveNodes } from "@/lib/facade/nodes";
-import { DEFAULT_GROUND, type Ground } from "@/lib/facade/terrain";
+import { DEFAULT_GROUND, type Ground, type Heightfield } from "@/lib/facade/terrain";
 import { streetRefOf, STREET_WIDTH_DEFAULT } from "@/lib/facade/street";
+import { anchorOf, type GeoAnchor, type LngLatBBox } from "@/lib/geo/project";
 import {
   EMPTY_NETWORK,
   nextStreetId,
@@ -82,6 +83,9 @@ import FacadeControls, {
 import PromptInput from "@/components/demo/PromptInput";
 
 const FacadeViewer = dynamic(() => import("@/components/facade/FacadeViewer"), {
+  ssr: false,
+});
+const PlacePicker = dynamic(() => import("@/components/facade/PlacePicker"), {
   ssr: false,
 });
 
@@ -258,6 +262,13 @@ export default function FacadePage() {
   );
   const [maxCornerAngle, setMaxCornerAngle] = useState(DEFAULT_MAX_CORNER_ANGLE);
   const [ground, setGround] = useState<Ground>(DEFAULT_GROUND);
+  // Geo anchor for the loaded real-terrain heightfield (Ground.hf) — null
+  // while the ground is the manual flat/tilted plane. Picker + load/clear
+  // state are page-local UI, not part of the saved document.
+  const [anchor, setAnchor] = useState<GeoAnchor | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [terrainLoading, setTerrainLoading] = useState(false);
+  const [terrainError, setTerrainError] = useState<string | null>(null);
   const [streetWidth, setStreetWidth] = useState(STREET_WIDTH_DEFAULT);
   // Auto-populate editable buildings along street frontages (SP-2c). Default
   // on; transient UI state (like drawActive/marquee) — not part of the saved
@@ -307,6 +318,7 @@ export default function FacadePage() {
     setBlocks(syncCorners(s.blocks, s.cornerChoices, s.maxCornerAngle));
     setCornerChoices(s.cornerChoices);
     setGround(s.ground);
+    setAnchor(s.anchor);
     setStreetWidth(s.streetWidth);
     setMaxCornerAngle(s.maxCornerAngle);
     setStreetNetwork(s.streetNetwork);
@@ -328,6 +340,7 @@ export default function FacadePage() {
       streetWidth,
       maxCornerAngle,
       streetNetwork,
+      anchor,
     });
     const url = URL.createObjectURL(
       new Blob([text], { type: "application/json" }),
@@ -341,7 +354,7 @@ export default function FacadePage() {
     // Defer the revoke so the download has surely started (revoking on the
     // same tick is the fragile variant).
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
-  }, [blocks, cornerChoices, ground, streetWidth, maxCornerAngle, streetNetwork]);
+  }, [blocks, cornerChoices, ground, streetWidth, maxCornerAngle, streetNetwork, anchor]);
 
   const handleLoadFile = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -358,6 +371,37 @@ export default function FacadePage() {
     },
     [applyScene],
   );
+
+  /** "Load place": fetch a real heightfield for the picked bbox and adopt it
+   * as the ground, replacing the manual flat/tilted plane. */
+  const handleLoadPlace = useCallback(async (bbox: LngLatBBox) => {
+    setTerrainError(null);
+    setTerrainLoading(true);
+    try {
+      const a = anchorOf(bbox);
+      const res = await fetch("/api/terrain", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ bbox, anchor: a }),
+      });
+      const json = (await res.json()) as { heightfield?: Heightfield; error?: string };
+      if (!res.ok || !json.heightfield) throw new Error(json.error ?? `HTTP ${res.status}`);
+      setGround((g) => ({ ...g, hf: json.heightfield }));
+      setAnchor(a);
+      setPickerOpen(false);
+    } catch (e) {
+      setTerrainError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTerrainLoading(false);
+    }
+  }, []);
+
+  /** Drop the loaded heightfield, reverting to the manual flat/tilted plane
+   * (the Topography sliders reappear). */
+  const handleClearTerrain = useCallback(() => {
+    setGround((g) => ({ slope: g.slope, azimuth: g.azimuth })); // drop hf
+    setAnchor(null);
+  }, []);
 
   // Restore the autosave once on mount (survives refresh/crash). Guarded so
   // Strict Mode's double-invoke can't apply it twice.
@@ -394,11 +438,12 @@ export default function FacadePage() {
           streetWidth,
           maxCornerAngle,
           streetNetwork,
+          anchor,
         }),
       );
     }, 500);
     return () => window.clearTimeout(id);
-  }, [blocks, cornerChoices, ground, streetWidth, maxCornerAngle, streetNetwork]);
+  }, [blocks, cornerChoices, ground, streetWidth, maxCornerAngle, streetNetwork, anchor]);
 
   const selectedBlock = selected
     ? (blocks.find((b) => b.id === selected.blockId) ?? null)
@@ -1220,6 +1265,23 @@ export default function FacadePage() {
           <span className="mx-1 h-4 w-px bg-[var(--border)]" aria-hidden />
           <button
             type="button"
+            onClick={() => setPickerOpen(true)}
+            className="text-[11px] px-2 py-0.5 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30 transition-colors"
+          >
+            Load place
+          </button>
+          {ground.hf && (
+            <button
+              type="button"
+              onClick={handleClearTerrain}
+              className="text-[11px] px-2 py-0.5 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30 transition-colors"
+            >
+              Clear terrain
+            </button>
+          )}
+          <span className="mx-1 h-4 w-px bg-[var(--border)]" aria-hidden />
+          <button
+            type="button"
             onClick={() => setBuildingsFromStreets((v) => !v)}
             aria-pressed={buildingsFromStreets}
             title="Auto-populate editable buildings along drawn streets"
@@ -1360,6 +1422,7 @@ export default function FacadePage() {
                   onMaxCornerAngle={setMaxCornerAngle}
                   ground={ground}
                   onGroundChange={setGround}
+                  terrainImported={!!ground.hf}
                   streetWidth={streetWidth}
                   onStreetWidth={setStreetWidth}
                 />
@@ -1380,6 +1443,15 @@ export default function FacadePage() {
           </div>
         </div>
       </div>
+
+      {pickerOpen && (
+        <PlacePicker
+          onLoad={handleLoadPlace}
+          onCancel={() => setPickerOpen(false)}
+          loading={terrainLoading}
+          error={terrainError}
+        />
+      )}
     </div>
   );
 }

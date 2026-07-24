@@ -9,7 +9,7 @@ import {
 } from "./document";
 import { DEFAULT_GEN, reserveBlockIds, nextBlockId, type FacadeBlock } from "./blocks";
 import { DEFAULT_FACADE } from "./types";
-import { DEFAULT_GROUND } from "./terrain";
+import { DEFAULT_GROUND, type Heightfield } from "./terrain";
 import { STREET_WIDTH_DEFAULT } from "./street";
 import { DEFAULT_MAX_CORNER_ANGLE, type CornerChoice } from "./corners";
 import { EMPTY_NETWORK } from "../street/types";
@@ -44,6 +44,7 @@ const scene = (): SceneState => ({
   streetWidth: 18,
   maxCornerAngle: 120,
   streetNetwork: EMPTY_NETWORK,
+  anchor: null,
 });
 
 describe("serializeScene / toJSON", () => {
@@ -95,6 +96,7 @@ describe("round-trip", () => {
         streets: [{ id: "canal-1", type: "canal", points: [[0, 0], [40, 0]] }],
         roundabouts: [],
       },
+      anchor: null,
     };
     const res = fromJSON(toJSON(s));
     expect(res.ok).toBe(true);
@@ -116,6 +118,7 @@ describe("round-trip", () => {
       streetWidth: STREET_WIDTH_DEFAULT,
       maxCornerAngle: DEFAULT_MAX_CORNER_ANGLE,
       streetNetwork: EMPTY_NETWORK,
+      anchor: null,
     };
     const res = fromJSON(toJSON(s));
     expect(res.ok).toBe(true);
@@ -230,6 +233,7 @@ describe("params normalization (partial lots render safe)", () => {
       streetWidth: STREET_WIDTH_DEFAULT,
       maxCornerAngle: DEFAULT_MAX_CORNER_ANGLE,
       streetNetwork: EMPTY_NETWORK,
+      anchor: null,
     };
     const res = fromJSON(toJSON(s));
     expect(res.ok).toBe(true);
@@ -360,5 +364,50 @@ describe("reserveBlockIds", () => {
     ]);
     const next = Number(/^block-(\d+)$/.exec(nextBlockId())![1]);
     expect(next).toBeGreaterThan(41);
+  });
+});
+
+const HF: Heightfield = {
+  originX: -100, originZ: -100, spacing: 20, cols: 3, rows: 3,
+  data: [0, 1, 2, 3, 4, 5, 6, 7, 8],
+};
+
+function baseScene() {
+  return {
+    blocks: [],
+    cornerChoices: new Map(),
+    ground: { slope: 0, azimuth: 0 },
+    streetWidth: 14,
+    maxCornerAngle: 60,
+    streetNetwork: { streets: [], roundabouts: [], squares: [] },
+    anchor: null,
+  };
+}
+
+describe("document terrain round-trip", () => {
+  it("round-trips a heightfield + anchor", () => {
+    const scene = { ...baseScene(), ground: { slope: 0, azimuth: 0, hf: HF }, anchor: { lat0: 52.37, lon0: 4.91 } };
+    const back = deserializeScene(JSON.parse(JSON.stringify(serializeScene(scene))));
+    expect(back.ok).toBe(true);
+    if (!back.ok) return;
+    expect(back.scene.ground.hf).toEqual(HF);
+    expect(back.scene.anchor).toEqual({ lat0: 52.37, lon0: 4.91 });
+  });
+
+  it("an old save with no hf/anchor loads flat (byte-identical)", () => {
+    const doc = { version: 1, blocks: [], cornerChoices: [], ground: { slope: 0, azimuth: 0 }, streetWidth: 14, maxCornerAngle: 60, streetNetwork: { streets: [], roundabouts: [], squares: [] } };
+    const back = deserializeScene(doc);
+    expect(back.ok).toBe(true);
+    if (!back.ok) return;
+    expect(back.scene.ground.hf).toBeUndefined();
+    expect(back.scene.anchor).toBeNull();
+  });
+
+  it("drops a malformed heightfield rather than crashing", () => {
+    const doc = { version: 1, blocks: [], cornerChoices: [], ground: { slope: 0, azimuth: 0, hf: { cols: 3 } }, streetWidth: 14, maxCornerAngle: 60, streetNetwork: { streets: [], roundabouts: [], squares: [] } };
+    const back = deserializeScene(doc);
+    expect(back.ok).toBe(true);
+    if (!back.ok) return;
+    expect(back.scene.ground.hf).toBeUndefined();
   });
 });
