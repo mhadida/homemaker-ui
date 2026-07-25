@@ -80,7 +80,19 @@ export default function PlacePicker({
           </button>
         </div>
         <div className="relative h-[420px] w-full overflow-hidden rounded">
-          <div ref={mapEl} className="absolute inset-0" />
+          {/* NOT `absolute inset-0`: maplibre-gl.css defines `.maplibregl-map
+              { position: relative }` and applies that class to this element
+              at construction. Both `.absolute` (Tailwind) and `.maplibregl-map`
+              are single-class selectors, so specificity ties and source order
+              decides — maplibre's stylesheet is imported after Tailwind, so it
+              wins, `position` never becomes `absolute`, and `inset-0` (which
+              only applies under absolute/fixed positioning) is dropped
+              entirely. The div then collapses to 0 height around its
+              absolutely-positioned canvas children, and readBBox() (which
+              unprojects clientHeight-derived pixel rows) degenerates to
+              south === north. Filling the parent's definite height in normal
+              flow sidesteps the specificity fight altogether. */}
+          <div ref={mapEl} className="h-full w-full" />
           {/* fixed centre framing box (middle 60%) */}
           <div className="pointer-events-none absolute inset-[20%] border-2 border-[var(--accent)] rounded-sm" />
         </div>
