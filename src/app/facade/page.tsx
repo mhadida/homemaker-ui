@@ -41,6 +41,7 @@ import { moveNode, deriveNodes } from "@/lib/facade/nodes";
 import { DEFAULT_GROUND, type Ground, type Heightfield } from "@/lib/facade/terrain";
 import { streetRefOf, STREET_WIDTH_DEFAULT } from "@/lib/facade/street";
 import { anchorOf, type GeoAnchor, type LngLatBBox } from "@/lib/geo/project";
+import type { ContextBuilding } from "@/lib/geo/buildings";
 import {
   EMPTY_NETWORK,
   nextStreetId,
@@ -269,6 +270,21 @@ export default function FacadePage() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [terrainLoading, setTerrainLoading] = useState(false);
   const [terrainError, setTerrainError] = useState<string | null>(null);
+  // Context buildings (M2). The footprints are page state ONLY — never
+  // serialized; `bbox` is the key they are re-fetched from on load. This
+  // page-state + load-flow wiring lands ahead of its UI consumers
+  // (FacadeViewer/SceneContents in Task 6, FacadeControls in Task 7), so the
+  // read side of a few of these is temporarily unused — disabled narrowly
+  // rather than left to fail the lint gate.
+  /* eslint-disable @typescript-eslint/no-unused-vars -- consumed starting Task 6/7 */
+  const [contextBuildings, setContextBuildings] = useState<ContextBuilding[]>([]);
+  const [bbox, setBbox] = useState<LngLatBBox | null>(null);
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
+  const [contextVisible, setContextVisible] = useState(true);
+  const [buildingsLoading, setBuildingsLoading] = useState(false);
+  const [buildingsError, setBuildingsError] = useState<string | null>(null);
+  const [buildingsInfo, setBuildingsInfo] = useState<{ truncated: boolean; total: number } | null>(null);
+  /* eslint-enable @typescript-eslint/no-unused-vars */
   const [streetWidth, setStreetWidth] = useState(STREET_WIDTH_DEFAULT);
   // Auto-populate editable buildings along street frontages (SP-2c). Default
   // on; transient UI state (like drawActive/marquee) — not part of the saved
@@ -309,6 +325,40 @@ export default function FacadePage() {
   );
 
   // ── Save / Load ────────────────────────────────────────────────────────
+  /** Fetch context footprints for a bbox. Deliberately swallows its error into
+   * `buildingsError`: a failed backdrop must never roll back a good terrain
+   * load (Overpass is slow and rate-limits). Declared ahead of `applyScene`,
+   * which re-fetches from a loaded document's saved bbox. */
+  const loadContextBuildings = useCallback(
+    async (box: LngLatBBox, a: GeoAnchor) => {
+      setBuildingsError(null);
+      setBuildingsInfo(null);
+      setBuildingsLoading(true);
+      try {
+        const res = await fetch("/api/buildings", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ bbox: box, anchor: a }),
+        });
+        const json = (await res.json()) as {
+          buildings?: ContextBuilding[];
+          truncated?: boolean;
+          total?: number;
+          error?: string;
+        };
+        if (!res.ok || !json.buildings) throw new Error(json.error ?? `HTTP ${res.status}`);
+        setContextBuildings(json.buildings);
+        setBuildingsInfo({ truncated: !!json.truncated, total: json.total ?? json.buildings.length });
+      } catch (e) {
+        setContextBuildings([]);
+        setBuildingsError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBuildingsLoading(false);
+      }
+    },
+    [],
+  );
+
   /** Replace the whole scene from a loaded document. Re-syncs corners
    * defensively (idempotent for clean saves; repairs hand-edited files) and
    * bumps the block-id counter so newly-drawn blocks can't collide. */
@@ -319,6 +369,13 @@ export default function FacadePage() {
     setCornerChoices(s.cornerChoices);
     setGround(s.ground);
     setAnchor(s.anchor);
+    setBbox(s.bbox);
+    setHiddenIds(s.hiddenIds);
+    setContextBuildings([]);
+    setBuildingsError(null);
+    setBuildingsInfo(null);
+    // Footprints are not in the document — re-fetch them for the saved bbox.
+    if (s.bbox && s.anchor) void loadContextBuildings(s.bbox, s.anchor);
     setStreetWidth(s.streetWidth);
     setMaxCornerAngle(s.maxCornerAngle);
     setStreetNetwork(s.streetNetwork);
@@ -330,7 +387,7 @@ export default function FacadePage() {
     setSelectedStreet(null);
     setSelectedIntersection(null);
     setSelectedSquare(null);
-  }, []);
+  }, [loadContextBuildings]);
 
   const handleSave = useCallback(() => {
     const text = toJSON({
@@ -341,9 +398,8 @@ export default function FacadePage() {
       maxCornerAngle,
       streetNetwork,
       anchor,
-      // TODO(Task 5): wire real page state for context-buildings bbox/hiddenIds.
-      bbox: null,
-      hiddenIds: new Set<string>(),
+      bbox,
+      hiddenIds,
     });
     const url = URL.createObjectURL(
       new Blob([text], { type: "application/json" }),
@@ -357,7 +413,7 @@ export default function FacadePage() {
     // Defer the revoke so the download has surely started (revoking on the
     // same tick is the fragile variant).
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
-  }, [blocks, cornerChoices, ground, streetWidth, maxCornerAngle, streetNetwork, anchor]);
+  }, [blocks, cornerChoices, ground, streetWidth, maxCornerAngle, streetNetwork, anchor, bbox, hiddenIds]);
 
   const handleLoadFile = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -391,20 +447,46 @@ export default function FacadePage() {
       if (!res.ok || !json.heightfield) throw new Error(json.error ?? `HTTP ${res.status}`);
       setGround((g) => ({ ...g, hf: json.heightfield }));
       setAnchor(a);
+      setBbox(bbox);
+      setHiddenIds(new Set());
       setPickerOpen(false);
+      void loadContextBuildings(bbox, a);
     } catch (e) {
       setTerrainError(e instanceof Error ? e.message : String(e));
     } finally {
       setTerrainLoading(false);
     }
-  }, []);
+  }, [loadContextBuildings]);
 
   /** Drop the loaded heightfield, reverting to the manual flat/tilted plane
    * (the Topography sliders reappear). */
   const handleClearTerrain = useCallback(() => {
     setGround((g) => ({ slope: g.slope, azimuth: g.azimuth })); // drop hf
     setAnchor(null);
+    setBbox(null);
+    setContextBuildings([]);
+    setHiddenIds(new Set());
+    setBuildingsError(null);
+    setBuildingsInfo(null);
   }, []);
+
+  /** Demolish one context building (click-to-hide). Not yet wired to a click
+   * handler — that lands with the FacadeViewer/SceneContents props in Task 6. */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- consumed starting Task 6
+  const handleHideContextBuilding = useCallback((id: string) => {
+    setHiddenIds((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }, []);
+
+  /** Bring every demolished context building back — a hidden one cannot be
+   * clicked again, so this is the only way out. Not yet wired to a control —
+   * that lands with the FacadeControls props in Task 7. */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- consumed starting Task 7
+  const handleRestoreHidden = useCallback(() => setHiddenIds(new Set()), []);
 
   // Restore the autosave once on mount (survives refresh/crash). Guarded so
   // Strict Mode's double-invoke can't apply it twice.
@@ -442,14 +524,13 @@ export default function FacadePage() {
           maxCornerAngle,
           streetNetwork,
           anchor,
-          // TODO(Task 5): wire real page state for context-buildings bbox/hiddenIds.
-          bbox: null,
-          hiddenIds: new Set<string>(),
+          bbox,
+          hiddenIds,
         }),
       );
     }, 500);
     return () => window.clearTimeout(id);
-  }, [blocks, cornerChoices, ground, streetWidth, maxCornerAngle, streetNetwork, anchor]);
+  }, [blocks, cornerChoices, ground, streetWidth, maxCornerAngle, streetNetwork, anchor, bbox, hiddenIds]);
 
   const selectedBlock = selected
     ? (blocks.find((b) => b.id === selected.blockId) ?? null)
