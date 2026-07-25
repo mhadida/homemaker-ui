@@ -275,16 +275,10 @@ export default function FacadePage() {
   const [contextBuildings, setContextBuildings] = useState<ContextBuilding[]>([]);
   const [bbox, setBbox] = useState<LngLatBBox | null>(null);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
-  // The visibility toggle control lands with FacadeControls in Task 7.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- setter consumed starting Task 7
   const [contextVisible, setContextVisible] = useState(true);
-  // Loading/error/truncation UI (spinner, error banner, truncation notice)
-  // lands with FacadeControls in Task 7.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- consumed starting Task 7
+  // Loading/error/truncation UI (spinner, error banner, truncation notice).
   const [buildingsLoading, setBuildingsLoading] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- consumed starting Task 7
   const [buildingsError, setBuildingsError] = useState<string | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- consumed starting Task 7
   const [buildingsInfo, setBuildingsInfo] = useState<{ truncated: boolean; total: number } | null>(null);
   const [streetWidth, setStreetWidth] = useState(STREET_WIDTH_DEFAULT);
   // Auto-populate editable buildings along street frontages (SP-2c). Default
@@ -483,9 +477,7 @@ export default function FacadePage() {
   }, []);
 
   /** Bring every demolished context building back — a hidden one cannot be
-   * clicked again, so this is the only way out. Not yet wired to a control —
-   * that lands with the FacadeControls props in Task 7. */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- consumed starting Task 7
+   * clicked again, so this is the only way out. */
   const handleRestoreHidden = useCallback(() => setHiddenIds(new Set()), []);
 
   // Restore the autosave once on mount (survives refresh/crash). Guarded so
@@ -1519,6 +1511,16 @@ export default function FacadePage() {
                   terrainImported={!!ground.hf}
                   streetWidth={streetWidth}
                   onStreetWidth={setStreetWidth}
+                  contextLoaded={!!bbox}
+                  contextCount={contextBuildings.length}
+                  contextVisible={contextVisible}
+                  onToggleContext={() => setContextVisible((v) => !v)}
+                  contextTruncated={!!buildingsInfo?.truncated}
+                  contextTotal={buildingsInfo?.total ?? 0}
+                  contextLoading={buildingsLoading}
+                  contextError={buildingsError}
+                  hiddenCount={hiddenIds.size}
+                  onRestoreHidden={handleRestoreHidden}
                 />
               </>
             ) : (
