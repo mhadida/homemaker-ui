@@ -4,6 +4,7 @@ import {
   deserializeScene,
   toJSON,
   fromJSON,
+  sceneHasContent,
   SCENE_VERSION,
   type SceneState,
 } from "./document";
@@ -509,5 +510,44 @@ describe("document context-building fields", () => {
     const doc = serializeScene(sceneWith({}) as never);
     expect(doc.hiddenIds).toBeUndefined();
     expect(doc.bbox).toBeUndefined();
+  });
+});
+
+describe("sceneHasContent", () => {
+  const BBOX = { west: 4.88, south: 52.36, east: 4.9, north: 52.38 };
+
+  it("is false for a genuinely empty scene (no blocks, no streets, no place)", () => {
+    expect(sceneHasContent(baseScene())).toBe(false);
+  });
+
+  it("is true when blocks are present", () => {
+    expect(
+      sceneHasContent({
+        ...baseScene(),
+        blocks: [mkBlock("block-1", [0, 0], [6, 0], [6])],
+      }),
+    ).toBe(true);
+  });
+
+  it("is true when streets are present", () => {
+    expect(
+      sceneHasContent({
+        ...baseScene(),
+        streetNetwork: {
+          streets: [{ id: "s1", type: "street", points: [[0, 0], [10, 0]] }],
+          roundabouts: [],
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it("is true when a terrain heightfield is loaded, even with no blocks/streets (the autosave-place bug)", () => {
+    expect(
+      sceneHasContent({ ...baseScene(), ground: { slope: 0, azimuth: 0, hf: HF } }),
+    ).toBe(true);
+  });
+
+  it("is true when a context-buildings bbox is loaded, even with no blocks/streets", () => {
+    expect(sceneHasContent({ ...baseScene(), bbox: BBOX })).toBe(true);
   });
 });

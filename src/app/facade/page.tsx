@@ -33,6 +33,7 @@ import {
 import {
   toJSON,
   fromJSON,
+  sceneHasContent,
   type SceneState,
 } from "@/lib/facade/document";
 import { syncStreetBlocks } from "@/lib/facade/streetBlocks";
@@ -490,18 +491,25 @@ export default function FacadePage() {
     const saved = window.localStorage.getItem(AUTOSAVE_KEY);
     if (!saved) return;
     const res = fromJSON(saved);
-    if (res.ok && (res.scene.blocks.length > 0 || res.scene.streetNetwork.streets.length > 0)) applyScene(res.scene);
+    // Content = hand-drawn blocks/streets OR a loaded real place (terrain
+    // `ground.hf` and/or context-buildings `bbox`) — see sceneHasContent.
+    if (res.ok && sceneHasContent(res.scene)) applyScene(res.scene);
     else window.localStorage.removeItem(AUTOSAVE_KEY);
   }, [applyScene]);
 
   // Debounced autosave — one write 500 ms after the last change, so live
   // node drags don't hammer localStorage every frame. Emptying a scene
   // clears the key so a refresh doesn't resurrect deleted buildings — but
-  // ONLY after the scene has actually held content (blocks or streets) this session, so the
+  // ONLY after the scene has actually held content this session, so the
   // mount-time empty pass can't wipe a good save before restore lands.
+  // "Content" is blocks/streets OR a loaded real place — a terrain
+  // heightfield (`ground.hf`) and/or a context-buildings bbox (`bbox`) are
+  // real scene state (Milestone 1/2) worth restoring on refresh even before
+  // any block is drawn on top of them, so they must count too (otherwise a
+  // place-only scene is silently never autosaved). See sceneHasContent.
   const everHadContentRef = useRef(false);
   useEffect(() => {
-    if (blocks.length === 0 && streetNetwork.streets.length === 0) {
+    if (!sceneHasContent({ blocks, streetNetwork, ground, bbox })) {
       if (everHadContentRef.current) window.localStorage.removeItem(AUTOSAVE_KEY);
       return;
     }

@@ -50,6 +50,26 @@ export type LoadResult =
   | { ok: true; scene: SceneState }
   | { ok: false; error: string };
 
+/** Whether a scene has anything worth treating as non-empty — hand-drawn
+ * blocks/streets, OR a loaded real place (a terrain heightfield in
+ * `ground.hf` and/or the context-buildings re-fetch key `bbox`). A loaded
+ * place is real scene state the user fetched (terrain + the bbox footprints
+ * re-fetch from) and is worth autosaving/restoring even before any block is
+ * drawn on top of it, so it counts as content alongside blocks/streets.
+ * Shared by facade/page.tsx's autosave-write guard and mount-time restore
+ * guard so the two conditions can't drift apart — narrowing this back to
+ * "blocks or streets only" would make a place-only scene unrestorable again. */
+export function sceneHasContent(
+  s: Pick<SceneState, "blocks" | "streetNetwork" | "ground" | "bbox">,
+): boolean {
+  return (
+    s.blocks.length > 0 ||
+    s.streetNetwork.streets.length > 0 ||
+    !!s.ground.hf ||
+    !!s.bbox
+  );
+}
+
 /** Pure: live state → serializable document (Map → entries). */
 export function serializeScene(s: SceneState): FacadeDocument {
   return {
