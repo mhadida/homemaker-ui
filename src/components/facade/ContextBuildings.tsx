@@ -105,7 +105,12 @@ export default function ContextBuildings({
         onPointerMove={
           onHide
             ? (e) => {
-                e.stopPropagation();
+                // No stopPropagation here (unlike onClick below): this mesh
+                // sits above MarqueeSurface's catcher plane in the plan view,
+                // so stopping the walk would freeze the rubber-band rect (and
+                // street-ribbon hover) wherever the cursor crosses a
+                // footprint. The hover handler has already run by this point,
+                // so nothing is lost by letting the event keep walking.
                 setHovered(idAt(e) ?? null);
               }
             : undefined

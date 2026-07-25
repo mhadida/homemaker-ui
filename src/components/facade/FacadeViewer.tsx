@@ -1465,6 +1465,19 @@ function PlanPane({
     },
     [onSelectLot],
   );
+  // Same hazard as guardedSelectLot above: the context-buildings backdrop's
+  // onClick (ContextBuildings.tsx) synthesizes just like a lot's, so a
+  // marquee sweep that starts and ends over a footprint would otherwise hide
+  // a building nobody meant to touch. `onHideContextBuilding` stays undefined
+  // outside select mode, so preserve that "not interactive" signal instead of
+  // always handing SceneContents a defined callback.
+  const guardedHideContextBuilding = useCallback(
+    (id: string) => {
+      if (performance.now() - dragEndAt.current < 300) return;
+      onHideContextBuilding?.(id);
+    },
+    [onHideContextBuilding],
+  );
   const bounds = useMemo(() => {
     if (blocks.length === 0) return { w: 30, d: 30, cx: 0, cz: 0 };
     let minX = Infinity,
@@ -1538,7 +1551,9 @@ function PlanPane({
         contextBuildings={contextBuildings}
         hiddenIds={hiddenIds}
         contextVisible={contextVisible}
-        onHideContextBuilding={onHideContextBuilding}
+        onHideContextBuilding={
+          onHideContextBuilding ? guardedHideContextBuilding : undefined
+        }
       />
       <StreetGuides streetRef={streetRef} streetWidth={streetWidth} />
       <PenSurface
