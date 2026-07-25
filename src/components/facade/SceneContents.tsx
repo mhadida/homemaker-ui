@@ -8,6 +8,8 @@ import Line from "./NodeLine";
 import NodeGrid from "./NodeGrid";
 import { isWebGPUPath } from "./webgpu";
 import InstancedFacadeBoxes from "./InstancedFacadeBoxes";
+import ContextBuildings from "./ContextBuildings";
+import type { ContextBuilding } from "@/lib/geo/buildings";
 import StreetNetworkView from "@/components/street/StreetNetworkView";
 import type { StreetNetwork } from "@/lib/street/types";
 // Ground half-extent's single source of truth — the perspective far plane is
@@ -61,6 +63,12 @@ import {
 
 const BASEMENT_MIN = 0.3; // no sliver plinths below this drop
 const BASEMENT_COLOR = "#6f6a62"; // stone
+
+// Stable identities for SceneContents' optional context-building props — a
+// fresh [] / new Set() literal inline on every render would change identity
+// each frame and thrash ContextBuildings' memos.
+const EMPTY_CONTEXT: ContextBuilding[] = [];
+const EMPTY_HIDDEN: ReadonlySet<string> = new Set();
 
 /** Leveling plinth below a building on sloping ground: a stone box from the
  * floor (local y=0) down to −drop, pierced by a row of thin horizontal
@@ -434,6 +442,10 @@ export default function SceneContents({
   gridAngleDeg = null,
   cornerChoices,
   display = "full",
+  contextBuildings,
+  hiddenIds,
+  contextVisible,
+  onHideContextBuilding,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -466,6 +478,12 @@ export default function SceneContents({
   onSelectSquare?: (streetId: string) => void;
   /** Building render mode. Default "full" (byte-identical). */
   display?: BuildingDisplay;
+  /** Real footprints loaded as backdrop context (M2). Empty = nothing renders. */
+  contextBuildings?: ContextBuilding[];
+  hiddenIds?: ReadonlySet<string>;
+  contextVisible?: boolean;
+  /** undefined ⇒ not interactive (Select tool off). */
+  onHideContextBuilding?: (id: string) => void;
 }) {
   const groundGeo = useGroundGeometry(streetNetwork, ground);
   const groundQuat = useMemo(() => {
@@ -772,6 +790,13 @@ export default function SceneContents({
           ground={ground}
         />
       )}
+      <ContextBuildings
+        buildings={contextBuildings ?? EMPTY_CONTEXT}
+        ground={ground}
+        hiddenIds={hiddenIds ?? EMPTY_HIDDEN}
+        visible={contextVisible ?? true}
+        onHide={onHideContextBuilding}
+      />
       {/* Ground plane + grid tilt to the slope so buildings sit on it at
        * their datums. polygonOffset keeps the sidewalk/road/grid winning
        * the depth test. */}

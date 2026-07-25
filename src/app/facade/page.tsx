@@ -271,20 +271,21 @@ export default function FacadePage() {
   const [terrainLoading, setTerrainLoading] = useState(false);
   const [terrainError, setTerrainError] = useState<string | null>(null);
   // Context buildings (M2). The footprints are page state ONLY — never
-  // serialized; `bbox` is the key they are re-fetched from on load. This
-  // page-state + load-flow wiring lands ahead of its UI consumers
-  // (FacadeViewer/SceneContents in Task 6, FacadeControls in Task 7), so the
-  // read side of a few of these is temporarily unused — disabled narrowly
-  // rather than left to fail the lint gate.
-  /* eslint-disable @typescript-eslint/no-unused-vars -- consumed starting Task 6/7 */
+  // serialized; `bbox` is the key they are re-fetched from on load.
   const [contextBuildings, setContextBuildings] = useState<ContextBuilding[]>([]);
   const [bbox, setBbox] = useState<LngLatBBox | null>(null);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
+  // The visibility toggle control lands with FacadeControls in Task 7.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- setter consumed starting Task 7
   const [contextVisible, setContextVisible] = useState(true);
+  // Loading/error/truncation UI (spinner, error banner, truncation notice)
+  // lands with FacadeControls in Task 7.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- consumed starting Task 7
   const [buildingsLoading, setBuildingsLoading] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- consumed starting Task 7
   const [buildingsError, setBuildingsError] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- consumed starting Task 7
   const [buildingsInfo, setBuildingsInfo] = useState<{ truncated: boolean; total: number } | null>(null);
-  /* eslint-enable @typescript-eslint/no-unused-vars */
   const [streetWidth, setStreetWidth] = useState(STREET_WIDTH_DEFAULT);
   // Auto-populate editable buildings along street frontages (SP-2c). Default
   // on; transient UI state (like drawActive/marquee) — not part of the saved
@@ -470,9 +471,8 @@ export default function FacadePage() {
     setBuildingsInfo(null);
   }, []);
 
-  /** Demolish one context building (click-to-hide). Not yet wired to a click
-   * handler — that lands with the FacadeViewer/SceneContents props in Task 6. */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- consumed starting Task 6
+  /** Demolish one context building (click-to-hide), wired to ContextBuildings'
+   * onHide via FacadeViewer/SceneContents (gated behind the Select tool). */
   const handleHideContextBuilding = useCallback((id: string) => {
     setHiddenIds((prev) => {
       if (prev.has(id)) return prev;
@@ -1437,6 +1437,10 @@ export default function FacadePage() {
             selectedSquare={selectedSquare}
             onSelectSquare={handleSelectSquare}
             onClearSelection={handleClearSelection}
+            contextBuildings={contextBuildings}
+            hiddenIds={hiddenIds}
+            contextVisible={contextVisible}
+            onHideContextBuilding={handleHideContextBuilding}
           />
         </div>
 

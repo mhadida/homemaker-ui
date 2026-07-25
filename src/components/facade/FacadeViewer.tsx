@@ -38,6 +38,7 @@ import {
   type Selection,
 } from "@/lib/facade/blocks";
 import type { Corner, CornerChoice } from "@/lib/facade/corners";
+import type { ContextBuilding } from "@/lib/geo/buildings";
 import type { Ground } from "@/lib/facade/terrain";
 import { groundHeightAt } from "@/lib/facade/terrain";
 import { walkStep, EYE_HEIGHT, type WalkKeys } from "@/lib/facade/walk";
@@ -115,6 +116,13 @@ interface FacadeViewerProps {
    * marquee) without touching the scene. Called whenever the Select tool goes
    * off, since nothing may stay selected outside selection mode. */
   onClearSelection: () => void;
+  /** Real footprints loaded as backdrop context (M2). Empty = nothing renders. */
+  contextBuildings: ContextBuilding[];
+  hiddenIds: ReadonlySet<string>;
+  contextVisible: boolean;
+  /** Click-to-hide a context building. Gated behind the Select tool the same
+   * way as onSelectStreet/onSelectIntersection/onSelectSquare. */
+  onHideContextBuilding: (id: string) => void;
 }
 
 type PaneId = "plan" | "perspective" | "overview" | "detail";
@@ -1377,6 +1385,10 @@ function PlanPane({
   onSelectIntersection,
   selectedSquare,
   onSelectSquare,
+  contextBuildings,
+  hiddenIds,
+  contextVisible,
+  onHideContextBuilding,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -1424,6 +1436,11 @@ function PlanPane({
   onSelectIntersection?: (key: string) => void;
   selectedSquare: string | null;
   onSelectSquare?: (streetId: string) => void;
+  contextBuildings: ContextBuilding[];
+  hiddenIds: ReadonlySet<string>;
+  contextVisible: boolean;
+  /** Undefined outside select mode → backdrop renders but doesn't hover/click. */
+  onHideContextBuilding?: (id: string) => void;
 }) {
   const [nodeDrag, setNodeDrag] = useState(false);
   const dragEndAt = useRef(0);
@@ -1518,6 +1535,10 @@ function PlanPane({
         selectedSquare={selectedSquare}
         onSelectSquare={onSelectSquare}
         gridAngleDeg={gridSnap ? gridAngle : null}
+        contextBuildings={contextBuildings}
+        hiddenIds={hiddenIds}
+        contextVisible={contextVisible}
+        onHideContextBuilding={onHideContextBuilding}
       />
       <StreetGuides streetRef={streetRef} streetWidth={streetWidth} />
       <PenSurface
@@ -1829,6 +1850,10 @@ function PerspectivePane({
   onSelectIntersection,
   selectedSquare,
   onSelectSquare,
+  contextBuildings,
+  hiddenIds,
+  contextVisible,
+  onHideContextBuilding,
   walk,
   walkStart,
   onExitWalk,
@@ -1850,6 +1875,11 @@ function PerspectivePane({
   onSelectIntersection?: (key: string) => void;
   selectedSquare: string | null;
   onSelectSquare?: (streetId: string) => void;
+  contextBuildings: ContextBuilding[];
+  hiddenIds: ReadonlySet<string>;
+  contextVisible: boolean;
+  /** Undefined outside select mode → backdrop renders but doesn't hover/click. */
+  onHideContextBuilding?: (id: string) => void;
   walk: boolean;
   /** The picked start pose (street point + facing); null → drop in place. */
   walkStart: StreetProjection | null;
@@ -1879,6 +1909,10 @@ function PerspectivePane({
         onSelectIntersection={onSelectIntersection}
         selectedSquare={selectedSquare}
         onSelectSquare={onSelectSquare}
+        contextBuildings={contextBuildings}
+        hiddenIds={hiddenIds}
+        contextVisible={contextVisible}
+        onHideContextBuilding={onHideContextBuilding}
       />
       {/* far is DERIVED (clip.ts) to always contain the ground out to its far
         * corner at full dolly-out; a hardcoded 2000 was smaller than that, so
@@ -1944,6 +1978,10 @@ function ElevationPane({
   onSelectIntersection,
   selectedSquare,
   onSelectSquare,
+  contextBuildings,
+  hiddenIds,
+  contextVisible,
+  onHideContextBuilding,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -1964,6 +2002,11 @@ function ElevationPane({
   onSelectIntersection?: (key: string) => void;
   selectedSquare: string | null;
   onSelectSquare?: (streetId: string) => void;
+  contextBuildings: ContextBuilding[];
+  hiddenIds: ReadonlySet<string>;
+  contextVisible: boolean;
+  /** Undefined outside select mode → backdrop renders but doesn't hover/click. */
+  onHideContextBuilding?: (id: string) => void;
 }) {
   // Zero-block world: `block` is undefined. Hooks below must still run
   // unconditionally (Rules of Hooks) — every derived value falls back to a
@@ -2067,6 +2110,10 @@ function ElevationPane({
         onSelectIntersection={onSelectIntersection}
         selectedSquare={selectedSquare}
         onSelectSquare={onSelectSquare}
+        contextBuildings={contextBuildings}
+        hiddenIds={hiddenIds}
+        contextVisible={contextVisible}
+        onHideContextBuilding={onHideContextBuilding}
       />
       <OrthographicCamera
         ref={camRef}
@@ -2130,6 +2177,10 @@ export default function FacadeViewer({
   selectedSquare,
   onSelectSquare: rawSelectSquare,
   onClearSelection,
+  contextBuildings,
+  hiddenIds,
+  contextVisible,
+  onHideContextBuilding: rawHideContextBuilding,
 }: FacadeViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null!);
   const planRef = useRef<HTMLDivElement>(null);
@@ -2195,6 +2246,9 @@ export default function FacadeViewer({
   const onSelectStreet = selectMode ? rawSelectStreet : undefined;
   const onSelectIntersection = selectMode ? rawSelectIntersection : undefined;
   const onSelectSquare = selectMode ? rawSelectSquare : undefined;
+  // Same convention: undefined off, so the backdrop's hover highlight (which
+  // only shows when onHide is defined) disables along with the click-to-hide.
+  const onHideContextBuilding = selectMode ? rawHideContextBuilding : undefined;
   // Two-step confirm for the select-mode Clear-all button.
   const [confirmClear, setConfirmClear] = useState(false);
   // The street tool (draws the standalone road network). Mutually exclusive
@@ -2405,6 +2459,10 @@ export default function FacadeViewer({
             onSelectIntersection={onSelectIntersection}
         selectedSquare={selectedSquare}
         onSelectSquare={onSelectSquare}
+            contextBuildings={contextBuildings}
+            hiddenIds={hiddenIds}
+            contextVisible={contextVisible}
+            onHideContextBuilding={onHideContextBuilding}
           />
         );
       case "perspective":
@@ -2426,6 +2484,10 @@ export default function FacadeViewer({
             onSelectIntersection={onSelectIntersection}
         selectedSquare={selectedSquare}
         onSelectSquare={onSelectSquare}
+            contextBuildings={contextBuildings}
+            hiddenIds={hiddenIds}
+            contextVisible={contextVisible}
+            onHideContextBuilding={onHideContextBuilding}
             walk={walkMode}
             walkStart={walkStart}
             onExitWalk={() => {
@@ -2455,6 +2517,10 @@ export default function FacadeViewer({
             onSelectIntersection={onSelectIntersection}
         selectedSquare={selectedSquare}
         onSelectSquare={onSelectSquare}
+            contextBuildings={contextBuildings}
+            hiddenIds={hiddenIds}
+            contextVisible={contextVisible}
+            onHideContextBuilding={onHideContextBuilding}
           />
         );
       case "detail":
@@ -2478,6 +2544,10 @@ export default function FacadeViewer({
             onSelectIntersection={onSelectIntersection}
         selectedSquare={selectedSquare}
         onSelectSquare={onSelectSquare}
+            contextBuildings={contextBuildings}
+            hiddenIds={hiddenIds}
+            contextVisible={contextVisible}
+            onHideContextBuilding={onHideContextBuilding}
           />
         );
     }
