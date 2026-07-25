@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import {
   parseBuildingsRequest,
   OsmBuildingProvider,
   MAX_BUILDING_SPAN_DEG,
+  __resetOverpassCacheForTests,
 } from "./buildingProvider";
 
 const anchor = { lat0: 52.37, lon0: 4.89 };
@@ -42,6 +43,13 @@ describe("parseBuildingsRequest", () => {
 });
 
 describe("OsmBuildingProvider", () => {
+  // The response cache is a module-level singleton, so without a reset a
+  // cache hit from an earlier test (several below reuse `good.bbox`/`anchor`)
+  // would skip `fetch` entirely and silently break that test's own
+  // `toHaveBeenCalled*` assertions. Resetting before each test (rather than
+  // giving every test a unique bbox) keeps the existing tests' shared
+  // fixtures untouched and makes the cache itself exercisable in isolation.
+  beforeEach(() => __resetOverpassCacheForTests());
   afterEach(() => vi.unstubAllGlobals());
 
   it("queries Overpass and maps the response into local-frame buildings", async () => {
@@ -122,5 +130,102 @@ describe("OsmBuildingProvider", () => {
     const r = await new OsmBuildingProvider().fetchBuildings(good.bbox, anchor);
     expect(r.buildings).toEqual([]);
     expect(r.total).toBe(0);
+  });
+
+  it("fails over to the next mirror when the first is transient (504), and resolves", async () => {
+    const goodBody = {
+      elements: [
+        {
+          type: "way",
+          id: 7,
+          tags: { building: "yes" },
+          geometry: [
+            { lat: 52.37, lon: 4.89 },
+            { lat: 52.37, lon: 4.8901 },
+            { lat: 52.3701, lon: 4.8901 },
+            { lat: 52.37, lon: 4.89 },
+          ],
+        },
+      ],
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 504, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => goodBody });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const r = await new OsmBuildingProvider().fetchBuildings(good.bbox, anchor);
+
+    expect(r.buildings).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://overpass.kumi.systems/api/interpreter");
+    expect(fetchMock.mock.calls[1][0]).toBe("https://overpass-api.de/api/interpreter");
+  });
+
+  it("fails fast on a non-transient status (400) without trying other mirrors", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 400, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new OsmBuildingProvider().fetchBuildings(good.bbox, anchor),
+    ).rejects.toThrow(/400/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws one actionable error when every mirror fails transiently (504)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 504, json: async () => ({}) }),
+    );
+    const err: Error = await new OsmBuildingProvider()
+      .fetchBuildings(good.bbox, anchor)
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toMatch(/rate-limiting or busy/);
+    expect(err.message).toMatch(/try again shortly/);
+  });
+
+  it("caches a successful response so an identical bbox/anchor doesn't re-hit Overpass", async () => {
+    const body = {
+      elements: [
+        {
+          type: "way",
+          id: 99,
+          tags: { building: "yes" },
+          geometry: [
+            { lat: 52.37, lon: 4.89 },
+            { lat: 52.37, lon: 4.8901 },
+            { lat: 52.3701, lon: 4.8901 },
+            { lat: 52.37, lon: 4.89 },
+          ],
+        },
+      ],
+    };
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => body });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const provider = new OsmBuildingProvider();
+    const r1 = await provider.fetchBuildings(good.bbox, anchor);
+    const r2 = await provider.fetchBuildings(good.bbox, anchor);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(r2).toEqual(r1);
+    expect(r2.buildings).toHaveLength(1);
+  });
+
+  it("sends the User-Agent header on the failover attempt too", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 504, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new OsmBuildingProvider().fetchBuildings(good.bbox, anchor);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [, secondInit] = fetchMock.mock.calls[1];
+    const headers = secondInit.headers as Record<string, string>;
+    const userAgent = headers["user-agent"] ?? headers["User-Agent"];
+    expect(userAgent).toBeTruthy();
   });
 });
