@@ -42,6 +42,11 @@ export function parseBuildingsRequest(
 
 const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 
+// Overpass's usage policy requires an identifying User-Agent and 406s any
+// request without one — Node's server-side fetch sends no UA by default, so
+// this is required for the request to succeed at all. Do not remove.
+const OVERPASS_USER_AGENT = "homemaker-ui/0.1 (+https://github.com/mhadida/homemaker-ui)";
+
 export class OsmBuildingProvider implements BuildingProvider {
   async fetchBuildings(bbox: LngLatBBox, anchor: GeoAnchor): Promise<FetchResult> {
     // Ways only — multipolygon relations (courtyard holes) are deferred.
@@ -52,7 +57,10 @@ export class OsmBuildingProvider implements BuildingProvider {
       `out geom;`;
     const res = await fetch(OVERPASS_URL, {
       method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "user-agent": OVERPASS_USER_AGENT,
+      },
       body: `data=${encodeURIComponent(query)}`,
     });
     if (!res.ok) {

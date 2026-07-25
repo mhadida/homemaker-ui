@@ -67,6 +67,12 @@ describe("OsmBuildingProvider", () => {
     expect(String(init.body)).toContain(
       encodeURIComponent(`(${bbox.south},${bbox.west},${bbox.north},${bbox.east})`),
     );
+    // Overpass 406s any request without an identifying User-Agent (verified
+    // against the live API) — guard against that regression here since the
+    // mocked fetch below can't catch it.
+    const headers = init.headers as Record<string, string>;
+    const userAgent = headers["user-agent"] ?? headers["User-Agent"];
+    expect(userAgent).toBeTruthy();
     expect(r.buildings).toHaveLength(1);
     expect(r.buildings[0].id).toBe("way/42");
     expect(r.buildings[0].height).toBe(9); // 3 levels x 3 m
