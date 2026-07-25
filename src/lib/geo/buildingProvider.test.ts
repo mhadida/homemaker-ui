@@ -12,26 +12,32 @@ describe("parseBuildingsRequest", () => {
   it("accepts a normal city bbox", () => {
     expect(parseBuildingsRequest(good)).toEqual(good);
   });
-  it("rejects a non-object or missing parts", () => {
-    expect(parseBuildingsRequest("nope")).toBeNull();
-    expect(parseBuildingsRequest(null)).toBeNull();
-    expect(parseBuildingsRequest({ anchor })).toBeNull();
-    expect(parseBuildingsRequest({ bbox: good.bbox })).toBeNull();
+  it("rejects a non-object or missing parts as malformed", () => {
+    expect(parseBuildingsRequest("nope")).toEqual({ error: "malformed" });
+    expect(parseBuildingsRequest(null)).toEqual({ error: "malformed" });
+    expect(parseBuildingsRequest({ anchor })).toEqual({ error: "malformed" });
+    expect(parseBuildingsRequest({ bbox: good.bbox })).toEqual({ error: "malformed" });
   });
-  it("rejects non-finite coordinates", () => {
-    expect(parseBuildingsRequest({ ...good, bbox: { ...good.bbox, west: NaN } })).toBeNull();
+  it("rejects non-finite coordinates as malformed", () => {
+    expect(parseBuildingsRequest({ ...good, bbox: { ...good.bbox, west: NaN } })).toEqual({
+      error: "malformed",
+    });
   });
-  it("rejects an inverted or zero-area bbox", () => {
-    expect(parseBuildingsRequest({ ...good, bbox: { west: 5, south: 52.36, east: 4, north: 52.38 } })).toBeNull();
-    expect(parseBuildingsRequest({ ...good, bbox: { west: 4.9, south: 52.36, east: 4.9, north: 52.38 } })).toBeNull();
+  it("rejects an inverted or zero-area bbox as malformed", () => {
+    expect(
+      parseBuildingsRequest({ ...good, bbox: { west: 5, south: 52.36, east: 4, north: 52.38 } }),
+    ).toEqual({ error: "malformed" });
+    expect(
+      parseBuildingsRequest({ ...good, bbox: { west: 4.9, south: 52.36, east: 4.9, north: 52.38 } }),
+    ).toEqual({ error: "malformed" });
   });
-  it("rejects a span wider than MAX_BUILDING_SPAN_DEG", () => {
+  it("rejects a span wider than MAX_BUILDING_SPAN_DEG as 'span', distinct from malformed", () => {
     const wide = { west: 4, south: 52, east: 4 + MAX_BUILDING_SPAN_DEG + 0.01, north: 52.01 };
-    expect(parseBuildingsRequest({ ...good, bbox: wide })).toBeNull();
+    expect(parseBuildingsRequest({ ...good, bbox: wide })).toEqual({ error: "span" });
   });
-  it("rejects a north-south span wider than MAX_BUILDING_SPAN_DEG", () => {
+  it("rejects a north-south span wider than MAX_BUILDING_SPAN_DEG as 'span'", () => {
     const tall = { west: 4.88, south: 52, east: 4.90, north: 52 + MAX_BUILDING_SPAN_DEG + 0.01 };
-    expect(parseBuildingsRequest({ ...good, bbox: tall })).toBeNull();
+    expect(parseBuildingsRequest({ ...good, bbox: tall })).toEqual({ error: "span" });
   });
 });
 
@@ -83,6 +89,32 @@ describe("OsmBuildingProvider", () => {
   it("throws a clear error when Overpass rate-limits", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 429, json: async () => ({}) }));
     await expect(new OsmBuildingProvider().fetchBuildings(good.bbox, anchor)).rejects.toThrow(/429/);
+  });
+
+  it("bounds the Overpass fetch with an AbortSignal", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+    await new OsmBuildingProvider().fetchBuildings(good.bbox, anchor);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("surfaces a clear, actionable error when the Overpass fetch times out", async () => {
+    const timeoutError = new DOMException(
+      "The operation was aborted due to timeout",
+      "TimeoutError",
+    );
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(timeoutError));
+    await expect(
+      new OsmBuildingProvider().fetchBuildings(good.bbox, anchor),
+    ).rejects.toThrow(/timed out/);
+  });
+
+  it("rethrows a non-timeout fetch failure unchanged", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
+    await expect(
+      new OsmBuildingProvider().fetchBuildings(good.bbox, anchor),
+    ).rejects.toThrow(/network down/);
   });
 
   it("returns an empty result when the source has no elements", async () => {

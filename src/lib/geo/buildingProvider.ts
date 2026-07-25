@@ -19,20 +19,28 @@ export const MAX_BUILDING_SPAN_DEG = 0.05;
 // (FetchResult.truncated/total) so the UI can say so — never a silent cap.
 export const MAX_BUILDINGS = 4000;
 
+/** Why a request body was rejected — lets the route give an actionable
+ * message for "too large" (zoom in) vs. genuinely malformed input, while the
+ * server-side bound (MAX_BUILDING_SPAN_DEG) is enforced identically either
+ * way. */
+export type BuildingsRequestError = "malformed" | "span";
+
 /** Validate an untrusted request body. Exported so the route and its test share
  * one definition. Mirrors parseTerrainRequest's guards with the tighter span. */
 export function parseBuildingsRequest(
   body: unknown,
-): { bbox: LngLatBBox; anchor: GeoAnchor } | null {
-  if (typeof body !== "object" || body === null) return null;
+): { bbox: LngLatBBox; anchor: GeoAnchor } | { error: BuildingsRequestError } {
+  if (typeof body !== "object" || body === null) return { error: "malformed" };
   const b = (body as { bbox?: unknown }).bbox as Partial<LngLatBBox> | undefined;
   const a = (body as { anchor?: unknown }).anchor as Partial<GeoAnchor> | undefined;
-  if (!b || !a) return null;
-  if (!isNum(b.west) || !isNum(b.south) || !isNum(b.east) || !isNum(b.north)) return null;
-  if (!isNum(a.lat0) || !isNum(a.lon0)) return null;
-  if (!(b.west < b.east && b.south < b.north)) return null;
+  if (!b || !a) return { error: "malformed" };
+  if (!isNum(b.west) || !isNum(b.south) || !isNum(b.east) || !isNum(b.north)) {
+    return { error: "malformed" };
+  }
+  if (!isNum(a.lat0) || !isNum(a.lon0)) return { error: "malformed" };
+  if (!(b.west < b.east && b.south < b.north)) return { error: "malformed" };
   if (b.east - b.west > MAX_BUILDING_SPAN_DEG || b.north - b.south > MAX_BUILDING_SPAN_DEG) {
-    return null;
+    return { error: "span" };
   }
   return {
     bbox: { west: b.west, south: b.south, east: b.east, north: b.north },
@@ -55,14 +63,28 @@ export class OsmBuildingProvider implements BuildingProvider {
       `[out:json][timeout:25];` +
       `way["building"](${bbox.south},${bbox.west},${bbox.north},${bbox.east});` +
       `out geom;`;
-    const res = await fetch(OVERPASS_URL, {
-      method: "POST",
-      headers: {
-        "content-type": "application/x-www-form-urlencoded",
-        "user-agent": OVERPASS_USER_AGENT,
-      },
-      body: `data=${encodeURIComponent(query)}`,
-    });
+    let res: Response;
+    try {
+      res = await fetch(OVERPASS_URL, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "user-agent": OVERPASS_USER_AGENT,
+        },
+        body: `data=${encodeURIComponent(query)}`,
+        // `[timeout:25]` above only bounds Overpass's own query execution,
+        // not queue wait or transfer — without an AbortSignal a busy Overpass
+        // could hold this serverless function open until the platform limit.
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch (e) {
+      if (e instanceof Error && e.name === "TimeoutError") {
+        throw new Error(
+          "Overpass request timed out after 30s — it may be busy; try again shortly.",
+        );
+      }
+      throw e;
+    }
     if (!res.ok) {
       const hint =
         res.status === 429 || res.status === 504

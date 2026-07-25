@@ -322,12 +322,17 @@ export default function FacadePage() {
   );
 
   // ── Save / Load ────────────────────────────────────────────────────────
+  // Request token for `loadContextBuildings`: an Overpass fetch takes ~15s,
+  // so a later call (a second place, or a cleared terrain) must be able to
+  // invalidate an earlier one's eventual state updates rather than racing it.
+  const buildingsReqRef = useRef(0);
   /** Fetch context footprints for a bbox. Deliberately swallows its error into
    * `buildingsError`: a failed backdrop must never roll back a good terrain
    * load (Overpass is slow and rate-limits). Declared ahead of `applyScene`,
    * which re-fetches from a loaded document's saved bbox. */
   const loadContextBuildings = useCallback(
     async (box: LngLatBBox, a: GeoAnchor) => {
+      const token = ++buildingsReqRef.current;
       setBuildingsError(null);
       setBuildingsInfo(null);
       setBuildingsLoading(true);
@@ -344,13 +349,17 @@ export default function FacadePage() {
           error?: string;
         };
         if (!res.ok || !json.buildings) throw new Error(json.error ?? `HTTP ${res.status}`);
+        // A newer call (second place, or a clear) superseded this one while
+        // it was in flight — drop the response rather than letting it land.
+        if (buildingsReqRef.current !== token) return;
         setContextBuildings(json.buildings);
         setBuildingsInfo({ truncated: !!json.truncated, total: json.total ?? json.buildings.length });
       } catch (e) {
+        if (buildingsReqRef.current !== token) return;
         setContextBuildings([]);
         setBuildingsError(e instanceof Error ? e.message : String(e));
       } finally {
-        setBuildingsLoading(false);
+        if (buildingsReqRef.current === token) setBuildingsLoading(false);
       }
     },
     [],
@@ -458,6 +467,9 @@ export default function FacadePage() {
   /** Drop the loaded heightfield, reverting to the manual flat/tilted plane
    * (the Topography sliders reappear). */
   const handleClearTerrain = useCallback(() => {
+    // Invalidate any in-flight buildings fetch — otherwise it can resolve
+    // after this clear and repopulate contextBuildings on a bbox-less scene.
+    buildingsReqRef.current++;
     setGround((g) => ({ slope: g.slope, azimuth: g.azimuth })); // drop hf
     setAnchor(null);
     setBbox(null);

@@ -8,11 +8,12 @@ const provider = new OsmBuildingProvider();
 export async function POST(req: NextRequest) {
   try {
     const parsed = parseBuildingsRequest(await req.json());
-    if (!parsed) {
-      return NextResponse.json(
-        { error: "Bad request: need { bbox, anchor } with a small, well-ordered bbox." },
-        { status: 400 },
-      );
+    if ("error" in parsed) {
+      const message =
+        parsed.error === "span"
+          ? "Area too large for buildings — zoom in to roughly 5 km across."
+          : "Bad request: need { bbox, anchor } with a small, well-ordered bbox.";
+      return NextResponse.json({ error: message }, { status: 400 });
     }
     const result = await provider.fetchBuildings(parsed.bbox, parsed.anchor);
     return NextResponse.json(result);
