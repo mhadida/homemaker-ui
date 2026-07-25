@@ -8,7 +8,7 @@ import type { FacadeParams } from "./types";
 import { DEFAULT_FACADE } from "./types";
 import type { Monument, Street, StreetNetwork } from "@/lib/street/types";
 import { EMPTY_NETWORK, STREET_SPECS } from "@/lib/street/types";
-import type { GeoAnchor } from "@/lib/geo/project";
+import type { GeoAnchor, LngLatBBox } from "@/lib/geo/project";
 
 /** Bump when the on-disk shape changes incompatibly. Loaders reject unknown
  * versions rather than silently mis-reading (beta data-preservation rule). */
@@ -24,6 +24,11 @@ export interface SceneState {
   maxCornerAngle: number;
   streetNetwork: StreetNetwork;
   anchor: GeoAnchor | null;
+  /** bbox the context buildings were fetched for — the re-fetch key. The
+   * footprints themselves are NEVER serialized (thousands of polygons). */
+  bbox: LngLatBBox | null;
+  /** Context buildings the user demolished, by OSM id. Sparse. */
+  hiddenIds: Set<string>;
 }
 
 /** JSON-native form. `cornerChoices` is a Map in memory → entries on disk
@@ -37,6 +42,8 @@ export interface FacadeDocument {
   maxCornerAngle: number;
   streetNetwork: StreetNetwork;
   anchor?: GeoAnchor;
+  bbox?: LngLatBBox;
+  hiddenIds?: string[];
 }
 
 export type LoadResult =
@@ -54,6 +61,8 @@ export function serializeScene(s: SceneState): FacadeDocument {
     maxCornerAngle: s.maxCornerAngle,
     streetNetwork: s.streetNetwork,
     anchor: s.anchor ?? undefined,
+    bbox: s.bbox ?? undefined,
+    hiddenIds: s.hiddenIds.size ? Array.from(s.hiddenIds) : undefined,
   };
 }
 
@@ -168,6 +177,15 @@ export function validHeightfield(v: unknown): v is Heightfield {
   );
 }
 
+/** A context-buildings bbox: four finite lng/lat bounds. Defensive guard for
+ * a loaded `bbox` — malformed (missing/non-finite fields) is DROPPED (not
+ * trusted, not thrown on), same idiom as validHeightfield above. */
+export function validBBox(v: unknown): v is LngLatBBox {
+  if (typeof v !== "object" || v === null) return false;
+  const b = v as Record<string, unknown>;
+  return (["west", "south", "east", "north"] as const).every((k) => isFiniteNumber(b[k]));
+}
+
 /** Normalize every lot's params so the loaded blocks are render-safe. */
 function normalizeBlocks(blocks: Record<string, unknown>[]): FacadeBlock[] {
   return blocks.map((b) => ({
@@ -253,6 +271,17 @@ export function deserializeScene(raw: unknown): LoadResult {
       ? { lat0: rawAnchor.lat0, lon0: rawAnchor.lon0 }
       : null;
 
+  // Additive (older saves have no field at all). The footprints themselves
+  // are never persisted — bbox is only the re-fetch key, hiddenIds only the
+  // demolished-building set — so a malformed value just falls back to
+  // "nothing loaded" rather than failing the whole document.
+  const bbox: LngLatBBox | null = validBBox(doc.bbox) ? doc.bbox : null;
+  const hiddenIds = new Set<string>(
+    Array.isArray(doc.hiddenIds)
+      ? (doc.hiddenIds as unknown[]).filter((s): s is string => typeof s === "string")
+      : [],
+  );
+
   return {
     ok: true,
     scene: {
@@ -267,6 +296,8 @@ export function deserializeScene(raw: unknown): LoadResult {
         : DEFAULT_MAX_CORNER_ANGLE,
       streetNetwork,
       anchor,
+      bbox,
+      hiddenIds,
     },
   };
 }

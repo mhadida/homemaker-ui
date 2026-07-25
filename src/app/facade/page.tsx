@@ -341,6 +341,9 @@ export default function FacadePage() {
       maxCornerAngle,
       streetNetwork,
       anchor,
+      // TODO(Task 5): wire real page state for context-buildings bbox/hiddenIds.
+      bbox: null,
+      hiddenIds: new Set<string>(),
     });
     const url = URL.createObjectURL(
       new Blob([text], { type: "application/json" }),
@@ -439,6 +442,9 @@ export default function FacadePage() {
           maxCornerAngle,
           streetNetwork,
           anchor,
+          // TODO(Task 5): wire real page state for context-buildings bbox/hiddenIds.
+          bbox: null,
+          hiddenIds: new Set<string>(),
         }),
       );
     }, 500);

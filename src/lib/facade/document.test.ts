@@ -45,6 +45,8 @@ const scene = (): SceneState => ({
   maxCornerAngle: 120,
   streetNetwork: EMPTY_NETWORK,
   anchor: null,
+  bbox: null,
+  hiddenIds: new Set<string>(),
 });
 
 describe("serializeScene / toJSON", () => {
@@ -97,6 +99,8 @@ describe("round-trip", () => {
         roundabouts: [],
       },
       anchor: null,
+      bbox: null,
+      hiddenIds: new Set<string>(),
     };
     const res = fromJSON(toJSON(s));
     expect(res.ok).toBe(true);
@@ -119,6 +123,8 @@ describe("round-trip", () => {
       maxCornerAngle: DEFAULT_MAX_CORNER_ANGLE,
       streetNetwork: EMPTY_NETWORK,
       anchor: null,
+      bbox: null,
+      hiddenIds: new Set<string>(),
     };
     const res = fromJSON(toJSON(s));
     expect(res.ok).toBe(true);
@@ -234,6 +240,8 @@ describe("params normalization (partial lots render safe)", () => {
       maxCornerAngle: DEFAULT_MAX_CORNER_ANGLE,
       streetNetwork: EMPTY_NETWORK,
       anchor: null,
+      bbox: null,
+      hiddenIds: new Set<string>(),
     };
     const res = fromJSON(toJSON(s));
     expect(res.ok).toBe(true);
@@ -381,6 +389,8 @@ function baseScene() {
     maxCornerAngle: 60,
     streetNetwork: { streets: [], roundabouts: [], squares: [] },
     anchor: null,
+    bbox: null,
+    hiddenIds: new Set<string>(),
   };
 }
 
@@ -429,5 +439,75 @@ describe("document terrain round-trip", () => {
     expect(back.ok).toBe(true);
     if (!back.ok) return;
     expect(back.scene.ground.hf).toBeUndefined();
+  });
+});
+
+describe("document context-building fields", () => {
+  const BBOX = { west: 4.88, south: 52.36, east: 4.9, north: 52.38 };
+
+  function sceneWith(over: Record<string, unknown>) {
+    return {
+      blocks: [],
+      cornerChoices: new Map(),
+      ground: { slope: 0, azimuth: 0 },
+      streetWidth: 14,
+      maxCornerAngle: 60,
+      streetNetwork: { streets: [], roundabouts: [], squares: [] },
+      anchor: null,
+      bbox: null,
+      hiddenIds: new Set<string>(),
+      ...over,
+    };
+  }
+
+  it("round-trips bbox and hiddenIds", () => {
+    const scene = sceneWith({ bbox: BBOX, hiddenIds: new Set(["way/1", "way/2"]) });
+    const back = deserializeScene(JSON.parse(JSON.stringify(serializeScene(scene as never))));
+    expect(back.ok).toBe(true);
+    if (!back.ok) return;
+    expect(back.scene.bbox).toEqual(BBOX);
+    expect(Array.from(back.scene.hiddenIds).sort()).toEqual(["way/1", "way/2"]);
+  });
+
+  it("a document without the fields loads clean (byte-identical)", () => {
+    const doc = {
+      version: 1,
+      blocks: [],
+      cornerChoices: [],
+      ground: { slope: 0, azimuth: 0 },
+      streetWidth: 14,
+      maxCornerAngle: 60,
+      streetNetwork: { streets: [], roundabouts: [], squares: [] },
+    };
+    const back = deserializeScene(doc);
+    expect(back.ok).toBe(true);
+    if (!back.ok) return;
+    expect(back.scene.bbox).toBeNull();
+    expect(back.scene.hiddenIds.size).toBe(0);
+  });
+
+  it("drops a malformed bbox and non-string hiddenIds rather than throwing", () => {
+    const doc = {
+      version: 1,
+      blocks: [],
+      cornerChoices: [],
+      ground: { slope: 0, azimuth: 0 },
+      streetWidth: 14,
+      maxCornerAngle: 60,
+      streetNetwork: { streets: [], roundabouts: [], squares: [] },
+      bbox: { west: 1, south: 2 },
+      hiddenIds: ["way/1", 7, null],
+    };
+    const back = deserializeScene(doc);
+    expect(back.ok).toBe(true);
+    if (!back.ok) return;
+    expect(back.scene.bbox).toBeNull();
+    expect(Array.from(back.scene.hiddenIds)).toEqual(["way/1"]);
+  });
+
+  it("omits empty hiddenIds from the serialized document", () => {
+    const doc = serializeScene(sceneWith({}) as never);
+    expect(doc.hiddenIds).toBeUndefined();
+    expect(doc.bbox).toBeUndefined();
   });
 });
