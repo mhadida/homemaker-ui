@@ -29,6 +29,10 @@ describe("parseBuildingsRequest", () => {
     const wide = { west: 4, south: 52, east: 4 + MAX_BUILDING_SPAN_DEG + 0.01, north: 52.01 };
     expect(parseBuildingsRequest({ ...good, bbox: wide })).toBeNull();
   });
+  it("rejects a north-south span wider than MAX_BUILDING_SPAN_DEG", () => {
+    const tall = { west: 4.88, south: 52, east: 4.90, north: 52 + MAX_BUILDING_SPAN_DEG + 0.01 };
+    expect(parseBuildingsRequest({ ...good, bbox: tall })).toBeNull();
+  });
 });
 
 describe("OsmBuildingProvider", () => {
@@ -58,6 +62,11 @@ describe("OsmBuildingProvider", () => {
     // the query must be a ways-only building query over the bbox
     const [, init] = fetchMock.mock.calls[0];
     expect(String(init.body)).toContain(encodeURIComponent('way["building"]'));
+    // ensure bbox coordinates appear in Overpass order (south,west,north,east)
+    const { bbox } = good;
+    expect(String(init.body)).toContain(
+      encodeURIComponent(`(${bbox.south},${bbox.west},${bbox.north},${bbox.east})`),
+    );
     expect(r.buildings).toHaveLength(1);
     expect(r.buildings[0].id).toBe("way/42");
     expect(r.buildings[0].height).toBe(9); // 3 levels x 3 m
