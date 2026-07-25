@@ -22,9 +22,11 @@ export function lonLatToTile(lon: number, lat: number, z: number): { x: number; 
 // terrainProvider.ts) so this never builds a huge array even if something
 // upstream is bypassed. 512 comfortably covers a full MAX_SPAN_DEG (0.5°)
 // span at any realistic city latitude at ZOOM 13 (≈260 tiles at Amsterdam's
-// 52.37°, ≈442 at 70°N — Mercator's y-tile density grows with latitude, so
-// this is latitude-aware headroom, not just an equatorial estimate) while
-// staying ~130,000× smaller than a whole-world bbox (~67M tiles).
+// 52.37°, ≈455 at 70°N once tile-boundary alignment is accounted for —
+// Mercator's y-tile density grows with latitude, so this is latitude-aware
+// headroom, not just an equatorial estimate; the worst case only exceeds 512
+// past ≈72.6°N/S) while staying ~130,000× smaller than a whole-world bbox
+// (~67M tiles).
 export const MAX_TILES = 512;
 
 /** Every integer tile covering the bbox at zoom z. Throws if the bbox would

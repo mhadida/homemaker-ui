@@ -225,7 +225,10 @@ describe("groundNormalAt", () => {
     const n = groundNormalAt(10, 10, { slope: 0, azimuth: 0, hf: RAMP });
     expect(Math.hypot(...n)).toBeCloseTo(1, 9);
     expect(n[0]).toBeLessThan(0); // uphill is +x ⇒ normal leans −x
-    expect(n[1]).toBeGreaterThan(0.9);
+    // RAMP rises 10 m over 10 m — a 45° grade — so the up-component is
+    // exactly 1/√2 ≈ 0.707. (Do NOT assert `> 0.9`: that is unsatisfiable
+    // for this data.)
+    expect(n[1]).toBeCloseTo(1 / Math.SQRT2, 9);
   });
   it("falls back to the plane normal when hf is absent", () => {
     expect(groundNormalAt(0, 0, { slope: 0, azimuth: 0 })).toEqual([0, 1, 0]);
@@ -311,7 +314,12 @@ export function groundNormalAt(
   const nx = -hx;
   const nz = -hz;
   const len = Math.hypot(nx, 1, nz);
-  return [nx / len, 1 / len, nz / len];
+  // Normalise -0 to +0: over a perfectly flat heightfield hx/hz are +0, and
+  // negating gives -0, which `toEqual([0, 1, 0])` REJECTS (vitest compares
+  // primitives with Object.is, and Object.is(-0, 0) is false).
+  const ux = nx / len;
+  const uz = nz / len;
+  return [Object.is(ux, -0) ? 0 : ux, 1 / len, Object.is(uz, -0) ? 0 : uz];
 }
 ```
 
@@ -511,8 +519,13 @@ export function resampleToGrid(
   const width = xE - xW;
   const height = zN - zS;
   const spacing = Math.max(width, height) / (maxDim - 1);
-  const cols = Math.max(2, Math.ceil(width / spacing) + 1);
-  const rows = Math.max(2, Math.ceil(height / spacing) + 1);
+  let cols = Math.max(2, Math.ceil(width / spacing) + 1);
+  let rows = Math.max(2, Math.ceil(height / spacing) + 1);
+  // Clamp: `ceil(a / (a/(maxDim-1))) + 1` can round to maxDim+1 under
+  // floating-point error (measured on real city bboxes), which would break the
+  // ≤ maxDim grid-cap constraint. Math.min holds regardless of the rounding.
+  cols = Math.min(cols, maxDim);
+  rows = Math.min(rows, maxDim);
   const data: number[] = new Array(cols * rows);
   for (let iz = 0; iz < rows; iz++) {
     for (let ix = 0; ix < cols; ix++) {

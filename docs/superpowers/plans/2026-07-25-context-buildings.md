@@ -636,24 +636,30 @@ export default function ContextBuildings({
   );
   useEffect(() => () => merged?.geo.dispose(), [merged]);
 
+  // Drop a stale hover when the set changes (e.g. the hovered one was
+  // hidden) — DERIVED, not reset via a setState-in-effect round trip, which
+  // the react-hooks/set-state-in-effect rule rejects.
+  const validHovered = useMemo(
+    () => (hovered && shown.some((b) => b.id === hovered) ? hovered : null),
+    [hovered, shown],
+  );
+
   // A hovered building needs its own little geometry — you cannot tint one
   // building inside a merged mesh.
   const hoverGeo = useMemo(() => {
-    if (!onHide || !hovered) return null;
-    const b = shown.find((x) => x.id === hovered);
+    if (!onHide || !validHovered) return null;
+    const b = shown.find((x) => x.id === validHovered);
     return b ? buildMerged([b], ground).geo : null;
-  }, [onHide, hovered, shown, ground]);
+  }, [onHide, validHovered, shown, ground]);
   useEffect(() => () => hoverGeo?.dispose(), [hoverGeo]);
-
-  // Drop a stale hover when the set changes (e.g. the hovered one was hidden).
-  useEffect(() => {
-    if (hovered && !shown.some((b) => b.id === hovered)) setHovered(null);
-  }, [hovered, shown]);
 
   if (!visible || !merged) return null;
 
+  // `faceIndex` is typed `number | null | undefined` (see @types/three's
+  // Intersection) — a `=== undefined` check would leave `null` unnarrowed and
+  // index the array with it, so test for a number.
   const idAt = (e: ThreeEvent<PointerEvent | MouseEvent>): string | undefined =>
-    e.faceIndex === undefined ? undefined : merged.faceBuilding[e.faceIndex];
+    typeof e.faceIndex === "number" ? merged.faceBuilding[e.faceIndex] : undefined;
 
   return (
     <>
