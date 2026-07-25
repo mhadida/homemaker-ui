@@ -86,17 +86,6 @@ interface FacadeControlsProps {
   terrainImported?: boolean;
   streetWidth: number;
   onStreetWidth: (w: number) => void;
-  /** M2 context buildings — the section only renders when a place is loaded. */
-  contextLoaded?: boolean;
-  contextCount?: number;
-  contextVisible?: boolean;
-  onToggleContext?: () => void;
-  contextTruncated?: boolean;
-  contextTotal?: number;
-  contextLoading?: boolean;
-  contextError?: string | null;
-  hiddenCount?: number;
-  onRestoreHidden?: () => void;
 }
 
 function SliderRow({
@@ -245,16 +234,6 @@ export default function FacadeControls({
   terrainImported,
   streetWidth,
   onStreetWidth,
-  contextLoaded,
-  contextCount,
-  contextVisible,
-  onToggleContext,
-  contextTruncated,
-  contextTotal,
-  contextLoading,
-  contextError,
-  hiddenCount,
-  onRestoreHidden,
 }: FacadeControlsProps) {
   const update = (u: Partial<FacadeParams>) => onChange({ ...params, ...u });
   const L = FACADE_LIMITS;
@@ -761,50 +740,6 @@ export default function FacadeControls({
             step={5}
             onChange={(azimuth) => onGroundChange({ ...ground, azimuth })}
           />
-        </Section>
-      )}
-
-      {contextLoaded && (
-        <Section title="Context">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] text-[var(--muted)]">
-              {contextLoading
-                ? "Loading buildings…"
-                : `${(contextCount ?? 0).toLocaleString()} buildings`}
-            </span>
-            <button
-              type="button"
-              onClick={onToggleContext}
-              aria-pressed={contextVisible ?? true}
-              className={`text-[11px] px-2 py-0.5 rounded border transition-colors ${
-                contextVisible ?? true
-                  ? "border-[var(--accent)] text-[var(--accent)]"
-                  : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30"
-              }`}
-            >
-              {contextVisible ?? true ? "Shown" : "Hidden"}
-            </button>
-          </div>
-          {contextTruncated && (
-            <p className="text-[11px] text-[var(--muted)]">
-              Showing the first {(contextCount ?? 0).toLocaleString()} of{" "}
-              {(contextTotal ?? 0).toLocaleString()} — zoom into a smaller area for the rest.
-            </p>
-          )}
-          {contextError && (
-            <p className="text-[11px] text-red-400" role="alert">
-              Buildings unavailable: {contextError}
-            </p>
-          )}
-          {(hiddenCount ?? 0) > 0 && (
-            <button
-              type="button"
-              onClick={onRestoreHidden}
-              className="text-[11px] px-2 py-0.5 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30 transition-colors"
-            >
-              Restore hidden ({hiddenCount})
-            </button>
-          )}
         </Section>
       )}
     </div>
@@ -1527,5 +1462,85 @@ export function IntersectionInspector({
         )}
       </Section>
     </div>
+  );
+}
+
+/**
+ * M2 context buildings — visibility toggle, count, truncation notice, fetch
+ * error, and Restore hidden. Rendered by the page OUTSIDE the block/street/
+ * marquee selection ternary (Task 7 fix round 1): the primary M2 flow is
+ * "load a place, look at the backdrop" with nothing selected, so gating this
+ * behind a selection would make the count/toggle/truncation notice — and
+ * critically "Restore hidden", the only way to undo a demolition — all
+ * unreachable whenever nothing happens to be selected. Renders nothing
+ * unless `contextLoaded` (a place is loaded), so a scene with no place is
+ * byte-identical.
+ */
+export function ContextPanel({
+  contextLoaded,
+  contextCount,
+  contextVisible,
+  onToggleContext,
+  contextTruncated,
+  contextTotal,
+  contextLoading,
+  contextError,
+  hiddenCount,
+  onRestoreHidden,
+}: {
+  contextLoaded?: boolean;
+  contextCount?: number;
+  contextVisible?: boolean;
+  onToggleContext?: () => void;
+  contextTruncated?: boolean;
+  contextTotal?: number;
+  contextLoading?: boolean;
+  contextError?: string | null;
+  hiddenCount?: number;
+  onRestoreHidden?: () => void;
+}) {
+  if (!contextLoaded) return null;
+  return (
+    <Section title="Context">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] text-[var(--muted)]">
+          {contextLoading
+            ? "Loading buildings…"
+            : `${(contextCount ?? 0).toLocaleString()} buildings`}
+        </span>
+        <button
+          type="button"
+          onClick={onToggleContext}
+          aria-pressed={contextVisible ?? true}
+          className={`text-[11px] px-2 py-0.5 rounded border transition-colors ${
+            contextVisible ?? true
+              ? "border-[var(--accent)] text-[var(--accent)]"
+              : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30"
+          }`}
+        >
+          {contextVisible ?? true ? "Shown" : "Hidden"}
+        </button>
+      </div>
+      {contextTruncated && (
+        <p className="text-[11px] text-[var(--muted)]">
+          Showing the first {(contextCount ?? 0).toLocaleString()} of{" "}
+          {(contextTotal ?? 0).toLocaleString()} — zoom into a smaller area for the rest.
+        </p>
+      )}
+      {contextError && (
+        <p className="text-[11px] text-red-400" role="alert">
+          Buildings unavailable: {contextError}
+        </p>
+      )}
+      {(hiddenCount ?? 0) > 0 && (
+        <button
+          type="button"
+          onClick={onRestoreHidden}
+          className="text-[11px] px-2 py-0.5 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30 transition-colors"
+        >
+          Restore hidden ({hiddenCount})
+        </button>
+      )}
+    </Section>
   );
 }

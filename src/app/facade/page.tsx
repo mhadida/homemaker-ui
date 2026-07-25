@@ -80,6 +80,7 @@ import FacadeControls, {
   StreetInspector,
   IntersectionInspector,
   SquareInspector,
+  ContextPanel,
 } from "@/components/facade/FacadeControls";
 import PromptInput from "@/components/demo/PromptInput";
 
@@ -1438,6 +1439,22 @@ export default function FacadePage() {
 
         <div className="w-full md:w-80 border-t md:border-t-0 md:border-l border-[var(--border)] bg-[var(--panel-bg)] overflow-y-auto">
           <div className="p-4 space-y-5">
+            {/* Context (M2) is rendered above the selection ternary — the
+             * primary flow is "load a place, look at the backdrop" with
+             * nothing selected, so it must not depend on what (if anything)
+             * is selected below. Gated internally on `contextLoaded`. */}
+            <ContextPanel
+              contextLoaded={!!bbox}
+              contextCount={contextBuildings.length}
+              contextVisible={contextVisible}
+              onToggleContext={() => setContextVisible((v) => !v)}
+              contextTruncated={!!buildingsInfo?.truncated}
+              contextTotal={buildingsInfo?.total ?? 0}
+              contextLoading={buildingsLoading}
+              contextError={buildingsError}
+              hiddenCount={hiddenIds.size}
+              onRestoreHidden={handleRestoreHidden}
+            />
             {marquee ? (
               <MarqueeControls
                 marquee={marquee}
@@ -1511,16 +1528,6 @@ export default function FacadePage() {
                   terrainImported={!!ground.hf}
                   streetWidth={streetWidth}
                   onStreetWidth={setStreetWidth}
-                  contextLoaded={!!bbox}
-                  contextCount={contextBuildings.length}
-                  contextVisible={contextVisible}
-                  onToggleContext={() => setContextVisible((v) => !v)}
-                  contextTruncated={!!buildingsInfo?.truncated}
-                  contextTotal={buildingsInfo?.total ?? 0}
-                  contextLoading={buildingsLoading}
-                  contextError={buildingsError}
-                  hiddenCount={hiddenIds.size}
-                  onRestoreHidden={handleRestoreHidden}
                 />
               </>
             ) : (
