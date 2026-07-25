@@ -469,7 +469,14 @@ export default function FacadePage() {
   const handleClearTerrain = useCallback(() => {
     // Invalidate any in-flight buildings fetch — otherwise it can resolve
     // after this clear and repopulate contextBuildings on a bbox-less scene.
+    // Also reset buildingsLoading directly: bumping the token makes the
+    // in-flight fetch's own `finally` a no-op (stale token), so nothing else
+    // would ever clear the flag — it would otherwise stay stuck `true` and
+    // resurface as a permanent "Loading buildings…" if a later document
+    // (bbox valid, anchor missing/malformed — deserializeScene validates them
+    // independently) repopulates `bbox` without starting a new fetch.
     buildingsReqRef.current++;
+    setBuildingsLoading(false);
     setGround((g) => ({ slope: g.slope, azimuth: g.azimuth })); // drop hf
     setAnchor(null);
     setBbox(null);
