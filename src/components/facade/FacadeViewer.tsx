@@ -43,7 +43,14 @@ import type { Ground } from "@/lib/facade/terrain";
 import { groundHeightAt } from "@/lib/facade/terrain";
 import { walkStep, EYE_HEIGHT, type WalkKeys } from "@/lib/facade/walk";
 import { snapToGridAxis } from "@/lib/facade/grid";
-import { ORBIT_MAX_DISTANCE, PERSPECTIVE_FAR } from "@/lib/facade/clip";
+import {
+  ORBIT_MAX_DISTANCE,
+  PERSPECTIVE_FAR,
+  PLAN_CAM_Y,
+  PLAN_CAM_NEAR,
+  PLAN_CAM_FAR,
+  WALK_CATCHER_Y,
+} from "@/lib/facade/clip";
 import { marqueeEmpty, type Marquee } from "@/lib/facade/marquee";
 import {
   streetLines,
@@ -1525,7 +1532,7 @@ function PlanPane({
     [fit.cx, fit.cz],
   );
   const camPosition = useMemo<[number, number, number]>(
-    () => [fit.cx, 60, fit.cz - 2],
+    () => [fit.cx, PLAN_CAM_Y, fit.cz - 2],
     [fit.cx, fit.cz],
   );
   return (
@@ -1613,8 +1620,8 @@ function PlanPane({
         position={camPosition}
         up={[0, 0, -1]}
         zoom={zoom}
-        near={0.1}
-        far={200}
+        near={PLAN_CAM_NEAR}
+        far={PLAN_CAM_FAR}
       />
       {/* Keep the control ENABLED so wheel-zoom always works (even while
        * drawing / node-dragging / marquee-dragging); gate only PAN so a
@@ -1663,15 +1670,17 @@ function WalkStartSurface({
   const heading = preview ? Math.atan2(preview.tangent[0], preview.tangent[1]) : 0;
   return (
     <>
-      {/* The catcher floats HIGH (just under the plan camera at y=60, above
-       * every building/roof/turret) so in the top-down ortho view it is the
-       * nearest interactive hit for every click — its stopPropagation then
-       * wins over lot/street selection, making the whole plan pane a modal
-       * pick surface. Rays are vertical, so the reported x/z are unaffected
-       * by the height. */}
+      {/* The catcher floats HIGH (just under the plan camera's near plane,
+       * above every building/roof/turret — including imported real-city
+       * buildings, which is why the height is derived from
+       * MAX_BUILDING_HEIGHT rather than hardcoded) so in the top-down ortho
+       * view it is the nearest interactive hit for every click — its
+       * stopPropagation then wins over lot/street/context-building selection,
+       * making the whole plan pane a modal pick surface. Rays are vertical,
+       * so the reported x/z are unaffected by the height. */}
       <mesh
         rotation={[-Math.PI / 2, 0, 0]}
-        position={[0, 50, 0]}
+        position={[0, WALK_CATCHER_Y, 0]}
         onPointerMove={(e) => {
           e.stopPropagation();
           setPreview(nearestPointOnStreets([e.point.x, e.point.z], network));

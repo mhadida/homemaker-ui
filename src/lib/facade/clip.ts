@@ -38,3 +38,49 @@ export function perspectiveFar(
 
 /** The live far plane, precomputed. */
 export const PERSPECTIVE_FAR = perspectiveFar();
+
+/* ── Plan-pane heights ──────────────────────────────────────────────────────
+ * Same failure mode as `far` above, one milestone later. The top-down plan
+ * camera (y = 60) and the Walk pick-surface (y = 50) were sized when the
+ * tallest thing in the world was a ~20 m hand-drawn facade. Real-city import
+ * broke that: one Rotterdam bbox alone holds buildings at 106 m, 95 m and
+ * 75 m, so roofs were clipped by the camera's NEAR plane (leaving the
+ * double-sided wall interior showing) and were unclickable — an orthographic
+ * ray starts at the near plane — while buildings above the catcher stole the
+ * clicks that were meant to place a walk start. Derive both from the tallest
+ * building the world supports so they cannot drift below the geometry again. */
+
+/** Tallest building the world is expected to contain (m). The Burj Khalifa is
+ * 828 m, so this clears every building on Earth. Nothing clamps building
+ * heights TO this — it is the headroom the cameras are sized against. */
+export const MAX_BUILDING_HEIGHT = 1000;
+
+/** How far below the y = 0 datum real terrain may dip (m). The Dead Sea shore
+ * is ≈ −430 m, so this covers any land surface. */
+export const MAX_TERRAIN_DEPTH = 1000;
+
+/** Slack (m) between the tallest building, the Walk catcher, and the camera. */
+const PLAN_CAM_MARGIN = 50;
+
+/** Near plane of the top-down plan camera. Exported so the "nothing pokes
+ * above the near plane" invariant is testable rather than implicit. */
+export const PLAN_CAM_NEAR = 0.1;
+
+/** Height of the top-down plan camera. An orthographic camera's apparent size
+ * comes from `zoom`, not distance, so lifting it above the tallest building
+ * costs nothing visually — and ortho depth is LINEAR, so the wider near..far
+ * range barely moves depth precision (≈0.1 mm over the full span at 24-bit,
+ * still orders of magnitude finer than the ~5 mm that separates the flat
+ * ground layers). */
+export const PLAN_CAM_Y = MAX_BUILDING_HEIGHT + PLAN_CAM_MARGIN;
+
+/** Far plane of the plan camera: measured from the camera, so it must span the
+ * whole drop from PLAN_CAM_Y past the lowest ground. */
+export const PLAN_CAM_FAR = PLAN_CAM_Y + MAX_TERRAIN_DEPTH;
+
+/** Height of the Walk pick-surface plane: above every building, so in the
+ * top-down view it is the nearest hit for every click and its stopPropagation
+ * wins over lot/street/context-building selection — but below the camera's
+ * near plane, or it would be clipped and catch nothing at all. Rays are
+ * vertical, so the reported x/z are unaffected by the height. */
+export const WALK_CATCHER_Y = MAX_BUILDING_HEIGHT + PLAN_CAM_MARGIN / 2;
