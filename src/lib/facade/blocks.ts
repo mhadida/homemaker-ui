@@ -46,6 +46,13 @@ export interface FacadeBlock {
   /** Set on blocks auto-derived from a street edge (SP-2c). Absent on
    * hand-drawn blocks. Drives street-driven regeneration/refit. */
   source?: { streetId: string; segment: number; part: number; side: "left" | "right" };
+  /** Set on blocks promoted from an imported real footprint (M4). The real
+   * parcel polygon in local metres, the source OSM id, and the CLAMPED plot
+   * depth. Depth is stored rather than re-derived because the parcel is fixed
+   * while the block line is not: after a node drag, re-deriving would change
+   * a depth whose plot has not moved. Absent on drawn and street-derived
+   * blocks — absent means every M4 path is skipped. */
+  parcel?: { source: string; outline: [number, number][]; depth: number };
 }
 
 export interface Selection {
@@ -185,4 +192,27 @@ export function snapPoint(
     }
   }
   return best;
+}
+
+/** Force every lot of a PROMOTED block back onto its parcel depth, with no
+ * depth jitter. `generateLot` redraws `massingDepth` from 6-12 m, and both
+ * `rerollBlock` and `refit` call it — without this, a reroll or a node drag
+ * would push the building out through the back of its own parcel outline.
+ * Depth is plot geometry, not generated character. A block with no `parcel`
+ * is returned by identity, so this is free on every drawn block. Pure. */
+export function applyParcelDepth(block: FacadeBlock): FacadeBlock {
+  const parcel = block.parcel;
+  if (!parcel) return block;
+  const needsFix = block.lots.some(
+    (l) => l.params.massingDepth !== parcel.depth || l.depthOffset !== 0,
+  );
+  if (!needsFix) return block;
+  return {
+    ...block,
+    lots: block.lots.map((l) => ({
+      ...l,
+      params: { ...l.params, massingDepth: parcel.depth },
+      depthOffset: 0,
+    })),
+  };
 }

@@ -7,9 +7,11 @@ import {
   initialWorld,
   snapPoint,
   DEFAULT_GEN,
+  applyParcelDepth,
   type FacadeBlock,
 } from "./blocks";
 import { DEFAULT_FACADE } from "./types";
+import { rerollBlock } from "./generate";
 
 const lot = (width: number) => ({
   params: { ...DEFAULT_FACADE, width },
@@ -123,5 +125,69 @@ describe("initialWorld / snapPoint", () => {
     const blocks = [block({})]; // endpoints (-5,0) and (5,0)
     expect(snapPoint([4.4, 0.5], blocks, 1)).toEqual([5, 0]);
     expect(snapPoint([3, 3], blocks, 1)).toEqual([3, 3]);
+  });
+});
+
+// --- M4: promoted blocks carry a real parcel ----------------------------
+
+const promoted = (): FacadeBlock => ({
+  ...initialWorld({ ...DEFAULT_FACADE, width: 12 }),
+  parcel: {
+    source: "way/1",
+    outline: [
+      [0, 0],
+      [12, 0],
+      [12, 5],
+      [0, 5],
+    ],
+    depth: 5,
+  },
+});
+
+describe("applyParcelDepth", () => {
+  it("forces every lot onto the parcel depth with no jitter", () => {
+    const b = promoted();
+    b.lots[0].params = { ...b.lots[0].params, massingDepth: 11 };
+    b.lots[0].depthOffset = 0.09;
+    const out = applyParcelDepth(b);
+    expect(out.lots[0].params.massingDepth).toBe(5);
+    expect(out.lots[0].depthOffset).toBe(0);
+  });
+
+  it("returns a block with no parcel untouched, by identity", () => {
+    const b = initialWorld({ ...DEFAULT_FACADE });
+    expect(applyParcelDepth(b)).toBe(b);
+  });
+
+  it("returns an already-correct promoted block by identity", () => {
+    const b = applyParcelDepth(promoted());
+    expect(applyParcelDepth(b)).toBe(b);
+  });
+
+  it("does not mutate its input", () => {
+    const b = promoted();
+    b.lots[0].params = { ...b.lots[0].params, massingDepth: 11 };
+    applyParcelDepth(b);
+    expect(b.lots[0].params.massingDepth).toBe(11);
+  });
+});
+
+describe("rerollBlock on a promoted block", () => {
+  it("keeps the parcel depth instead of redrawing 6-12 m", () => {
+    const out = rerollBlock(promoted(), 4242);
+    expect(out.lots[0].params.massingDepth).toBe(5);
+    expect(out.lots[0].depthOffset).toBe(0);
+  });
+
+  it("still rerolls the building's character", () => {
+    const after = rerollBlock(promoted(), 4242);
+    expect(after.lots[0].params.storeys).toBeDefined();
+    expect(after.seed).toBe(4242);
+  });
+
+  it("leaves a NON-promoted block's generated depth and jitter alone", () => {
+    const plain = rerollBlock(initialWorld({ ...DEFAULT_FACADE }), 4242);
+    expect(plain.lots[0].params.massingDepth).toBeGreaterThanOrEqual(6);
+    expect(plain.lots[0].params.massingDepth).toBeLessThanOrEqual(12);
   });
 });

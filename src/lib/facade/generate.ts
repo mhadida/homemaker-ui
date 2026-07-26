@@ -2,7 +2,7 @@ import type { FacadeParams, WindowStyleId } from "./types";
 import { DEFAULT_FACADE, FACADE_PRESETS, DOOR_SWATCHES } from "./types";
 import { WALL_SWATCHES, classicalStoreyHeights } from "@/lib/building/types";
 import type { BlockGenSettings, FacadeBlock, LotState } from "./blocks";
-import { blockFrame } from "./blocks";
+import { applyParcelDepth, blockFrame } from "./blocks";
 
 /** Deterministic PRNG (mulberry32) — same seed, same street. */
 export function mulberry32(seed: number): () => number {
@@ -154,7 +154,10 @@ export function generateBlock(
 
 /** New seed regenerates ONLY unpinned lots; widths and pinned lots persist. */
 export function rerollBlock(block: FacadeBlock, seed: number): FacadeBlock {
-  return {
+  // applyParcelDepth: generateLot redraws massingDepth from 6-12 m, which
+  // would push a PROMOTED building out through the back of its own parcel.
+  // Identity on every non-promoted block, so drawn blocks are unaffected.
+  return applyParcelDepth({
     ...block,
     seed,
     lots: block.lots.map((lot, i) =>
@@ -170,7 +173,7 @@ export function rerollBlock(block: FacadeBlock, seed: number): FacadeBlock {
             depthOffset: offsetFor(seed, i, block.gen.depthJitter),
           },
     ),
-  };
+  });
 }
 
 const REFIT_EPS = 1e-6;
@@ -202,7 +205,7 @@ export function refit(
     const delta = target - sum;
     if (Math.abs(delta) < REFIT_EPS) {
       const lots = movedAtTail ? arr : arr.reverse();
-      return { ...block, lots };
+      return applyParcelDepth({ ...block, lots });
     }
     let i = arr.length - 1;
     while (i >= 0 && arr[i].customized) i--;
@@ -242,7 +245,7 @@ export function refit(
     }));
     arr.splice(i + 1, 0, ...newLots);
     const lots = movedAtTail ? arr : arr.reverse();
-    return { ...block, lots };
+    return applyParcelDepth({ ...block, lots });
   }
   return null;
 }
