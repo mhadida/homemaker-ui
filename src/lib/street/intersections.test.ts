@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { deriveIntersections, moveStreetNode, pruneRoundabouts } from "./intersections";
-import type { StreetNetwork } from "./types";
+import type { Intersection } from "./intersections";
+import type { StreetNetwork, Street, Vec2 } from "./types";
 
 const net = (streets: StreetNetwork["streets"]): StreetNetwork => ({ streets, roundabouts: [] });
 
@@ -242,5 +243,177 @@ describe("moveStreetNode", () => {
     ]);
     // moving the last vertex onto the first would collapse the closing segment
     expect(moveStreetNode(before, [0, 20], [0, 0.5])).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression guard for the spatial-grid refactor: a verbatim, independent
+// brute-force O(vertices×segments + segments²) reference — the exact
+// algorithm `deriveIntersections` used before it was bucketed through a grid
+// — compared against the (now bucketed) real implementation on a moderately
+// large synthetic network. If a future change to the grid ever silently
+// drops or duplicates a candidate, this is what catches it.
+function bruteForceDeriveIntersections(net: StreetNetwork): Intersection[] {
+  const WELD = 1e-6;
+  const ON_SEG = 1e-4;
+  const keyOf = (p: Vec2) => `${p[0]}:${p[1]}`;
+  const roundKey = (p: Vec2) =>
+    `${Math.round(p[0] / ON_SEG) * ON_SEG}:${Math.round(p[1] / ON_SEG) * ON_SEG}`;
+  const byKey = new Map<string, Intersection>();
+  const add = (
+    key: string,
+    pos: Vec2,
+    kind: Intersection["kind"],
+    inc: { streetId: string; vertex: number },
+  ) => {
+    let e = byKey.get(key);
+    if (!e) {
+      e = { key, pos, kind, incident: [] };
+      byKey.set(key, e);
+    }
+    if (!e.incident.some((i) => i.streetId === inc.streetId && i.vertex === inc.vertex)) {
+      e.incident.push(inc);
+    }
+    return e;
+  };
+  const nearExisting = (p: Vec2) =>
+    [...byKey.values()].some(
+      (e) => Math.abs(e.pos[0] - p[0]) < ON_SEG && Math.abs(e.pos[1] - p[1]) < ON_SEG,
+    );
+
+  const closestPointOnSegment = (p: Vec2, a: Vec2, b: Vec2) => {
+    const abx = b[0] - a[0], abz = b[1] - a[1];
+    const denom = abx * abx + abz * abz;
+    let t = denom === 0 ? 0 : ((p[0] - a[0]) * abx + (p[1] - a[1]) * abz) / denom;
+    t = Math.max(0, Math.min(1, t));
+    const point: Vec2 = [a[0] + abx * t, a[1] + abz * t];
+    return { point, t, dist: Math.hypot(p[0] - point[0], p[1] - point[1]) };
+  };
+
+  const segCross = (p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2): Vec2 | null => {
+    const d1x = p2[0] - p1[0], d1z = p2[1] - p1[1];
+    const d2x = p4[0] - p3[0], d2z = p4[1] - p3[1];
+    const denom = d1x * d2z - d1z * d2x;
+    if (Math.abs(denom) < WELD) return null;
+    const s = ((p3[0] - p1[0]) * d2z - (p3[1] - p1[1]) * d2x) / denom;
+    const t = ((p3[0] - p1[0]) * d1z - (p3[1] - p1[1]) * d1x) / denom;
+    const e = ON_SEG;
+    if (s > e && s < 1 - e && t > e && t < 1 - e) return [p1[0] + s * d1x, p1[1] + s * d1z];
+    return null;
+  };
+
+  // Pass 1 — shared vertices.
+  const vByKey = new Map<string, { pos: Vec2; inc: { streetId: string; vertex: number }[] }>();
+  for (const s of net.streets) {
+    s.points.forEach((p, vertex) => {
+      const k = keyOf(p);
+      let v = vByKey.get(k);
+      if (!v) { v = { pos: [p[0], p[1]], inc: [] }; vByKey.set(k, v); }
+      v.inc.push({ streetId: s.id, vertex });
+    });
+  }
+  for (const [k, v] of vByKey) {
+    if (new Set(v.inc.map((i) => i.streetId)).size >= 2) {
+      for (const i of v.inc) add(k, v.pos, "node", i);
+    }
+  }
+
+  // Pass 2 — T junctions, brute O(vertices × segments).
+  for (const a of net.streets) {
+    a.points.forEach((v, vertex) => {
+      if (byKey.has(keyOf(v))) return;
+      for (const b of net.streets) {
+        if (b.id === a.id) continue;
+        for (let j = 0; j < b.points.length - 1; j++) {
+          const b0 = b.points[j], b1 = b.points[j + 1];
+          if (
+            (Math.abs(v[0] - b0[0]) < WELD && Math.abs(v[1] - b0[1]) < WELD) ||
+            (Math.abs(v[0] - b1[0]) < WELD && Math.abs(v[1] - b1[1]) < WELD)
+          ) continue;
+          const c = closestPointOnSegment(v, b0, b1);
+          if (c.dist < ON_SEG && c.t > ON_SEG && c.t < 1 - ON_SEG) {
+            add(keyOf(v), [v[0], v[1]], "t", { streetId: a.id, vertex });
+            add(keyOf(v), [v[0], v[1]], "t", { streetId: b.id, vertex: j });
+          }
+        }
+      }
+    });
+  }
+
+  // Pass 3 — X junctions, brute O(segments²).
+  const streets = net.streets;
+  for (let ai = 0; ai < streets.length; ai++) {
+    for (let bi = ai + 1; bi < streets.length; bi++) {
+      const a = streets[ai], b = streets[bi];
+      for (let i = 0; i < a.points.length - 1; i++) {
+        for (let j = 0; j < b.points.length - 1; j++) {
+          const p = segCross(a.points[i], a.points[i + 1], b.points[j], b.points[j + 1]);
+          if (!p) continue;
+          const k = roundKey(p);
+          if (byKey.has(k) || nearExisting(p)) continue;
+          add(k, p, "x", { streetId: a.id, vertex: i });
+          add(k, p, "x", { streetId: b.id, vertex: j });
+        }
+      }
+    }
+  }
+  return [...byKey.values()];
+}
+
+/** Normalizes an intersections list so array-order differences (junction
+ * order, incident order) that neither implementation guarantees don't fail
+ * an otherwise-correct comparison. */
+function normalizeIntersections(list: Intersection[]) {
+  return list
+    .map((it) => ({
+      kind: it.kind,
+      pos: [Math.round(it.pos[0] * 1e6) / 1e6, Math.round(it.pos[1] * 1e6) / 1e6],
+      incident: [...it.incident]
+        .sort((a, b) => a.streetId.localeCompare(b.streetId) || a.vertex - b.vertex),
+    }))
+    .sort(
+      (a, b) => a.pos[0] - b.pos[0] || a.pos[1] - b.pos[1] || a.kind.localeCompare(b.kind),
+    );
+}
+
+/** A 15×15 grid of horizontal/vertical streets (shared-endpoint corner
+ * "node"s, dozens of interior-interior "x" grid crossings), three long
+ * diagonals cutting across at non-grid-aligned angles (more "x"s, at
+ * positions that stress the roundKey/grid-cell-boundary logic), and several
+ * short stub streets ending mid-span of a grid line (isolated "t"s). Fully
+ * deterministic (no Math.random) — same network every run. */
+function syntheticStreetGridNetwork(): StreetNetwork {
+  const streets: Street[] = [];
+  const N = 15;
+  const spacing = 10;
+  const span = (N - 1) * spacing;
+  for (let r = 0; r < N; r++) {
+    streets.push({ id: `h${r}`, type: "street", points: [[0, r * spacing], [span, r * spacing]] });
+  }
+  for (let c = 0; c < N; c++) {
+    streets.push({ id: `v${c}`, type: "street", points: [[c * spacing, 0], [c * spacing, span]] });
+  }
+  streets.push({ id: "diag1", type: "road", points: [[-5, -5], [span + 5, span + 5]] });
+  streets.push({ id: "diag2", type: "road", points: [[span + 5, -5], [-5, span + 5]] });
+  streets.push({ id: "diag3", type: "boulevard", points: [[10, -10], [span - 20, span + 10]] });
+  // Stubs ending mid-span of a horizontal line at a non-grid-aligned x — pure
+  // T junctions, no coincidence with a vertical column.
+  const stubs: [number, number][] = [[15, 30], [55, 70], [95, 20], [25, 110]];
+  stubs.forEach(([x, z], i) => {
+    streets.push({ id: `stub${i}`, type: "alley", points: [[x, z - 10], [x, z]] });
+  });
+  return { streets, roundabouts: [] };
+}
+
+describe("deriveIntersections — matches a brute-force reference (grid regression guard)", () => {
+  it("a 15x15 grid + diagonals + stub T's derives identically to the pre-grid brute force", () => {
+    const network = syntheticStreetGridNetwork();
+    const fast = normalizeIntersections(deriveIntersections(network));
+    const reference = normalizeIntersections(bruteForceDeriveIntersections(network));
+    expect(fast).toEqual(reference);
+    // Sanity: the synthetic network actually exercises all three kinds.
+    expect(reference.some((i) => i.kind === "node")).toBe(true);
+    expect(reference.some((i) => i.kind === "t")).toBe(true);
+    expect(reference.some((i) => i.kind === "x")).toBe(true);
   });
 });
