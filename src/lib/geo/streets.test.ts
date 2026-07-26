@@ -6,13 +6,14 @@ const ANCHOR: GeoAnchor = { lat0: 52.37, lon0: 4.89 };
 
 describe("classifyWay", () => {
   it("maps the arterial classes to boulevard", () => {
-    for (const h of ["motorway", "trunk", "primary", "primary_link"]) {
+    for (const h of ["motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link"]) {
       expect(classifyWay({ highway: h })?.type).toBe("boulevard");
     }
   });
-  it("maps secondary/tertiary to road", () => {
-    expect(classifyWay({ highway: "secondary" })?.type).toBe("road");
-    expect(classifyWay({ highway: "tertiary" })?.type).toBe("road");
+  it("maps secondary/tertiary (+_link) to road", () => {
+    for (const h of ["secondary", "secondary_link", "tertiary", "tertiary_link"]) {
+      expect(classifyWay({ highway: h })?.type).toBe("road");
+    }
   });
   it("maps the local classes to street", () => {
     for (const h of ["residential", "unclassified", "living_street", "busway"]) {
