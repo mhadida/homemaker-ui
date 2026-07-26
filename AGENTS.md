@@ -31,11 +31,19 @@ Four parts work together:
 
 **Tests:** vitest covers the pure facade modules — layout engine (incl. section strips), prompt parser, street generator (`refit`/`deleteLot`), node welding, corner detection/sync/miters, section edit helpers, street-aware orientation, and marquee hit-test/delete/translate (`src/lib/facade/*.test.ts`) — plus the standalone street-network module: centreline smoothing, ribbon offsets, roundabout rings, derived intersections, and the Krier/Alexander advisory (`src/lib/street/*.test.ts`) — run `npm test`. Real-city import adds `src/lib/geo/*.test.ts` (projection, DEM
 decode/resample, OSM→building/street mapping, way merging, Overpass failover +
-cache, request validation) and the demo-fixture guard. No e2e/playwright;
+cache, request validation), parcel frontage-fitting and promote/subdivide/merge
+(`src/lib/geo/parcel.test.ts`, `src/lib/facade/promote.test.ts`), and two
+fixture guards — the demo-fixture shape/anchor check and a `fitFrontage` sweep
+over all 1,585 real footprints. No e2e/playwright;
 everything else is verified visually — **and in this codebase the bugs that
 mattered were only findable by running the app** (a 0-height picker map, a
-missing Overpass User-Agent, a 1.8 s-per-frame drag freeze), so treat a green
-suite as necessary, not sufficient.
+missing Overpass User-Agent, a 1.8 s-per-frame drag freeze, an uncaught
+localStorage `QuotaExceededError` that killed the editor on reload), so treat a
+green suite as necessary, not sufficient. A green suite is not even sufficient
+for *correctness*: the M4 frontage fitter passed a 99.3% fixture guard while
+putting every canal house's facade on its party wall, because the guard
+measured whether a frontage was produced, not whether it was the right one.
+Assert the property you actually care about.
 
 ## Blender is NOT a runtime dependency of the web app
 
@@ -95,6 +103,7 @@ src/
       corners.ts       — corner detection (turn/convexity), shell sync, miters
       sections.ts      — facade-section edit helpers (canonical writes, AI patterns)
       grid.ts          — rectilinear drawing grid: lattice snap + 90° axis lock
+      promote.ts       — real footprint → editable block (M4); subdivide/merge
       clip.ts          — world size (GROUND_HALF), perspective far plane, and the
                          plan-camera / walk-catcher heights derived from
                          MAX_BUILDING_HEIGHT (real buildings exceed the old y=60)
@@ -108,6 +117,7 @@ src/
       streetProvider.ts  — StreetProvider + Overpass adapter (network)
       overpass.ts      — shared Overpass client: mirror failover + TTL cache
       demoPlace.ts     — the committed offline Amsterdam fixture's bbox/anchor
+      parcel.ts        — real parcel polygon → frontage line, facing, depth
   types/
     mapbox-gl-draw.d.ts — Type declarations (legacy, unused; the real map UI is
                           PlacePicker.tsx on maplibre-gl)
@@ -432,7 +442,7 @@ NOT involved; every edit is live (no Update button). Spec:
   radius-limited fillet + topography draping) +
   `docs/superpowers/specs/2026-07-21-junction-pad-design.md` (trim + pad).
 
-## Real-city import (M1–M3)
+## Real-city import (M1–M4)
 
 Pick a real place on a map and the scene becomes that place: its **terrain**,
 its **buildings**, its **streets and canals** — then design into it. Specs:
@@ -477,6 +487,23 @@ its **buildings**, its **streets and canals** — then design into it. Specs:
   `npm run fixture:amsterdam`; `src/lib/geo/demoPlace.test.ts` fails loudly if
   the fixture and its anchor drift apart.
 
+- **M4 promote to an editable lot** — click an imported footprint (Select tool)
+  and the **Context building** inspector offers **Promote to lot** or
+  **Demolish**. Promotion takes the PLOT from reality — frontage line, facing,
+  width, depth (`src/lib/geo/parcel.ts` → `src/lib/facade/promote.ts`, both
+  pure) — and the building from the generator (storeys, style, roof, colour).
+  The real polygon rides on `FacadeBlock.parcel` and draws as a dashed,
+  ground-draped plot boundary; the rectangular-box engine is **untouched**, so
+  roofs, section strips, corners and basements all work on a promoted building
+  from day one. A reversible **Subdivide / Merge to one lot** action turns one
+  plot into a terrace and back (merge refuses when a lot is hand-edited rather
+  than discarding the work). Only 18% of real footprints are quads and even a
+  min-area **oriented** bbox misses ≥10% of plot area on 47% of them, which is
+  why the true polygon is stored rather than a rectangle. The parcel outline is
+  **fixed** — it does not follow the block, so seeing a building leave its plot
+  is information, not a bug. Spec:
+  `docs/superpowers/specs/2026-07-26-promote-footprint-design.md`.
+
 ### Hard-won rules (violating these has broken this app before)
 
 - **Overpass 406s any request without a `User-Agent`.** It also rate-limits
@@ -499,6 +526,36 @@ its **buildings**, its **streets and canals** — then design into it. Specs:
   never be collapsed**, or the two streets silently detach.
 - Cameras are sized from `MAX_BUILDING_HEIGHT` in `clip.ts`, not hardcoded:
   real buildings exceed the old plan camera (y=60) and walk catcher (y=50).
+- **A frontage is a CHAIN of edges, never one edge.** The longest single edge of
+  a real footprint is only ~31% of its perimeter (median), so "pick the longest
+  edge as the facade" does not work. `edgeChains` groups near-collinear runs
+  first — and a smooth ring with no corner at all (footprints run to 162
+  vertices) falls back to one chain per edge, because the wrap-around chain it
+  would otherwise emit has zero length.
+- **Scoring a frontage on length and distance alone puts the facade on the
+  party wall.** A 25 m side wall outscores a 6 m canal frontage, and distance
+  cannot fix it because a long edge running away from the street is still close
+  to it at one end. `fitFrontage` multiplies by a **facing** term. The
+  length-only version still "succeeded" on 99.3% of the fixture — success
+  measures whether a frontage was produced, not whether it was the right one —
+  while reporting a median 13.9 m wide × 6.0 m deep, i.e. Amsterdam backwards.
+  With facing: 6.5 m × 12.5 m, which is what a canal house is.
+- **Never assume a footprint's winding.** Real OSM ways wind both ways, so the
+  outward normal must come from the signed area, per polygon.
+- **`generateLot` redraws `massingDepth` from 6–12 m**, and both `rerollBlock`
+  and `refit` call it — so a promoted block's depth must be re-pinned through
+  `applyParcelDepth`, or a reroll or node drag silently pushes the building out
+  through the back of its own parcel.
+- **Promoted buildings are suppressed by a DERIVED set** (`blocks` →
+  `parcel.source`), not by `hiddenIds` — which is what stops "Restore hidden"
+  resurrecting a grey copy on top of a promoted block, and makes deleting the
+  block bring the real building back.
+- **The autosave must never throw.** It writes inside a timeout, so an uncaught
+  `QuotaExceededError` escapes as an unhandled error and kills the React tree.
+  It serializes **compact** (`toCompactJSON`, not the indented `toJSON` used for
+  downloads) and the `setItem` is wrapped: the bulk is LOTS (~541 chars each),
+  and auto-buildings over 212 imported streets generates thousands, so a large
+  enough scene overflows any budget.
 
 ## Tailwind v4
 
