@@ -1487,6 +1487,11 @@ export function ContextPanel({
   contextError,
   hiddenCount,
   onRestoreHidden,
+  streetCount,
+  streetsLoading,
+  streetsTruncated,
+  streetsTotal,
+  streetsError,
 }: {
   contextLoaded?: boolean;
   contextCount?: number;
@@ -1498,6 +1503,11 @@ export function ContextPanel({
   contextError?: string | null;
   hiddenCount?: number;
   onRestoreHidden?: () => void;
+  streetCount?: number;
+  streetsLoading?: boolean;
+  streetsTruncated?: boolean;
+  streetsTotal?: number;
+  streetsError?: string | null;
 }) {
   if (!contextLoaded) return null;
   return (
@@ -1540,6 +1550,24 @@ export function ContextPanel({
         >
           Restore hidden ({hiddenCount})
         </button>
+      )}
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] text-[var(--muted)]">
+          {streetsLoading
+            ? "Loading streets…"
+            : `${(streetCount ?? 0).toLocaleString()} streets`}
+        </span>
+      </div>
+      {streetsTruncated && (
+        <p className="text-[11px] text-[var(--muted)]">
+          Showing the first {(streetCount ?? 0).toLocaleString()} of{" "}
+          {(streetsTotal ?? 0).toLocaleString()} streets — zoom into a smaller area for the rest.
+        </p>
+      )}
+      {streetsError && (
+        <p className="text-[11px] text-red-400" role="alert">
+          Streets unavailable: {streetsError}
+        </p>
       )}
     </Section>
   );

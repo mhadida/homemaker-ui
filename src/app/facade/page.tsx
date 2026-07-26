@@ -367,14 +367,8 @@ export default function FacadePage() {
 
   // Request token for `loadStreets`, same reasoning as `buildingsReqRef`.
   const streetsReqRef = useRef(0);
-  // No UI consumer yet — Task 5 wires these into the Context panel
-  // (ContextPanel `streetsLoading`/`streetsError`/`streetsTruncated`/
-  // `streetsTotal` props), which will remove these disables.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [streetsLoading, setStreetsLoading] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [streetsError, setStreetsError] = useState<string | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [streetsInfo, setStreetsInfo] = useState<{ truncated: boolean; total: number } | null>(null);
 
   /** Fetch real streets + canals for a bbox and adopt them as the network.
@@ -1539,6 +1533,11 @@ export default function FacadePage() {
               contextError={buildingsError}
               hiddenCount={hiddenIds.size}
               onRestoreHidden={handleRestoreHidden}
+              streetCount={streetNetwork.streets.length}
+              streetsLoading={streetsLoading}
+              streetsTruncated={!!streetsInfo?.truncated}
+              streetsTotal={streetsInfo?.total ?? 0}
+              streetsError={streetsError}
             />
             {marquee ? (
               <MarqueeControls
