@@ -22,6 +22,7 @@ import {
   mergeFacadeParams,
 } from "@/lib/facade/prompt-parser";
 import {
+  blockFrame,
   syncLineToLots,
   nextBlockId,
   reserveBlockIds,
@@ -40,7 +41,7 @@ import {
 } from "@/lib/facade/document";
 import { syncStreetBlocks } from "@/lib/facade/streetBlocks";
 import { rerollBlock, generateBlock, deleteLot } from "@/lib/facade/generate";
-import { promoteParcel } from "@/lib/facade/promote";
+import { mergeBlock, promoteParcel, subdivideBlock } from "@/lib/facade/promote";
 import { parcelArea } from "@/lib/geo/parcel";
 import { moveNode, deriveNodes } from "@/lib/facade/nodes";
 import { DEFAULT_GROUND, type Ground, type Heightfield } from "@/lib/facade/terrain";
@@ -1035,6 +1036,31 @@ export default function FacadePage() {
     updateSelectedBlock((b) => rerollBlock(b, seed));
   }, [updateSelectedBlock]);
 
+  /** M4 — split one lot into a terrace and back. `?? b` keeps the block
+   * unchanged if the pure op declines; the buttons below only render when it
+   * would succeed, so that is belt-and-braces. */
+  const handleSubdivide = useCallback(() => {
+    const seed = Math.floor(Math.random() * 1e9);
+    updateSelectedBlock((b) => subdivideBlock(b, seed) ?? b);
+  }, [updateSelectedBlock]);
+
+  const handleMerge = useCallback(() => {
+    const seed = Math.floor(Math.random() * 1e9);
+    updateSelectedBlock((b) => mergeBlock(b, seed) ?? b);
+  }, [updateSelectedBlock]);
+
+  /** Availability mirrors subdivideBlock / mergeBlock's own guards exactly, so
+   * a button is never offered for an operation that would return null. */
+  const canSubdivide =
+    !!selectedBlock &&
+    selectedBlock.lots.length === 1 &&
+    blockFrame(selectedBlock).length >= 2 * selectedBlock.gen.lotWidth.min;
+
+  const canMerge =
+    !!selectedBlock &&
+    selectedBlock.lots.length > 1 &&
+    !selectedBlock.lots.some((l) => l.customized);
+
   const handleFlip = useCallback(
     () => updateSelectedBlock((b) => ({ ...b, flipped: !b.flipped })),
     [updateSelectedBlock],
@@ -1948,6 +1974,10 @@ export default function FacadePage() {
                   onReroll={handleReroll}
                   onFlip={handleFlip}
                   onDeleteBlock={handleDeleteBlock}
+                  canSubdivide={canSubdivide}
+                  canMerge={canMerge}
+                  onSubdivide={handleSubdivide}
+                  onMerge={handleMerge}
                   corner={selectedCorner}
                   onCornerChoice={handleCornerChoice}
                   maxCornerAngle={maxCornerAngle}

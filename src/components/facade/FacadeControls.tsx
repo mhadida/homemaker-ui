@@ -74,6 +74,13 @@ interface FacadeControlsProps {
   onReroll: () => void;
   onFlip: () => void;
   onDeleteBlock: () => void;
+  /** M4 reversible terrace split/merge. Availability mirrors the pure guards
+   * in facade/promote.ts so a button is never offered for an op that returns
+   * null. */
+  canSubdivide: boolean;
+  canMerge: boolean;
+  onSubdivide: () => void;
+  onMerge: () => void;
   // corner inspector (Task 5)
   corner: { data: Corner; choice: CornerChoice; widthA: number; widthB: number } | null;
   onCornerChoice: (key: string, choice: CornerChoice) => void;
@@ -225,6 +232,10 @@ export default function FacadeControls({
   onReroll,
   onFlip,
   onDeleteBlock,
+  canSubdivide,
+  canMerge,
+  onSubdivide,
+  onMerge,
   corner,
   onCornerChoice,
   maxCornerAngle,
@@ -292,6 +303,10 @@ export default function FacadeControls({
           onDeleteBlock={onDeleteBlock}
           maxCornerAngle={maxCornerAngle}
           onMaxCornerAngle={onMaxCornerAngle}
+          canSubdivide={canSubdivide}
+          canMerge={canMerge}
+          onSubdivide={onSubdivide}
+          onMerge={onMerge}
         />
       )}
 
@@ -888,6 +903,10 @@ function BlockInspector({
   onDeleteBlock,
   maxCornerAngle,
   onMaxCornerAngle,
+  canSubdivide,
+  canMerge,
+  onSubdivide,
+  onMerge,
 }: {
   block: FacadeBlock;
   onGenChange: (gen: BlockGenSettings) => void;
@@ -896,6 +915,12 @@ function BlockInspector({
   onDeleteBlock: () => void;
   maxCornerAngle: number;
   onMaxCornerAngle: (deg: number) => void;
+  /** One lot and a frontage long enough for two — see subdivideBlock. */
+  canSubdivide: boolean;
+  /** A terrace with no hand-edited lot — see mergeBlock. */
+  canMerge: boolean;
+  onSubdivide: () => void;
+  onMerge: () => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const confirmTimer = useRef<number | null>(null);
@@ -1047,6 +1072,17 @@ function BlockInspector({
         <div className="grid grid-cols-2 gap-1">
           <Toggle label="Reroll" on={false} onClick={onReroll} />
           <Toggle label="Flip side" on={block.flipped} onClick={onFlip} />
+          {/* Shown only when the pure op would actually succeed, so a button
+            * is never offered for something that returns null. Merge in
+            * particular HIDES rather than disables when a lot is hand-edited:
+            * a visible-but-dead button invites the user to try to destroy
+            * their own work. */}
+          {canSubdivide && (
+            <Toggle label="Subdivide" on={false} onClick={onSubdivide} />
+          )}
+          {canMerge && (
+            <Toggle label="Merge to one lot" on={false} onClick={onMerge} />
+          )}
         </div>
         <button
           type="button"
