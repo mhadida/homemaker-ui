@@ -55,7 +55,7 @@ intersection derivation and square derivation.
 | **Load semantics** | **Load place REPLACES `streetNetwork.streets`** (and prunes now-dangling roundabout/square choices). | Consistent with terrain and context buildings being replaced. Appending would duplicate on a second load of the same place. **Accepted tradeoff:** loading a place discards hand-drawn streets. |
 | **Persistence** | Imported streets are ordinary `Street`s and ride the EXISTING `streetNetwork` field in the document. **No re-fetch on load** (unlike footprints). | They are "our data" now — editable and saved. This is the key asymmetry with M2. |
 | **Provider** | `StreetProvider` interface + `OsmStreetProvider`, behind **`POST /api/streets`**. Reuses M2's Overpass mirror-failover, transient/fatal classification, `User-Agent`, timeout and TTL cache. | Same source-agnostic seam; an Esri adapter implements the same interface later. |
-| **Caps** | Same bbox span guard as buildings (`MAX_BUILDING_SPAN_DEG`, 0.05). **`MAX_STREETS = 600`** post-merge, truncating with `truncated`/`total` reported. | Bounds derivation cost. Truncation is surfaced, never silent. |
+| **Caps** | Same bbox span guard as buildings (`MAX_BUILDING_SPAN_DEG`, 0.05). **`MAX_STREETS = 600`** post-merge, truncating **longest-first** with `truncated`/`total` reported. | Bounds derivation cost. Truncation is surfaced, never silent, and keeps the significant streets: ungroupable stubs would otherwise be emitted before merged named chains and survive the cut. **Measured basis:** the original "600 bounds derivation cost" claim was wrong by an order of magnitude — at 227 streets one `StreetNetworkView` pass cost 387 ms and ran on all four mounted panes (~1.5 s per network change, ~1.8 s per pointermove while dragging a vertex). After deriving intersections once per network and bucketing `deriveIntersections` through a spatial grid, one pass is **19 ms**, which is what makes 600 defensible. |
 | **Failure isolation** | Terrain, buildings and streets fetch **in parallel and fail independently**. | Overpass is slow and rate-limits; one failure must not roll back the others. |
 | **Ids** | `street-osm-<wayId>` for a single way, `street-osm-<firstWayId>m` for a merged chain. Passed through `reserveStreetIds` so later hand-drawn ids can't collide. | Stable, traceable to source, and safe alongside the existing `street-N` counter. |
 
@@ -116,7 +116,7 @@ out geom;
 - `handleLoadPlace` fires terrain, buildings and streets; on street success:
   `setStreetNetwork({ ...EMPTY_NETWORK, streets })`, then
   `setBuildingsFromStreets(false)`.
-- `handleClearTerrain` also clears the imported network and street status.
+- `handleClearTerrain` removes only the IMPORTED streets (`street-osm-` id prefix), composed with `pruneRoundabouts`/`pruneSquareMonuments`, and clears the street status. It must NOT wipe the whole network: hand-drawn streets are user work and survive, exactly as hand-drawn blocks already do. It also restores `buildingsFromStreets` to its **pre-import** value (stashed when the import forced it off), never unconditionally to `true`.
 - The **Context** panel gains a street count, truncation notice and error line
   beside the buildings ones (same idiom, same `contextLoaded` gate).
 
@@ -143,7 +143,7 @@ out geom;
 
 ## Not in scope (deferred)
 
-Dual-carriageway merging (OSM models a divided road as two parallel ways);
+`highway=*` polygons tagged `area=yes` (pedestrian squares) are DROPPED, not imported — they are areas, not centrelines, and importing them produced 15 ring-shaped "streets" tracing each plaza's perimeter. Mapping them to a plaza/open-space concept is future work. Dual-carriageway merging (OSM models a divided road as two parallel ways);
 `oneway`/lane counts/turn restrictions; roundabout detection from
 `junction=roundabout` (roundabouts stay a manual per-intersection choice);
 bridges/tunnels from `layer`/`bridge` tags; sidewalk tags; rail/tram; relations
