@@ -29,7 +29,13 @@ Four parts work together:
 | MCP server (dev only) | `uv run ../homemaker-blender/mcp_server.py` | Bridges agents to a running Blender; lives in the sibling repo |
 | Tests | `npm test` | vitest — src/lib/facade + src/lib/street unit tests |
 
-**Tests:** vitest covers the pure facade modules — layout engine (incl. section strips), prompt parser, street generator (`refit`/`deleteLot`), node welding, corner detection/sync/miters, section edit helpers, street-aware orientation, and marquee hit-test/delete/translate (`src/lib/facade/*.test.ts`) — plus the standalone street-network module: centreline smoothing, ribbon offsets, roundabout rings, derived intersections, and the Krier/Alexander advisory (`src/lib/street/*.test.ts`) — run `npm test`. No e2e/playwright; everything else is verified visually.
+**Tests:** vitest covers the pure facade modules — layout engine (incl. section strips), prompt parser, street generator (`refit`/`deleteLot`), node welding, corner detection/sync/miters, section edit helpers, street-aware orientation, and marquee hit-test/delete/translate (`src/lib/facade/*.test.ts`) — plus the standalone street-network module: centreline smoothing, ribbon offsets, roundabout rings, derived intersections, and the Krier/Alexander advisory (`src/lib/street/*.test.ts`) — run `npm test`. Real-city import adds `src/lib/geo/*.test.ts` (projection, DEM
+decode/resample, OSM→building/street mapping, way merging, Overpass failover +
+cache, request validation) and the demo-fixture guard. No e2e/playwright;
+everything else is verified visually — **and in this codebase the bugs that
+mattered were only findable by running the app** (a 0-height picker map, a
+missing Overpass User-Agent, a 1.8 s-per-frame drag freeze), so treat a green
+suite as necessary, not sufficient.
 
 ## Blender is NOT a runtime dependency of the web app
 
@@ -53,6 +59,9 @@ src/
       debug-walls/route.ts       — GET: serves debug glbs (walls/windows/roofs) from /tmp
       prompt/route.ts            — POST: AI prompt parsing (Vercel AI Gateway)
       facade-prompt/route.ts     — POST: AI prompt parsing for the facade designer
+      terrain/route.ts           — POST: bbox+anchor → real DEM heightfield (M1)
+      buildings/route.ts         — POST: bbox+anchor → OSM footprints (M2)
+      streets/route.ts           — POST: bbox+anchor → OSM streets + canals (M3)
   components/
     demo/
       BuildingViewer.tsx   — R3F canvas with orbit controls, lighting, grid, compass
@@ -65,6 +74,8 @@ src/
       FacadeControls.tsx — presets + sliders + toggles panel
       BayGrid.tsx        — tappable per-cell opening editor
       SceneContents.tsx  — shared world scene (blocks, ground, lights)
+      PlacePicker.tsx    — MapLibre bbox picker modal (real-city import)
+      ContextBuildings.tsx — merged backdrop mesh for imported footprints
   lib/
     blender.ts        — TCP socket client to Blender (port 9876)
     python-server.ts  — Long-running Python child process serving pipeline requests (local dev)
@@ -84,9 +95,22 @@ src/
       corners.ts       — corner detection (turn/convexity), shell sync, miters
       sections.ts      — facade-section edit helpers (canonical writes, AI patterns)
       grid.ts          — rectilinear drawing grid: lattice snap + 90° axis lock
-      clip.ts          — world size (GROUND_HALF) + derived perspective far plane
+      clip.ts          — world size (GROUND_HALF), perspective far plane, and the
+                         plan-camera / walk-catcher heights derived from
+                         MAX_BUILDING_HEIGHT (real buildings exceed the old y=60)
+    geo/               — REAL-CITY IMPORT (all pure unless noted)
+      project.ts       — lon/lat ⇄ local metres (ENU; east→+x, north→+z)
+      dem.ts           — terrarium decode, web-mercator tiles, resample
+      terrainProvider.ts — TerrainProvider + AWS Terrain Tiles adapter (network)
+      buildings.ts     — OSM footprints → ContextBuilding (height, base, filter)
+      buildingProvider.ts — BuildingProvider + Overpass adapter (network)
+      streets.ts       — OSM ways → Street (classify, width, merge, project, cap)
+      streetProvider.ts  — StreetProvider + Overpass adapter (network)
+      overpass.ts      — shared Overpass client: mirror failover + TTL cache
+      demoPlace.ts     — the committed offline Amsterdam fixture's bbox/anchor
   types/
-    mapbox-gl-draw.d.ts — Type declarations (legacy; no map UI currently exists)
+    mapbox-gl-draw.d.ts — Type declarations (legacy, unused; the real map UI is
+                          PlacePicker.tsx on maplibre-gl)
 python/
   generate.py             — IFC + glTF pipeline (entry: build_and_export_glb)
   build.py                — Vercel Function entrypoint (POST → glb, GET → "ok")
@@ -407,6 +431,74 @@ NOT involved; every edit is live (no Update button). Spec:
   `docs/superpowers/specs/2026-07-16-street-realism-design.md` (SP-2a:
   radius-limited fillet + topography draping) +
   `docs/superpowers/specs/2026-07-21-junction-pad-design.md` (trim + pad).
+
+## Real-city import (M1–M3)
+
+Pick a real place on a map and the scene becomes that place: its **terrain**,
+its **buildings**, its **streets and canals** — then design into it. Specs:
+`docs/superpowers/specs/2026-07-24-arcgis-terrain-import-design.md`,
+`2026-07-25-context-buildings-design.md`, `2026-07-25-street-import-design.md`.
+
+- **One projection frame.** `src/lib/geo/project.ts` maps lon/lat ⇄ local
+  metres on an ENU tangent plane (`east→+x`, `north→+z`, R=6378137), origin =
+  the picked bbox centre. That `GeoAnchor` is stored in the document and every
+  payload is projected against it — **the anchor and the data must move
+  together**, or the geometry silently shifts.
+- **Header flow.** **Load place** opens `PlacePicker` (MapLibre, tokenless) →
+  bbox → three fetches **in parallel that fail independently**. **Demo place**
+  loads a committed offline Amsterdam fixture instead (below). **Clear terrain**
+  reverts.
+- **M1 terrain** — an optional `hf?: Heightfield` on `Ground`, sampled behind
+  the EXISTING `groundHeightAt(x,z,g)` seam, so basements (`levelingFor`),
+  streets, trees and ribbons drape on real ground for free. The ground mesh
+  becomes a displaced grid and `groundQuat` goes identity. `hf` absent ⇒ the
+  old tilted-plane math, byte-identical.
+- **M2 context buildings** — real footprints as ONE merged grey
+  `BufferGeometry` (thousands of meshes would be thousands of draw calls) with
+  a parallel per-triangle id array, so a raycast `faceIndex` resolves to one
+  building. Click (Select tool on) hides it; **Restore hidden** is the only way
+  back. **Footprints are NEVER serialized** — the document stores only `bbox` +
+  `hiddenIds`, and they are re-fetched on load.
+- **M3 streets & canals** — OSM ways become ordinary, editable `Street`s in the
+  existing network (the deliberate asymmetry with M2: these ARE serialized and
+  are NOT re-fetched). Roads only (`footway`/`cycleway`/`steps`/`path`/
+  `area=yes` are dropped — ~48% of ways, and `area=yes` polygons imported as
+  ring-shaped "streets"); contiguous ways sharing `(name, type)` are merged
+  back into whole streets (OSM splits "Herengracht" into 8). `waterway=canal`
+  → the existing `canal` type. Importing **replaces** the network and forces
+  `buildingsFromStreets` off (`syncStreetBlocks` would otherwise generate
+  thousands of lots over the real footprints); Clear-terrain removes only
+  `street-osm-` ids so hand-drawn work survives, and restores the pre-import
+  toggle value.
+- **Offline demo fixture** — `public/fixtures/amsterdam/` holds a frozen
+  snapshot (1,585 buildings, 212 streets, 128×79 heightfield) plus
+  `ATTRIBUTION.md` (OSM is **ODbL** — keep the attribution on any
+  redistribution). **Demo place** loads it with zero network. Recapture with
+  `npm run fixture:amsterdam`; `src/lib/geo/demoPlace.test.ts` fails loudly if
+  the fixture and its anchor drift apart.
+
+### Hard-won rules (violating these has broken this app before)
+
+- **Overpass 406s any request without a `User-Agent`.** It also rate-limits
+  hard: `overpass.ts` fails over across mirrors (429/502/503/504/network/timeout
+  → next mirror; anything else → fail fast) and caches responses, because
+  re-fetching the same bbox on every reload is what triggers the limiter.
+- **Tailwind utilities lose to unlayered third-party CSS.** Tailwind v4 emits
+  them in `@layer utilities`, so maplibre's `.maplibregl-map{position:relative}`
+  beat `.absolute` and gave the picker a 0-height map for a whole milestone.
+- **R3F synthesizes a click after a drag release.** Any new clickable 3D object
+  needs the existing `dragEndAt` guard, or a marquee sweep will trigger it.
+  `mouseButtons` does NOT gate touch — only `enablePan` does.
+- **Derive street geometry ONCE per network.** `deriveIntersections` is called
+  by `streetSpans` and `deriveJunctionPads` too, and all four panes are always
+  mounted; recomputing per pane cost ~1.5 s per network change (~1.8 s per
+  pointermove while dragging) before it was hoisted and spatially bucketed.
+- **Imported geometry must satisfy the network's own invariants** —
+  sub-`MIN_STREET_SEG` vertices are collapsed on import (they permanently block
+  vertex drags), but a vertex **shared with another way is a junction and must
+  never be collapsed**, or the two streets silently detach.
+- Cameras are sized from `MAX_BUILDING_HEIGHT` in `clip.ts`, not hardcoded:
+  real buildings exceed the old plan camera (y=60) and walk catcher (y=50).
 
 ## Tailwind v4
 
