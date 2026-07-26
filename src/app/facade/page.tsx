@@ -365,6 +365,55 @@ export default function FacadePage() {
     [],
   );
 
+  // Request token for `loadStreets`, same reasoning as `buildingsReqRef`.
+  const streetsReqRef = useRef(0);
+  // No UI consumer yet — Task 5 wires these into the Context panel
+  // (ContextPanel `streetsLoading`/`streetsError`/`streetsTruncated`/
+  // `streetsTotal` props), which will remove these disables.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [streetsLoading, setStreetsLoading] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [streetsError, setStreetsError] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [streetsInfo, setStreetsInfo] = useState<{ truncated: boolean; total: number } | null>(null);
+
+  /** Fetch real streets + canals for a bbox and adopt them as the network.
+   * Like the buildings loader, this deliberately swallows its error: a failed
+   * street import must never roll back a good terrain load. */
+  const loadStreets = useCallback(async (box: LngLatBBox, a: GeoAnchor) => {
+    const token = ++streetsReqRef.current;
+    setStreetsError(null);
+    setStreetsInfo(null);
+    setStreetsLoading(true);
+    try {
+      const res = await fetch("/api/streets", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ bbox: box, anchor: a }),
+      });
+      const json = (await res.json()) as {
+        streets?: Street[]; truncated?: boolean; total?: number; error?: string;
+      };
+      if (!res.ok || !json.streets) throw new Error(json.error ?? `HTTP ${res.status}`);
+      if (streetsReqRef.current !== token) return;
+      reserveStreetIds(json.streets);
+      // Importing REPLACES the network (consistent with terrain and context
+      // buildings being replaced); appending would duplicate on a second load
+      // of the same place.
+      setStreetNetwork({ ...EMPTY_NETWORK, streets: json.streets });
+      setStreetsInfo({ truncated: !!json.truncated, total: json.total ?? json.streets.length });
+      // syncStreetBlocks would otherwise generate parametric frontage
+      // buildings along EVERY imported street — thousands of lots on top of
+      // the real footprints already loaded as context.
+      setBuildingsFromStreets(false);
+    } catch (e) {
+      if (streetsReqRef.current !== token) return;
+      setStreetsError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (streetsReqRef.current === token) setStreetsLoading(false);
+    }
+  }, []);
+
   /** Replace the whole scene from a loaded document. Re-syncs corners
    * defensively (idempotent for clean saves; repairs hand-edited files) and
    * bumps the block-id counter so newly-drawn blocks can't collide. */
@@ -457,12 +506,13 @@ export default function FacadePage() {
       setHiddenIds(new Set());
       setPickerOpen(false);
       void loadContextBuildings(bbox, a);
+      void loadStreets(bbox, a);
     } catch (e) {
       setTerrainError(e instanceof Error ? e.message : String(e));
     } finally {
       setTerrainLoading(false);
     }
-  }, [loadContextBuildings]);
+  }, [loadContextBuildings, loadStreets]);
 
   /** Drop the loaded heightfield, reverting to the manual flat/tilted plane
    * (the Topography sliders reappear). */
@@ -477,6 +527,14 @@ export default function FacadePage() {
     // independently) repopulates `bbox` without starting a new fetch.
     buildingsReqRef.current++;
     setBuildingsLoading(false);
+    // Same reasoning for the streets fetch: bumping the token alone leaves
+    // an in-flight loader's own `finally` a no-op (stale token), so
+    // `streetsLoading` must be reset here directly too.
+    streetsReqRef.current++;
+    setStreetsLoading(false);
+    setStreetsError(null);
+    setStreetsInfo(null);
+    setStreetNetwork(EMPTY_NETWORK);
     setGround((g) => ({ slope: g.slope, azimuth: g.azimuth })); // drop hf
     setAnchor(null);
     setBbox(null);
