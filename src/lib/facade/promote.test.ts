@@ -4,7 +4,12 @@ import type { StreetNetwork } from "@/lib/street/types";
 import { EMPTY_NETWORK } from "@/lib/street/types";
 import { DEFAULT_GEN, blockFrame } from "./blocks";
 import { MASSING_DEPTH_MAX, MASSING_DEPTH_MIN } from "./layout";
-import { mergeBlock, promoteParcel, subdivideBlock } from "./promote";
+import {
+  mergeBlock,
+  parcelPreview,
+  promoteParcel,
+  subdivideBlock,
+} from "./promote";
 
 const streetAtZ = (z: number): StreetNetwork => ({
   ...EMPTY_NETWORK,
@@ -241,5 +246,49 @@ describe("mergeBlock", () => {
     expect(back.lots[0].params.width).toBeCloseTo(one.lots[0].params.width, 6);
     expect(back.line).toEqual(one.line);
     expect(back.flipped).toBe(one.flipped);
+  });
+});
+
+describe("parcelPreview", () => {
+  it("agrees exactly with what promoteParcel produces", () => {
+    for (const p of [PLOT, WIDE]) {
+      const pre = parcelPreview(p, streetAtZ(-8))!;
+      const block = promoteParcel(p, streetAtZ(-8), DEFAULT_GEN, 7)!;
+      expect(pre.width).toBeCloseTo(block.lots[0].params.width, 9);
+      expect(pre.depth).toBe(block.lots[0].params.massingDepth);
+      expect(pre.line).toEqual(block.line);
+      expect(pre.flipped).toBe(block.flipped);
+    }
+  });
+
+  it("applies the same depth clamp", () => {
+    const deep = plot([
+      [0, 0],
+      [10, 0],
+      [10, 40],
+      [0, 40],
+    ]);
+    expect(parcelPreview(deep, streetAtZ(-8))!.depth).toBe(MASSING_DEPTH_MAX);
+  });
+
+  it("is PURE — it must not consume block ids, unlike promoteParcel", () => {
+    // The panel previews on every render. If preview allocated an id, the
+    // counter would climb with mouse movement.
+    const before = promoteParcel(PLOT, streetAtZ(-8), DEFAULT_GEN, 7)!.id;
+    for (let i = 0; i < 50; i++) parcelPreview(PLOT, streetAtZ(-8));
+    const after = promoteParcel(PLOT, streetAtZ(-8), DEFAULT_GEN, 7)!.id;
+    const n = (s: string) => Number(/^block-(\d+)$/.exec(s)![1]);
+    expect(n(after) - n(before)).toBe(1);
+  });
+
+  it("returns null for the same parcels promoteParcel rejects", () => {
+    const sliver = plot([
+      [0, 0],
+      [1, 0],
+      [1, 1],
+      [0, 1],
+    ]);
+    expect(parcelPreview(sliver, streetAtZ(-8))).toBeNull();
+    expect(promoteParcel(sliver, streetAtZ(-8), DEFAULT_GEN, 7)).toBeNull();
   });
 });

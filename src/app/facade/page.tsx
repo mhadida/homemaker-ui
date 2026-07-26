@@ -41,7 +41,12 @@ import {
 } from "@/lib/facade/document";
 import { syncStreetBlocks } from "@/lib/facade/streetBlocks";
 import { rerollBlock, generateBlock, deleteLot } from "@/lib/facade/generate";
-import { mergeBlock, promoteParcel, subdivideBlock } from "@/lib/facade/promote";
+import {
+  mergeBlock,
+  parcelPreview,
+  promoteParcel,
+  subdivideBlock,
+} from "@/lib/facade/promote";
 import { parcelArea } from "@/lib/geo/parcel";
 import { moveNode, deriveNodes } from "@/lib/facade/nodes";
 import { DEFAULT_GROUND, type Ground, type Heightfield } from "@/lib/facade/terrain";
@@ -765,20 +770,18 @@ export default function FacadePage() {
     [selectedContextBuilding, contextBuildings],
   );
 
-  /** The block promotion WOULD produce, built with the real function so the
-   * panel and the result can never disagree and the depth clamp is not
-   * duplicated. promoteParcel is pure, so this costs nothing and is thrown
-   * away unless the user commits. The seed is fixed only to keep the preview
-   * stable while the panel is open; committing draws a fresh one. */
-  const promotePreview = useMemo(() => {
-    if (!selectedContextObj) return null;
-    const b = promoteParcel(selectedContextObj, streetNetwork, DEFAULT_GEN, 1);
-    if (!b) return null;
-    return {
-      width: b.lots[0].params.width,
-      depth: b.lots[0].params.massingDepth ?? 0,
-    };
-  }, [selectedContextObj, streetNetwork]);
+  /** The plot geometry promotion WOULD use. Goes through parcelPreview, the
+   * same helper promoteParcel itself builds on, so the panel and the result
+   * cannot disagree and the depth clamp is not duplicated. Critically it is
+   * PURE: promoteParcel allocates a block id, so calling it from a render-time
+   * memo would bump the id counter on every render. */
+  const promotePreview = useMemo(
+    () =>
+      selectedContextObj
+        ? parcelPreview(selectedContextObj, streetNetwork)
+        : null,
+    [selectedContextObj, streetNetwork],
+  );
 
   /** Promote the selected footprint into an editable block. */
   const handlePromoteContextBuilding = useCallback(() => {

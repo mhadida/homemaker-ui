@@ -4,7 +4,9 @@
  *
  * The rectangular-box facade engine is untouched: the real polygon rides along
  * on `block.parcel` and is drawn on the ground as the lot boundary, with the
- * box fitted inside it. Pure — no three, no React.
+ * box fitted inside it. No three, no React. Everything here is pure EXCEPT
+ * `promoteParcel`, which allocates a block id — render-time callers want
+ * `parcelPreview`.
  *
  * Spec: docs/superpowers/specs/2026-07-26-promote-footprint-design.md */
 
@@ -22,25 +24,47 @@ import { MASSING_DEPTH_MAX, MASSING_DEPTH_MIN } from "./layout";
 const clampDepth = (d: number): number =>
   Math.max(MASSING_DEPTH_MIN, Math.min(MASSING_DEPTH_MAX, d));
 
+/** The plot geometry a promotion would use: frontage width and clamped depth,
+ * or null when the parcel cannot carry a facade.
+ *
+ * Genuinely pure — unlike `promoteParcel`, which allocates a block id and so
+ * must not be called during render. The UI previews through THIS, and
+ * `promoteParcel` builds on it, so the panel and the result cannot diverge and
+ * the depth clamp still lives in one place. */
+export function parcelPreview(
+  building: ContextBuilding,
+  network: StreetNetwork | null,
+): { line: { a: [number, number]; b: [number, number] }; flipped: boolean; width: number; depth: number } | null {
+  const fit = fitFrontage(building.footprint as Vec2[], network);
+  if (!fit) return null;
+  const line = {
+    a: [fit.line.a[0], fit.line.a[1]] as [number, number],
+    b: [fit.line.b[0], fit.line.b[1]] as [number, number],
+  };
+  return {
+    line,
+    flipped: fit.flipped,
+    width: blockFrame({ line, flipped: fit.flipped }).length,
+    depth: clampDepth(fit.depth),
+  };
+}
+
 /** Real footprint -> a ready-to-render block with ONE generated lot.
  * `network` may be null: with no streets the longest edge chain wins, and the
  * existing `f` / Flip side control corrects a bad guess. Returns null when the
- * parcel cannot carry a facade (see `fitFrontage`). */
+ * parcel cannot carry a facade (see `fitFrontage`).
+ *
+ * NOT pure — it allocates a block id, so it must not be called during render.
+ * Use `parcelPreview` to show what promotion would produce. */
 export function promoteParcel(
   building: ContextBuilding,
   network: StreetNetwork | null,
   gen: BlockGenSettings,
   seed: number,
 ): FacadeBlock | null {
-  const fit = fitFrontage(building.footprint as Vec2[], network);
+  const fit = parcelPreview(building, network);
   if (!fit) return null;
-
-  const line = {
-    a: [fit.line.a[0], fit.line.a[1]] as [number, number],
-    b: [fit.line.b[0], fit.line.b[1]] as [number, number],
-  };
-  const width = blockFrame({ line, flipped: fit.flipped }).length;
-  const depth = clampDepth(fit.depth);
+  const { line, width, depth } = fit;
 
   return {
     id: nextBlockId(),
