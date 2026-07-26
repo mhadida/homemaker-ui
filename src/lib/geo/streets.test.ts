@@ -1,6 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { classifyWay, parseWidth, mergeWays, osmToStreets, type OsmWay } from "./streets";
+import {
+  classifyWay,
+  parseWidth,
+  mergeWays,
+  osmToStreets,
+  collapseShortSegments,
+  type OsmWay,
+} from "./streets";
 import type { GeoAnchor } from "./project";
+import { MIN_STREET_SEG } from "@/lib/street/intersections";
 
 const ANCHOR: GeoAnchor = { lat0: 52.37, lon0: 4.89 };
 
@@ -35,6 +43,47 @@ describe("classifyWay", () => {
     }
     expect(classifyWay(undefined)).toBeNull();
     expect(classifyWay({})).toBeNull();
+  });
+  it("drops a highway=*+area=yes polygon (a paved square outline, not a centreline)", () => {
+    expect(classifyWay({ highway: "pedestrian", area: "yes" })).toBeNull();
+    expect(classifyWay({ highway: "residential", area: "yes" })).toBeNull();
+  });
+  it("still classifies the same highway without area=yes", () => {
+    expect(classifyWay({ highway: "pedestrian" })).toEqual({ type: "street", traffic: "peds" });
+  });
+});
+
+describe("collapseShortSegments", () => {
+  it("collapses interior vertices closer than minSeg, keeping first/last exactly", () => {
+    const pts: [number, number][] = [[0, 0], [0.5, 0], [1, 0], [10, 0]];
+    const out = collapseShortSegments(pts, MIN_STREET_SEG);
+    expect(out[0]).toEqual([0, 0]);
+    expect(out[out.length - 1]).toEqual([10, 0]);
+    // [0.5,0] is within 1m of [0,0] so it's dropped; [1,0] is exactly 1m from
+    // the last KEPT vertex ([0,0]) so it survives.
+    expect(out).toEqual([[0, 0], [1, 0], [10, 0]]);
+  });
+  it("leaves a polyline with no sub-minSeg segments untouched", () => {
+    const pts: [number, number][] = [[0, 0], [5, 0], [10, 0]];
+    expect(collapseShortSegments(pts, MIN_STREET_SEG)).toEqual(pts);
+  });
+  it("also drops a trailing kept vertex that would leave the FINAL segment short", () => {
+    // [9.5,0] is far enough from [0,0] to survive the forward scan, but the
+    // true endpoint [10,0] is only 0.5m beyond it — without the trailing
+    // check this would still emit an 0.5m final segment.
+    const pts: [number, number][] = [[0, 0], [9.5, 0], [10, 0]];
+    const out = collapseShortSegments(pts, MIN_STREET_SEG);
+    expect(out).toEqual([[0, 0], [10, 0]]);
+  });
+  it("a 2-point street shorter than minSeg end-to-end is still emitted unchanged", () => {
+    const pts: [number, number][] = [[0, 0], [0.3, 0]];
+    expect(collapseShortSegments(pts, MIN_STREET_SEG)).toEqual(pts);
+  });
+  it("collapsing an entire interior run still preserves the true endpoints exactly", () => {
+    const pts: [number, number][] = [[0, 0], [0.1, 0], [0.2, 0], [0.3, 0], [20, 0]];
+    const out = collapseShortSegments(pts, MIN_STREET_SEG);
+    expect(out[0]).toEqual([0, 0]);
+    expect(out[out.length - 1]).toEqual([20, 0]);
   });
 });
 
@@ -161,5 +210,53 @@ describe("osmToStreets", () => {
     const r = osmToStreets([wide, junk], ANCHOR, 10);
     expect(r.streets.find((s) => s.id === "street-osm-1")!.width).toBe(18);
     expect(r.streets.find((s) => s.id === "street-osm-2")!.width).toBeUndefined();
+  });
+  it("drops highway=*+area=yes polygons (pedestrian squares) entirely", () => {
+    const square = way(1, "Dam Square", [[0, 0], [0, 1], [1, 1], [1, 0], [0, 0]], "pedestrian");
+    square.tags!.area = "yes";
+    const real = way(2, "Real Street", [[5, 5], [5, 6]]);
+    const r = osmToStreets([square, real], ANCHOR, 100);
+    expect(r.streets).toHaveLength(1);
+    expect(r.streets[0].id).toBe("street-osm-2");
+  });
+  it("collapses a sub-MIN_STREET_SEG vertex introduced by real OSM geometry", () => {
+    // ~6.8cm at this latitude (well under MIN_STREET_SEG) between the first
+    // two points — real OSM ways regularly have these (measured: 71 such
+    // segments across 22 of 227 streets in a real import, min 5.6cm). The
+    // third point is ~1.1km further — a real segment that must survive.
+    const r = osmToStreets(
+      [way(1, undefined, [
+        [ANCHOR.lat0, ANCHOR.lon0],
+        [ANCHOR.lat0, ANCHOR.lon0 + 0.000001],
+        [ANCHOR.lat0, ANCHOR.lon0 + 0.01],
+      ])],
+      ANCHOR,
+      100,
+    );
+    expect(r.streets).toHaveLength(1);
+    expect(r.streets[0].points).toHaveLength(2); // the sub-1m vertex collapsed away
+    expect(r.streets[0].points[0][0]).toBeCloseTo(0, 6); // first vertex preserved exactly
+    expect(r.streets[0].points[0][1]).toBeCloseTo(0, 6);
+  });
+  it("a 2-point way shorter than MIN_STREET_SEG is still emitted, not dropped", () => {
+    // ~0.5m at this latitude — collapseShortSegments never drops a 2-point
+    // input; osmToStreets doesn't filter on length either.
+    const r = osmToStreets(
+      [way(1, undefined, [[ANCHOR.lat0, ANCHOR.lon0], [ANCHOR.lat0, ANCHOR.lon0 + 0.000005]])],
+      ANCHOR,
+      100,
+    );
+    expect(r.streets).toHaveLength(1);
+    expect(r.streets[0].points).toHaveLength(2);
+  });
+  it("caps by descending polyline length, keeping a merged named street over an unnamed stub", () => {
+    const stub = way(99, undefined, [[0, 0], [0, 0.00001]]); // ~1.1m unnamed stub
+    const a = way(1, "Lang Street", [[10, 10], [10, 10.01]]);
+    const b = way(2, "Lang Street", [[10, 10.01], [10, 10.02]]); // merges with `a` into ~2.2km
+    const r = osmToStreets([stub, a, b], ANCHOR, 1);
+    expect(r.total).toBe(2); // stub + merged chain
+    expect(r.truncated).toBe(true);
+    expect(r.streets).toHaveLength(1);
+    expect(r.streets[0].id).toBe("street-osm-1m"); // the merged chain survives, not the stub
   });
 });

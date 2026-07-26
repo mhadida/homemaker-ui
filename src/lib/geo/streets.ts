@@ -4,6 +4,7 @@ import type { GeoAnchor } from "./project";
 import { project } from "./project";
 import type { Street, StreetType, TrafficMode, Vec2 } from "@/lib/street/types";
 import { reserveStreetIds } from "@/lib/street/types";
+import { MIN_STREET_SEG } from "@/lib/street/intersections";
 
 export interface OsmWay {
   type: string;
@@ -46,6 +47,11 @@ export function classifyWay(
   if (tags.waterway === "canal") return { type: "canal" };
   const hw = tags.highway;
   if (!hw) return null;
+  // `highway=* area=yes` tags a PAVED AREA (a pedestrian square, a plaza), not
+  // a centreline — its "way" is the polygon outline, so importing it as a
+  // street draws a paved ring tracing the square's perimeter instead of the
+  // square itself. Drop it; it's a polygon, not a road.
+  if (tags.area === "yes") return null;
   // A real street that happens to be car-free — exactly what the existing
   // `peds` traffic mode models (Dutch city centres).
   if (hw === "pedestrian") return { type: "street", traffic: "peds" };
@@ -70,6 +76,42 @@ export function parseWidth(tags: Record<string, string> | undefined): number | u
 }
 
 const endKey = (p: { lat: number; lon: number }) => `${p.lat},${p.lon}`;
+
+function dist(a: Vec2, b: Vec2): number {
+  return Math.hypot(a[0] - b[0], a[1] - b[1]);
+}
+
+function polylineLength(points: Vec2[]): number {
+  let total = 0;
+  for (let i = 0; i < points.length - 1; i++) total += dist(points[i], points[i + 1]);
+  return total;
+}
+
+/** Collapses consecutive vertices closer than `minSeg`, keeping the first and
+ * last vertex EXACTLY — merged-chain endpoints (and shared-vertex junction
+ * derivation) match on exact equality, so they must never move. Real OSM
+ * geometry has vertices a few centimetres apart (measured: 71 sub-1m segments
+ * across 22 of 227 streets in a real import, minimum 5.6 cm) that would
+ * otherwise degenerate the ribbon-offset math `MIN_STREET_SEG` exists to
+ * guard against, and permanently reject any `moveStreetNode` drag touching
+ * one. A street that collapses end-to-end to fewer than `minSeg` apart is
+ * still emitted as a short 2-point stub rather than dropped — callers that
+ * care about a minimum street length filter afterwards. */
+export function collapseShortSegments(points: Vec2[], minSeg: number): Vec2[] {
+  if (points.length <= 2) return points.map((p): Vec2 => [p[0], p[1]]);
+  const out: Vec2[] = [[points[0][0], points[0][1]]];
+  for (let i = 1; i < points.length - 1; i++) {
+    if (dist(out[out.length - 1], points[i]) >= minSeg) {
+      out.push([points[i][0], points[i][1]]);
+    }
+  }
+  const finalPt: Vec2 = [points[points.length - 1][0], points[points.length - 1][1]];
+  // Also drop trailing kept vertices that would otherwise leave the FINAL
+  // segment short — never pops below the first vertex.
+  while (out.length > 1 && dist(out[out.length - 1], finalPt) < minSeg) out.pop();
+  out.push(finalPt);
+  return out;
+}
 
 /** OSM splits one human street into many ways (at every tag change and
  * junction) — "Herengracht" is 8 separate ways. Chain contiguous ways sharing
@@ -160,14 +202,22 @@ export function osmToStreets(
     all.push({
       id: `street-osm-${chain[0].id}${chain.length > 1 ? "m" : ""}`,
       type: cls.type,
-      points,
+      points: collapseShortSegments(points, MIN_STREET_SEG),
       ...(width !== undefined ? { width } : {}),
       ...(cls.traffic ? { traffic: cls.traffic } : {}),
     });
   }
   const total = all.length;
+  // Longest-first before the cap: `mergeWays` pushes ungroupable (unnamed,
+  // short) stubs into its output during the SAME grouping loop that builds
+  // merged named chains, so `all`'s order is essentially arbitrary — a
+  // straight `slice` would truncate merged, significant streets before
+  // one-off stubs just because of encounter order. Ordering by descending
+  // polyline length keeps the most significant streets when a real import
+  // (~200+ ways) exceeds `maxStreets`.
+  const ordered = [...all].sort((a, b) => polylineLength(b.points) - polylineLength(a.points));
   const truncated = total > maxStreets;
-  const streets = truncated ? all.slice(0, maxStreets) : all;
+  const streets = truncated ? ordered.slice(0, maxStreets) : ordered;
   // Keep the session id counter clear of these ids so a later hand-drawn
   // street can never collide with an imported one.
   reserveStreetIds(streets);

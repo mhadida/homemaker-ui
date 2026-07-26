@@ -61,8 +61,12 @@ export class OsmStreetProvider implements StreetProvider {
     // Roads and canals in one union query; `out geom` inlines the node
     // coordinates so a single request suffices.
     const b = `(${bbox.south},${bbox.west},${bbox.north},${bbox.east})`;
+    // [timeout:25], not 30 — overpass.ts's client AbortSignal.timeout is a
+    // fixed 30s, so a query-side timeout equal to it leaves no headroom for
+    // queue wait or the ~90 KB transfer (buildingProvider uses the same
+    // [timeout:25] for the same reason).
     const query =
-      `[out:json][timeout:30];` +
+      `[out:json][timeout:25];` +
       `(way["highway"]${b};way["waterway"="canal"]${b};);` +
       `out geom;`;
     const json = await overpassFetch(query);
