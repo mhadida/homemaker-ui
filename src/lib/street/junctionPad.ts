@@ -5,6 +5,7 @@ import {
   ROUNDABOUT_OUTER_R,
   STREET_SPECS,
 } from "./types";
+import type { Intersection } from "./intersections";
 import { deriveIntersections } from "./intersections";
 import { filletCentreline } from "./geometry";
 
@@ -124,12 +125,17 @@ function incidentStreets(
 
 /** Per-street clip discs from every non-excluded junction it touches. A
  * junction with any canal incident, or fewer than 2 distinct incident streets,
- * is skipped. Pure. */
-export function junctionClips(net: StreetNetwork): Map<string, ClipDisc[]> {
+ * is skipped. `intersections` lets a caller that already derived them (e.g.
+ * `StreetNetworkView`, once per network) skip recomputing; omitted, they are
+ * derived internally as before. Pure. */
+export function junctionClips(
+  net: StreetNetwork,
+  intersections?: Intersection[],
+): Map<string, ClipDisc[]> {
   const byId = new Map(net.streets.map((s) => [s.id, s]));
   const roundabout = new Set(net.roundabouts.map(([k]) => k));
   const out = new Map<string, ClipDisc[]>();
-  for (const it of deriveIntersections(net)) {
+  for (const it of intersections ?? deriveIntersections(net)) {
     const streets = incidentStreets(it.incident, byId);
     if (streets.length < 2) continue;
     if (streets.some((s) => s.type === "canal")) continue;
@@ -144,9 +150,13 @@ export function junctionClips(net: StreetNetwork): Map<string, ClipDisc[]> {
 }
 
 /** Per-CLIPPED-street open spans (its filleted centreline minus every junction
- * disc). Unclipped streets are ABSENT (byte-identical rendering). Pure. */
-export function streetSpans(net: StreetNetwork): Map<string, Vec2[][]> {
-  const clips = junctionClips(net);
+ * disc). Unclipped streets are ABSENT (byte-identical rendering). `intersections`
+ * — see `junctionClips`. Pure. */
+export function streetSpans(
+  net: StreetNetwork,
+  intersections?: Intersection[],
+): Map<string, Vec2[][]> {
+  const clips = junctionClips(net, intersections);
   const out = new Map<string, Vec2[][]>();
   for (const s of net.streets) {
     const discs = clips.get(s.id);
@@ -215,12 +225,15 @@ const typeOrder = (t: StreetType) => Object.keys(STREET_SPECS).indexOf(t);
 /** One star-polygon pad per non-roundabout, non-canal junction. Walks the
  * incident mouths in angular order around the junction and emits each mouth's
  * [right, left] cap corners, so the pad tiles exactly with the clipped ribbons.
- * Pure, color-free. */
-export function deriveJunctionPads(net: StreetNetwork): JunctionPad[] {
+ * `intersections` — see `junctionClips`. Pure, color-free. */
+export function deriveJunctionPads(
+  net: StreetNetwork,
+  intersections?: Intersection[],
+): JunctionPad[] {
   const byId = new Map(net.streets.map((s) => [s.id, s]));
   const roundabout = new Set(net.roundabouts.map(([k]) => k));
   const pads: JunctionPad[] = [];
-  for (const it of deriveIntersections(net)) {
+  for (const it of intersections ?? deriveIntersections(net)) {
     if (roundabout.has(it.key)) continue; // ring is the pad
     const streets = incidentStreets(it.incident, byId);
     if (streets.length < 2) continue;

@@ -48,9 +48,11 @@ export default function StreetNetworkView({
   ground: Ground;
 }) {
   const roundabouts = useMemo(() => new Map(network.roundabouts), [network.roundabouts]);
+  // Derived once and shared — streetSpans/deriveJunctionPads would otherwise
+  // each re-derive the same intersections internally (3x per pane).
   const intersections = useMemo(() => deriveIntersections(network), [network]);
-  const spans = useMemo(() => streetSpans(network), [network]);
-  const pads = useMemo(() => deriveJunctionPads(network), [network]);
+  const spans = useMemo(() => streetSpans(network, intersections), [network, intersections]);
+  const pads = useMemo(() => deriveJunctionPads(network, intersections), [network, intersections]);
   const streetsById = useMemo(
     () => new Map(network.streets.map((s) => [s.id, s])),
     [network.streets],
