@@ -1572,3 +1572,77 @@ export function ContextPanel({
     </Section>
   );
 }
+
+/**
+ * M4 — the selected imported building. Shows what promotion WOULD produce
+ * (frontage and depth read straight off a trial `promoteParcel`, never
+ * re-derived, so the panel cannot disagree with the result and the depth
+ * clamp is not duplicated), then offers Promote or Demolish.
+ *
+ * Demolish lives here rather than on the mesh click because an instant,
+ * unconfirmed demolition on a single click was a real hazard. Rendered by the
+ * page OUTSIDE the block/street/marquee selection ternary, for the same reason
+ * ContextPanel is: the M4 flow is "load a place, click a building" with no
+ * block selected.
+ */
+export function ContextBuildingPanel({
+  id,
+  area,
+  vertices,
+  preview,
+  onPromote,
+  onDemolish,
+  onClose,
+}: {
+  id: string;
+  area: number;
+  vertices: number;
+  /** null when the parcel cannot carry a facade. */
+  preview: { width: number; depth: number } | null;
+  onPromote: () => void;
+  onDemolish: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <Section title="Context building">
+      <p className="text-[11px] text-[var(--muted)]">{id}</p>
+      <p className="text-[11px] text-[var(--muted)]">
+        {Math.round(area).toLocaleString()} m² · {vertices} vertices
+      </p>
+      {preview ? (
+        <p className="text-[11px] text-[var(--muted)]">
+          Promotes to a {preview.width.toFixed(1)} m frontage,{" "}
+          {preview.depth.toFixed(1)} m deep.
+        </p>
+      ) : (
+        <p className="text-[11px] text-[var(--muted)]">
+          This footprint is too small to carry a facade.
+        </p>
+      )}
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={onPromote}
+          disabled={!preview}
+          className="text-[11px] px-2 py-0.5 rounded border border-[var(--accent)] text-[var(--accent)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        >
+          Promote to lot
+        </button>
+        <button
+          type="button"
+          onClick={onDemolish}
+          className="text-[11px] px-2 py-0.5 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30 transition-colors"
+        >
+          Demolish
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-[11px] px-2 py-0.5 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30 transition-colors"
+        >
+          Close
+        </button>
+      </div>
+    </Section>
+  );
+}
