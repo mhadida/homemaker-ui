@@ -33,12 +33,15 @@ import {
 } from "@/lib/facade/blocks";
 import {
   toJSON,
+  toCompactJSON,
   fromJSON,
   sceneHasContent,
   type SceneState,
 } from "@/lib/facade/document";
 import { syncStreetBlocks } from "@/lib/facade/streetBlocks";
 import { rerollBlock, generateBlock, deleteLot } from "@/lib/facade/generate";
+import { promoteParcel } from "@/lib/facade/promote";
+import { parcelArea } from "@/lib/geo/parcel";
 import { moveNode, deriveNodes } from "@/lib/facade/nodes";
 import { DEFAULT_GROUND, type Ground, type Heightfield } from "@/lib/facade/terrain";
 import { streetRefOf, STREET_WIDTH_DEFAULT } from "@/lib/facade/street";
@@ -90,6 +93,7 @@ import FacadeControls, {
   IntersectionInspector,
   SquareInspector,
   ContextPanel,
+  ContextBuildingPanel,
 } from "@/components/facade/FacadeControls";
 import PromptInput from "@/components/demo/PromptInput";
 
@@ -728,6 +732,70 @@ export default function FacadePage() {
    * clicked again, so this is the only way out. */
   const handleRestoreHidden = useCallback(() => setHiddenIds(new Set()), []);
 
+  /** Context buildings suppressed because they were PROMOTED. Derived from the
+   * blocks, never stored — which is what stops "Restore hidden" resurrecting a
+   * grey copy on top of a promoted block, and makes deleting a promoted block
+   * bring the real building back, a natural undo with no undo stack. */
+  const promotedSources = useMemo(
+    () =>
+      new Set(
+        blocks
+          .map((b) => b.parcel?.source)
+          .filter((s): s is string => s !== undefined),
+      ),
+    [blocks],
+  );
+
+  /** What the backdrop actually hides: demolished PLUS promoted. `hiddenIds`
+   * alone still drives the Restore-hidden count, so restoring only ever brings
+   * back things the user demolished. */
+  const suppressedIds = useMemo(() => {
+    if (promotedSources.size === 0) return hiddenIds;
+    const next = new Set(hiddenIds);
+    for (const id of promotedSources) next.add(id);
+    return next;
+  }, [hiddenIds, promotedSources]);
+
+  const selectedContextObj = useMemo(
+    () =>
+      selectedContextBuilding
+        ? (contextBuildings.find((b) => b.id === selectedContextBuilding) ?? null)
+        : null,
+    [selectedContextBuilding, contextBuildings],
+  );
+
+  /** The block promotion WOULD produce, built with the real function so the
+   * panel and the result can never disagree and the depth clamp is not
+   * duplicated. promoteParcel is pure, so this costs nothing and is thrown
+   * away unless the user commits. The seed is fixed only to keep the preview
+   * stable while the panel is open; committing draws a fresh one. */
+  const promotePreview = useMemo(() => {
+    if (!selectedContextObj) return null;
+    const b = promoteParcel(selectedContextObj, streetNetwork, DEFAULT_GEN, 1);
+    if (!b) return null;
+    return {
+      width: b.lots[0].params.width,
+      depth: b.lots[0].params.massingDepth ?? 0,
+    };
+  }, [selectedContextObj, streetNetwork]);
+
+  /** Promote the selected footprint into an editable block. */
+  const handlePromoteContextBuilding = useCallback(() => {
+    if (!selectedContextObj) return;
+    const block = promoteParcel(
+      selectedContextObj,
+      streetNetwork,
+      DEFAULT_GEN,
+      Math.floor(Math.random() * 1e9),
+    );
+    if (!block) return;
+    // Every block mutation funnels through syncCorners, so a promoted block
+    // joins corner detection the moment it lands.
+    setBlocks((bs) => syncCorners([...bs, block], cornerChoices, maxCornerAngle));
+    setSelectedContextBuilding(null);
+    setSelected({ blockId: block.id, lot: 0, level: "block" });
+  }, [selectedContextObj, streetNetwork, cornerChoices, maxCornerAngle]);
+
   // Restore the autosave once on mount (survives refresh/crash). Guarded so
   // Strict Mode's double-invoke can't apply it twice.
   const restoredRef = useRef(false);
@@ -761,20 +829,39 @@ export default function FacadePage() {
     }
     everHadContentRef.current = true;
     const id = window.setTimeout(() => {
-      window.localStorage.setItem(
-        AUTOSAVE_KEY,
-        toJSON({
-          blocks,
-          cornerChoices,
-          ground,
-          streetWidth,
-          maxCornerAngle,
-          streetNetwork,
-          anchor,
-          bbox,
-          hiddenIds,
-        }),
-      );
+      // Compact, not pretty-printed: nothing reads this by eye, and the
+      // indented form of a real-city scene measured 2.79 MB — past Chrome's
+      // ~5 MB UTF-16 budget. See toCompactJSON.
+      const text = toCompactJSON({
+        blocks,
+        cornerChoices,
+        ground,
+        streetWidth,
+        maxCornerAngle,
+        streetNetwork,
+        anchor,
+        bbox,
+        hiddenIds,
+      });
+      // A full quota must NEVER take the editor down: this runs in a timeout,
+      // so an uncaught QuotaExceededError escapes as an unhandled error and
+      // kills the React tree. The scene is still in memory and Save still
+      // works, so degrading to "no autosave" is the correct failure.
+      try {
+        window.localStorage.setItem(AUTOSAVE_KEY, text);
+      } catch {
+        try {
+          // The stale value is itself occupying the quota — free it and retry
+          // once, which succeeds whenever the new scene is no bigger.
+          window.localStorage.removeItem(AUTOSAVE_KEY);
+          window.localStorage.setItem(AUTOSAVE_KEY, text);
+        } catch (err) {
+          console.warn(
+            "Autosave skipped — scene too large for localStorage.",
+            err,
+          );
+        }
+      }
     }, 500);
     return () => window.clearTimeout(id);
   }, [blocks, cornerChoices, ground, streetWidth, maxCornerAngle, streetNetwork, anchor, bbox, hiddenIds]);
@@ -1750,7 +1837,7 @@ export default function FacadePage() {
             onSelectSquare={handleSelectSquare}
             onClearSelection={handleClearSelection}
             contextBuildings={contextBuildings}
-            hiddenIds={hiddenIds}
+            hiddenIds={suppressedIds}
             contextVisible={contextVisible}
             selectedContextBuilding={selectedContextBuilding}
             onSelectContextBuilding={setSelectedContextBuilding}
@@ -1780,6 +1867,23 @@ export default function FacadePage() {
               streetsTotal={streetsInfo?.total ?? 0}
               streetsError={streetsError}
             />
+            {/* M4 inspector — also above the selection ternary, for the same
+             * reason: the flow is "load a place, click a building" with no
+             * block selected. */}
+            {selectedContextObj && (
+              <ContextBuildingPanel
+                id={selectedContextObj.id}
+                area={parcelArea(selectedContextObj.footprint)}
+                vertices={selectedContextObj.footprint.length}
+                preview={promotePreview}
+                onPromote={handlePromoteContextBuilding}
+                onDemolish={() => {
+                  handleHideContextBuilding(selectedContextObj.id);
+                  setSelectedContextBuilding(null);
+                }}
+                onClose={() => setSelectedContextBuilding(null)}
+              />
+            )}
             {marquee ? (
               <MarqueeControls
                 marquee={marquee}

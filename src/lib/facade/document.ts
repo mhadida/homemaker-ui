@@ -86,9 +86,22 @@ export function serializeScene(s: SceneState): FacadeDocument {
   };
 }
 
-/** Pure: pretty JSON text of the current scene (what Save writes to a file). */
+/** Pure: pretty JSON text of the current scene (what Save writes to a file).
+ * Indented because a downloaded file is read by humans. */
 export function toJSON(s: SceneState): string {
   return JSON.stringify(serializeScene(s), null, 2);
+}
+
+/** Pure: COMPACT JSON text, for the localStorage autosave.
+ *
+ * Deliberately not `toJSON`: nothing reads the autosave by eye, and the
+ * indented form of a real-city scene (a 128x79 terrain heightfield plus 212
+ * imported streets, each number on its own indented line) measured **2.79 MB**
+ * — past Chrome's ~5 MB UTF-16 localStorage budget, so every autosave threw
+ * QuotaExceededError. Same bytes of information, a fraction of the
+ * characters. */
+export function toCompactJSON(s: SceneState): string {
+  return JSON.stringify(serializeScene(s));
 }
 
 const isFiniteNumber = (v: unknown): v is number =>

@@ -3,6 +3,7 @@ import {
   serializeScene,
   deserializeScene,
   toJSON,
+  toCompactJSON,
   fromJSON,
   sceneHasContent,
   SCENE_VERSION,
@@ -643,4 +644,47 @@ describe("document round-trip of block.parcel", () => {
       expect(out.scene.blocks[0].parcel).toBeUndefined();
     },
   );
+});
+
+describe("toCompactJSON", () => {
+  it("round-trips identically to toJSON", () => {
+    const s = scene();
+    const compact = deserializeScene(JSON.parse(toCompactJSON(s)));
+    const pretty = deserializeScene(JSON.parse(toJSON(s)));
+    expect(compact.ok).toBe(true);
+    expect(pretty.ok).toBe(true);
+    if (!compact.ok || !pretty.ok) return;
+    expect(compact.scene).toEqual(pretty.scene);
+  });
+
+  it("is substantially smaller than the indented form", () => {
+    // The autosave key is machine-read only, and the indented form of a
+    // real-city scene ran to 2.79 MB — past Chrome's localStorage budget.
+    const s = scene();
+    expect(toCompactJSON(s).length).toBeLessThan(toJSON(s).length * 0.7);
+  });
+
+  it("stays compact for a heightfield-heavy scene, the case that overflowed", () => {
+    const cols = 128;
+    const rows = 79;
+    const withHf: SceneState = {
+      ...scene(),
+      ground: {
+        slope: 0,
+        azimuth: 0,
+        hf: {
+          originX: 0,
+          originZ: 0,
+          spacing: 10,
+          cols,
+          rows,
+          data: Array.from({ length: cols * rows }, (_, i) => i * 0.125),
+        },
+      },
+    };
+    // Indented, every one of the 10,112 samples costs its own line + indent.
+    expect(toCompactJSON(withHf).length).toBeLessThan(
+      toJSON(withHf).length * 0.5,
+    );
+  });
 });
