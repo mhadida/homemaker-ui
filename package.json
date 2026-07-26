@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "build:default-glb": "python/.venv/bin/python3 python/build_default.py"
+    "build:default-glb": "python/.venv/bin/python3 python/build_default.py",
+    "fixture:amsterdam": "node scripts/capture-fixture.mjs"
   },
   "dependencies": {
     "@mapbox/mapbox-gl-draw": "^1.5.1",

@@ -45,6 +45,13 @@ import { streetRefOf, STREET_WIDTH_DEFAULT } from "@/lib/facade/street";
 import { anchorOf, type GeoAnchor, type LngLatBBox } from "@/lib/geo/project";
 import type { ContextBuilding } from "@/lib/geo/buildings";
 import {
+  DEMO_ANCHOR,
+  DEMO_BBOX,
+  DEMO_BUILDINGS_URL,
+  DEMO_STREETS_URL,
+  DEMO_TERRAIN_URL,
+} from "@/lib/geo/demoPlace";
+import {
   EMPTY_NETWORK,
   nextStreetId,
   reserveStreetIds,
@@ -276,6 +283,11 @@ export default function FacadePage() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [terrainLoading, setTerrainLoading] = useState(false);
   const [terrainError, setTerrainError] = useState<string | null>(null);
+  // "Demo place": loads the committed Amsterdam fixture (terrain + buildings
+  // + streets) from static /fixtures/*.json — no Overpass/AWS calls. Own
+  // loading/error UI, separate from the real-place loaders above.
+  const [demoLoading, setDemoLoading] = useState(false);
+  const [demoError, setDemoError] = useState<string | null>(null);
   // Context buildings (M2). The footprints are page state ONLY — never
   // serialized; `bbox` is the key they are re-fetched from on load.
   const [contextBuildings, setContextBuildings] = useState<ContextBuilding[]>([]);
@@ -605,6 +617,95 @@ export default function FacadePage() {
     setHiddenIds(new Set());
     setBuildingsError(null);
     setBuildingsInfo(null);
+  }, [hasImportedStreets]);
+
+  /** "Demo place": adopt the committed Amsterdam fixture as the scene, byte-
+   * for-byte the same end state "Load place" would leave for that bbox — but
+   * fetching the three static /fixtures/*.json files instead of hitting
+   * Overpass/AWS. Reuses the same state shape and the same buildingsFromStreets
+   * pre-import stash loadStreets uses (mirrored inline since there is no
+   * server round-trip to await). */
+  const handleLoadDemoPlace = useCallback(async () => {
+    // Bump BOTH tokens before touching any state — an in-flight real
+    // Overpass/terrain fetch from an earlier "Load place" must not be able
+    // to land after this and clobber the demo (same race loadContextBuildings
+    // / loadStreets / handleClearTerrain guard against).
+    const bToken = ++buildingsReqRef.current;
+    const sToken = ++streetsReqRef.current;
+    setTerrainError(null);
+    setDemoError(null);
+    setDemoLoading(true);
+    setBuildingsLoading(true);
+    setBuildingsError(null);
+    setBuildingsInfo(null);
+    setStreetsLoading(true);
+    setStreetsError(null);
+    setStreetsInfo(null);
+    try {
+      const [terrainRes, buildingsRes, streetsRes] = await Promise.all([
+        fetch(DEMO_TERRAIN_URL),
+        fetch(DEMO_BUILDINGS_URL),
+        fetch(DEMO_STREETS_URL),
+      ]);
+      const [terrainJson, buildingsJson, streetsJson] = (await Promise.all([
+        terrainRes.json(),
+        buildingsRes.json(),
+        streetsRes.json(),
+      ])) as [
+        { heightfield?: Heightfield },
+        { buildings?: ContextBuilding[]; truncated?: boolean; total?: number },
+        { streets?: Street[]; truncated?: boolean; total?: number },
+      ];
+      if (!terrainRes.ok || !terrainJson.heightfield)
+        throw new Error(`terrain fixture: HTTP ${terrainRes.status}`);
+      if (!buildingsRes.ok || !buildingsJson.buildings)
+        throw new Error(`buildings fixture: HTTP ${buildingsRes.status}`);
+      if (!streetsRes.ok || !streetsJson.streets)
+        throw new Error(`streets fixture: HTTP ${streetsRes.status}`);
+
+      // A newer call (a real "Load place", another demo click, or a clear)
+      // superseded this one while the fetches were in flight — drop it.
+      if (buildingsReqRef.current !== bToken || streetsReqRef.current !== sToken)
+        return;
+
+      reserveStreetIds(streetsJson.streets);
+      setGround((g) => ({ ...g, hf: terrainJson.heightfield! }));
+      setAnchor(DEMO_ANCHOR);
+      setBbox(DEMO_BBOX);
+      setHiddenIds(new Set());
+      setPickerOpen(false);
+
+      setContextBuildings(buildingsJson.buildings);
+      setBuildingsInfo({
+        truncated: !!buildingsJson.truncated,
+        total: buildingsJson.total ?? buildingsJson.buildings.length,
+      });
+
+      // Importing REPLACES the network, same as loadStreets.
+      setStreetNetwork({ ...EMPTY_NETWORK, streets: streetsJson.streets });
+      setStreetsInfo({
+        truncated: !!streetsJson.truncated,
+        total: streetsJson.total ?? streetsJson.streets.length,
+      });
+
+      // Same stash-then-force-off dance loadStreets does, so "Clear terrain"
+      // restores the user's real preference afterward.
+      if (!hasImportedStreets) {
+        setBuildingsFromStreets((prev) => {
+          buildingsFromStreetsStashRef.current = prev;
+          return false;
+        });
+      } else {
+        setBuildingsFromStreets(false);
+      }
+    } catch (e) {
+      if (buildingsReqRef.current === bToken && streetsReqRef.current === sToken)
+        setDemoError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (buildingsReqRef.current === bToken) setBuildingsLoading(false);
+      if (streetsReqRef.current === sToken) setStreetsLoading(false);
+      setDemoLoading(false);
+    }
   }, [hasImportedStreets]);
 
   /** Demolish one context building (click-to-hide), wired to ContextBuildings'
@@ -1513,6 +1614,20 @@ export default function FacadePage() {
           >
             Load place
           </button>
+          <button
+            type="button"
+            onClick={handleLoadDemoPlace}
+            disabled={demoLoading}
+            title="Load a committed Amsterdam snapshot — terrain, buildings and streets with no network calls"
+            className="text-[11px] px-2 py-0.5 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {demoLoading ? "Loading demo…" : "Demo place"}
+          </button>
+          {demoError && (
+            <span className="text-[11px] text-red-400" role="alert">
+              {demoError}
+            </span>
+          )}
           {ground.hf && (
             <button
               type="button"
