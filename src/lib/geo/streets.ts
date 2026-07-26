@@ -96,19 +96,40 @@ function polylineLength(points: Vec2[]): number {
  * guard against, and permanently reject any `moveStreetNode` drag touching
  * one. A street that collapses end-to-end to fewer than `minSeg` apart is
  * still emitted as a short 2-point stub rather than dropped — callers that
- * care about a minimum street length filter afterwards. */
-export function collapseShortSegments(points: Vec2[], minSeg: number): Vec2[] {
+ * care about a minimum street length filter afterwards.
+ *
+ * `protectedIdx` — indices into `points` that must NEVER be dropped even when
+ * closer than `minSeg` to a kept neighbour. OSM splits ways exactly at real
+ * junctions, so an interior vertex of a merged chain is frequently precisely
+ * where a different street/bridge/canal meets it; collapsing it away would
+ * silently delete that junction (`deriveIntersections` would no longer find
+ * it, and `moveStreetNode` would stop treating the two streets as welded). */
+export function collapseShortSegments(
+  points: Vec2[],
+  minSeg: number,
+  protectedIdx: ReadonlySet<number> = new Set(),
+): Vec2[] {
   if (points.length <= 2) return points.map((p): Vec2 => [p[0], p[1]]);
   const out: Vec2[] = [[points[0][0], points[0][1]]];
+  const outIdx: number[] = [0];
   for (let i = 1; i < points.length - 1; i++) {
-    if (dist(out[out.length - 1], points[i]) >= minSeg) {
+    if (protectedIdx.has(i) || dist(out[out.length - 1], points[i]) >= minSeg) {
       out.push([points[i][0], points[i][1]]);
+      outIdx.push(i);
     }
   }
   const finalPt: Vec2 = [points[points.length - 1][0], points[points.length - 1][1]];
   // Also drop trailing kept vertices that would otherwise leave the FINAL
-  // segment short — never pops below the first vertex.
-  while (out.length > 1 && dist(out[out.length - 1], finalPt) < minSeg) out.pop();
+  // segment short — never pops a protected junction vertex, and never pops
+  // below the first vertex.
+  while (
+    out.length > 1 &&
+    dist(out[out.length - 1], finalPt) < minSeg &&
+    !protectedIdx.has(outIdx[outIdx.length - 1])
+  ) {
+    out.pop();
+    outIdx.pop();
+  }
   out.push(finalPt);
   return out;
 }
@@ -183,17 +204,46 @@ export function osmToStreets(
   maxStreets: number,
 ): StreetFetchResult {
   const usable = ways.filter((w) => classifyWay(w.tags) && (w.geometry?.length ?? 0) >= 2);
+  const chains = mergeWays(usable);
+
+  // Coordinates shared by ways belonging to >= 2 DIFFERENT merged chains are
+  // genuine cross-street junctions — OSM splits ways at every real crossing,
+  // so the shared node's EXACT raw lat/lon appears in both ways' geometry.
+  // Built and looked up entirely from RAW lat/lon (never the projected local
+  // frame), keyed the same exact-coordinate way `mergeWays`' own `endKey`
+  // does, so "shared" here is identical to what junction derivation matches
+  // on and there is no float-reprojection drift to worry about. A coordinate
+  // shared only by ways WITHIN the same chain is just an internal OSM
+  // way-split seam (a tag change, not a real junction) and must stay
+  // collapsible — that IS the fix this file exists for.
+  const coordToChains = new Map<string, Set<number>>();
+  chains.forEach((chain, chainIdx) => {
+    for (const w of chain) {
+      for (const p of w.geometry ?? []) {
+        const k = endKey(p);
+        let set = coordToChains.get(k);
+        if (!set) { set = new Set(); coordToChains.set(k, set); }
+        set.add(chainIdx);
+      }
+    }
+  });
+  const junctionCoords = new Set(
+    [...coordToChains].filter(([, s]) => s.size >= 2).map(([k]) => k),
+  );
+
   const all: Street[] = [];
-  for (const chain of mergeWays(usable)) {
+  for (const chain of chains) {
     const cls = classifyWay(chain[0].tags);
     if (!cls) continue;
     const points: Vec2[] = [];
+    const junctionIdx = new Set<number>();
     for (const w of chain) {
       for (const p of w.geometry!) {
         const xz = project(p.lat, p.lon, anchor);
         // Drop the duplicated shared node where two ways join.
         const last = points[points.length - 1];
         if (last && last[0] === xz[0] && last[1] === xz[1]) continue;
+        if (junctionCoords.has(endKey(p))) junctionIdx.add(points.length);
         points.push(xz);
       }
     }
@@ -202,7 +252,7 @@ export function osmToStreets(
     all.push({
       id: `street-osm-${chain[0].id}${chain.length > 1 ? "m" : ""}`,
       type: cls.type,
-      points: collapseShortSegments(points, MIN_STREET_SEG),
+      points: collapseShortSegments(points, MIN_STREET_SEG, junctionIdx),
       ...(width !== undefined ? { width } : {}),
       ...(cls.traffic ? { traffic: cls.traffic } : {}),
     });

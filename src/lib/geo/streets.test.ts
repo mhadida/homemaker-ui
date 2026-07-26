@@ -8,7 +8,7 @@ import {
   type OsmWay,
 } from "./streets";
 import type { GeoAnchor } from "./project";
-import { MIN_STREET_SEG } from "@/lib/street/intersections";
+import { MIN_STREET_SEG, deriveIntersections } from "@/lib/street/intersections";
 
 const ANCHOR: GeoAnchor = { lat0: 52.37, lon0: 4.89 };
 
@@ -84,6 +84,27 @@ describe("collapseShortSegments", () => {
     const out = collapseShortSegments(pts, MIN_STREET_SEG);
     expect(out[0]).toEqual([0, 0]);
     expect(out[out.length - 1]).toEqual([20, 0]);
+  });
+  it("never collapses a protected (junction) vertex even when closer than minSeg to its neighbour", () => {
+    const pts: [number, number][] = [[0, 0], [0.5, 0], [10, 0]];
+    // index 1 ([0.5,0]) is protected — would normally collapse (0.5m < 1m).
+    const out = collapseShortSegments(pts, MIN_STREET_SEG, new Set([1]));
+    expect(out).toEqual([[0, 0], [0.5, 0], [10, 0]]);
+  });
+  it("still collapses a non-protected sub-minSeg vertex when a DIFFERENT index is protected", () => {
+    const pts: [number, number][] = [[0, 0], [0.5, 0], [0.6, 0], [10, 0]];
+    // only index 2 is protected; index 1 must still collapse away.
+    const out = collapseShortSegments(pts, MIN_STREET_SEG, new Set([2]));
+    expect(out).toEqual([[0, 0], [0.6, 0], [10, 0]]);
+  });
+  it("a protected vertex near the true end survives even though it leaves a short final segment", () => {
+    // Without protection this exact input collapses to [[0,0],[10,0]] — see
+    // "also drops a trailing kept vertex..." above. Protecting index 1 must
+    // override that trailing cleanup: a real junction is never worth
+    // sacrificing to avoid a short trailing segment.
+    const pts: [number, number][] = [[0, 0], [9.5, 0], [10, 0]];
+    const out = collapseShortSegments(pts, MIN_STREET_SEG, new Set([1]));
+    expect(out).toEqual([[0, 0], [9.5, 0], [10, 0]]);
   });
 });
 
@@ -258,5 +279,49 @@ describe("osmToStreets", () => {
     expect(r.truncated).toBe(true);
     expect(r.streets).toHaveLength(1);
     expect(r.streets[0].id).toBe("street-osm-1m"); // the merged chain survives, not the stub
+  });
+
+  // Regression guard for the junction-aware collapse: OSM splits ways exactly
+  // at real crossings, so a merged chain's interior vertex is frequently
+  // precisely where a different street/bridge/canal meets it. If that vertex
+  // sits within MIN_STREET_SEG of its neighbour on the SAME chain — exactly
+  // the population the plain collapse fix targets — a junction-BLIND collapse
+  // deletes it, and the junction silently disappears (deriveIntersections
+  // stops finding it, moveStreetNode stops treating the two streets as
+  // welded). This test mirrors that exact scenario.
+  it("never collapses a real cross-street junction, even close to its neighbour and off-line — while an ordinary short vertex on the same chain still collapses", () => {
+    // Local layout after `project` (informally): A=(0,0) --~99.6m--> J --~0.4m--> B=(100,0).
+    // J sits ~5cm off the straight A–B line (ordinary GPS/curvature noise)
+    // and ~0.4m from B, its neighbour in the merged "Kade Straat" chain — too
+    // far off-line for deriveIntersections' T-junction fallback to rescue
+    // (5cm >> ON_SEG_EPS). A THIRD way ("Kanaal") shares J's exact raw
+    // coordinate — a genuine OSM-style shared junction node.
+    const M_PER_DEG_LAT = (Math.PI / 180) * 6378137; // same R as project()
+    const M_PER_DEG_LON = M_PER_DEG_LAT * Math.cos((ANCHOR.lat0 * Math.PI) / 180);
+    const jLat = ANCHOR.lat0 + 0.05 / M_PER_DEG_LAT; // ~5cm off-line
+    const jLon = ANCHOR.lon0 + 99.6 / M_PER_DEG_LON; // ~99.6m east
+    const J: [number, number] = [jLat, jLon];
+    const A: [number, number] = [ANCHOR.lat0, ANCHOR.lon0];
+    const B: [number, number] = [ANCHOR.lat0, ANCHOR.lon0 + 100 / M_PER_DEG_LON]; // ~100m east
+    const C: [number, number] = [ANCHOR.lat0 + 50 / M_PER_DEG_LAT, jLon]; // ~50m further, off "Kanaal"
+    // An ordinary, non-shared extra vertex ~7cm from A — nothing else
+    // touches it, so it must still collapse away exactly as before this fix.
+    const extra: [number, number] = [ANCHOR.lat0, ANCHOR.lon0 + 0.07 / M_PER_DEG_LON];
+
+    const chainA = way(1, "Kade Straat", [A, extra, J]);
+    const chainB = way(2, "Kade Straat", [J, B]);
+    const crossing = way(3, "Kanaal", [J, C]);
+
+    const r = osmToStreets([chainA, chainB, crossing], ANCHOR, 100);
+    expect(r.streets).toHaveLength(2);
+
+    const kade = r.streets.find((s) => s.id === "street-osm-1m")!;
+    // `extra` collapsed away (an ordinary short vertex, no junction there);
+    // `J` survives (a real junction) despite being CLOSER to B than `extra`
+    // was to A.
+    expect(kade.points).toHaveLength(3); // A, J, B
+
+    const is = deriveIntersections({ streets: r.streets, roundabouts: [] });
+    expect(is.some((i) => i.kind === "node")).toBe(true);
   });
 });
