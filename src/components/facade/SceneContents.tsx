@@ -64,6 +64,11 @@ import {
 const BASEMENT_MIN = 0.3; // no sliver plinths below this drop
 const BASEMENT_COLOR = "#6f6a62"; // stone
 
+/** Desaturated gold for a real imported plot boundary (M4) — deliberately
+ * unlike the accent used for block/lot selection, so a parcel never reads as
+ * "selected". */
+const PARCEL_COLOR = "#a89060";
+
 // Stable identities for SceneContents' optional context-building props — a
 // fresh [] / new Set() literal inline on every render would change identity
 // each frame and thrash ContextBuildings' memos.
@@ -280,6 +285,44 @@ function DrapedSidewalk({ frame, ground }: { frame: BlockFrame; ground: Ground }
   );
 }
 
+/** A promoted block's real parcel boundary, draped on the ground (M4).
+ *
+ * Deliberately FIXED: it does not follow the block when lots are resized or a
+ * node is dragged, because it is a real plot boundary — seeing the building
+ * leave its plot is information the designer wants, not a bug. Dashed so it
+ * reads as a survey line rather than built geometry. */
+function ParcelOutline({
+  outline,
+  ground,
+}: {
+  outline: [number, number][];
+  ground: Ground;
+}) {
+  const points = useMemo(
+    () =>
+      // Closed loop: repeat the first vertex so the ring joins up. Sits just
+      // above the block line (0.06) so the two never z-fight.
+      [...outline, outline[0]].map(
+        ([x, z]) =>
+          [x, groundHeightAt(x, z, ground) + 0.07, z] as [number, number, number],
+      ),
+    [outline, ground],
+  );
+  // Never mount an empty fat line — a Line2 compiled with empty geometry
+  // produces invalid WGSL that stays cached.
+  if (outline.length < 3) return null;
+  return (
+    <Line
+      points={points}
+      color={PARCEL_COLOR}
+      lineWidth={1.4}
+      dashed
+      dashSize={0.7}
+      gapSize={0.45}
+    />
+  );
+}
+
 function BlockGroup({
   block,
   selected,
@@ -398,6 +441,11 @@ function BlockGroup({
       {/* Per-block sidewalk strip on the street side of the line, draped to
         * follow the tilted ground. */}
       {!openFill && <DrapedSidewalk frame={frame} ground={ground} />}
+      {/* Real parcel boundary for a promoted block (M4). Absent on drawn and
+        * street-derived blocks, so a scene with no place is byte-identical. */}
+      {block.parcel && (
+        <ParcelOutline outline={block.parcel.outline} ground={ground} />
+      )}
       {/* The block's line — always visible in plan, accented when selected;
        * each endpoint rides the tilted ground so it doesn't float on slopes */}
       <Line
