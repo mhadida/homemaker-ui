@@ -50,18 +50,28 @@ Three consequences drive the whole design:
    "front edge" to grab. A frontage is a *chain* of short edges, so any design
    that picks the longest edge as the facade is dead on arrival.
 
-Prototyped frontage derivation (near-collinear chains scored by length and
-street proximity) run over all 1,585 fixture buildings:
+Frontage derivation (near-collinear chains scored by length, street proximity
+**and facing**) run over all 1,585 fixture buildings:
 
 ```
-frontage derived: 1574 / 1585  (99.3%)   failed: 11
-frontage length (m)   p05 4.3   median 13.9   p95 32.3
-parcel depth   (m)   p05 2.7   median  6.0   p95 28.7
-depth < 3 m  (below MASSING_DEPTH_MIN):   6.4%
-depth > 20 m (above MASSING_DEPTH_MAX):  10.5%
-frontage < 2 m:                            0.2%
-frontage >= 10 m:                           73%
+frontage derived: 1571 / 1585  (99.1%)   failed: 14
+frontage length (m)   p05 3.2   median  6.5   p95 26.9
+parcel depth   (m)   p05 3.0   median 12.5   p95 33.6
+depth < 3 m  (below MASSING_DEPTH_MIN):   5.0%
+depth > 20 m (above MASSING_DEPTH_MAX):  22.3%
+frontage >= 10 m:                           34%
 ```
+
+**The facing term is load-bearing, and an early prototype without it was
+wrong.** Scoring on `length / (1 + k·dist)` alone puts the facade on a canal
+house's 25 m PARTY WALL instead of its 6 m canal frontage, because a long edge
+running away from the street is still close to it at one end. That prototype
+reported median frontage **13.9 m** and median depth **6.0 m** — Amsterdam
+exactly backwards — and still "succeeded" on 99.3% of buildings, because
+success measures whether a frontage was produced, not whether it was the right
+one. With facing included the same corpus reads 6.5 m wide and 12.5 m deep,
+which is what a canal house actually is. Regression-tested in
+`parcel.test.ts` ("puts the facade on a canal house's NARROW end").
 
 ## Decisions
 
@@ -69,9 +79,9 @@ frontage >= 10 m:                           73%
 |---|---|---|
 | **How faithful is the 3D mass?** | **Parcel outline only.** The real polygon is the lot boundary drawn on the ground; the building is the EXISTING rectangular box engine, its width and depth derived from the polygon. | The engine's core assumption is *straight facade line + rectangular box body* — `blockFrame` reduces a block to `origin/dir/normal/length`, and roofs, section strips, basements, corner miters and the window instancer are all built on that box. A polygon mass would degrade every one of them on 82% of the city. This choice turns M4 from "teach the engine about polygons" into "derive four numbers from a polygon", which is a pure-function problem. **Accepted tradeoff:** the box under-fills the parcel (median 91%, p10 71%); the outline shows exactly where. |
 | **What does promotion produce?** | **A fresh design on the plot.** Reality contributes the *plot* — frontage line, facing, width, depth. The generator contributes storeys, style, roof, colour, ornament. | The user's call. Removes any need for a height→storeys mapping, so `ContextBuilding.height` is not consumed by promotion at all. **Accepted tradeoff:** the promoted building's height no longer matches the real one, so the skyline changes on promotion. |
-| **Where does `massingDepth` come from?** | **The parcel, not the generator.** | `generateLot` draws `massingDepth` from 6–12 m, but median real depth is 6.0 m and p05 is 2.7 m. A generated depth would push the box straight out through the back of its own parcel outline on a large fraction of plots — visibly broken, and it would undercut the point of drawing the real outline. Depth is plot geometry, not building character. |
-| **Depth clamps** | Clamp to the existing `[MASSING_DEPTH_MIN, MASSING_DEPTH_MAX]` = `[3, 20]`. Do NOT widen the range. | The 10.5% of plots deeper than 20 m get a 20 m building and a deep back garden — which is how Amsterdam plots actually work, so the clamp is architecturally right rather than merely tolerable. The 6.4% shallower than 3 m overshoot their plot by ≤0.3 m; the outline makes it visible. Widening `MASSING_DEPTH_MAX` would change the depth slider's range for every existing building. |
-| **Subdivision** | **One outline → one lot**, plus a reversible **Subdivide ↔ Merge** pair in the block panel. | 73% of real frontages are ≥10 m, so the default `lotWidth` of 5–9 m would silently turn one real building into 2+ designed ones. Defaulting to 1:1 preserves the parcel→lot relationship the constraint implies; the action makes a terrace an explicit, per-building choice. |
+| **Where does `massingDepth` come from?** | **The parcel, not the generator.** | `generateLot` draws `massingDepth` from 6–12 m, but real plot depth spans p05 3.0 m to p95 33.6 m around a 12.5 m median. A generated depth would sit inside its own parcel only by luck — too deep on a shallow plot (pushing the box out through the back of its outline) and far too shallow on a deep one. Depth is plot geometry, not building character. |
+| **Depth clamps** | Clamp to the existing `[MASSING_DEPTH_MIN, MASSING_DEPTH_MAX]` = `[3, 20]`. Do NOT widen the range. | The 22.3% of plots deeper than 20 m get a 20 m building and a deep back garden — which is how Amsterdam plots actually work (deep courtyards and gardens behind the canal houses), so the clamp is architecturally right rather than merely tolerable. The 5.0% shallower than 3 m overshoot their plot by a few centimetres; the outline makes it visible. Widening `MASSING_DEPTH_MAX` would change the depth slider's range for every existing building. |
+| **Subdivision** | **One outline → one lot**, plus a reversible **Subdivide ↔ Merge** pair in the block panel. | 34% of real frontages are ≥10 m, so the default `lotWidth` of 5–9 m would silently turn one real building in three into 2+ designed ones. Defaulting to 1:1 preserves the parcel→lot relationship the constraint implies; the action makes a terrace an explicit, per-building choice. (An earlier prototype put this at 73%, but that was the pre-facing scoring measuring side walls as frontages.) |
 | **Promotion gesture** | **One at a time, via a Context Building inspector** (same idiom as the Street / Intersection / Square / Corner inspectors). | Smallest surface. The pure core (`polygon → FacadeBlock`) is identical for bulk, so marquee promote is cheap additive work later. It also retires a real wart: today a single Select-tool click **instantly demolishes** a real building with no confirmation. |
 | **Suppressing the grey original** | **Derived, not stored:** `promotedSources = new Set(blocks.map(b => b.parcel?.source).filter(Boolean))`; rendering hides `hiddenIds ∪ promotedSources`. | Matches the codebase's dominant pattern (nodes, corners, intersections, squares, junction pads and open blocks are all derived). Two behaviours fall out free: **Restore hidden** cannot resurrect a grey copy on top of a promoted block, and **deleting a promoted block brings the real building back** — a natural undo with no undo stack. |
 | **Does the outline move with the block?** | **No. The parcel outline is fixed.** | It is a real plot boundary. Dragging the building off its plot is then *visible*, which is information the designer wants. |
@@ -155,25 +165,36 @@ export function fitFrontage(
    already documents this, which is why it renders `DoubleSide`), so "outward"
    must be derived per polygon and never assumed.
 2. Group edges into maximal near-collinear chains, tolerance **20°**.
-3. Score each chain `length / (1 + STREET_PULL * distToStreet)` with
-   `STREET_PULL = 0.35`, where `distToStreet` is
-   `nearestPointOnStreets(probe, network)?.dist ?? 0` and `probe` is the chain
-   midpoint pushed `PROBE_OUT = 0.5` m along the outward normal. (Probing
-   *outward* rather than at the midpoint itself is what stops a chain on the
-   far side of the building from scoring as well as the near one on a narrow
-   plot.)
-4. The winner's endpoints become `line` **verbatim, unswapped**;
+3. Discard any chain shorter than `MIN_FRONTAGE` — too short to carry a facade
+   makes it a non-candidate, **not** a reason to reject the plot. A stepped
+   frontage often has its best-facing run in a 1.5 m step, and rejecting there
+   refused promotable buildings that had a longer usable chain right beside
+   them (measured: 98.6% → 99.1%).
+4. Score each surviving chain
+   `length * facing / (1 + STREET_PULL * distToStreet)`, with
+   `STREET_PULL = 0.35`, `probe` = the chain midpoint pushed
+   `PROBE_OUT = 0.5` m along the outward normal, and
+   `facing = OFF_STREET_FLOOR + (1 − OFF_STREET_FLOOR) · max(0, nOut · toStreetUnit)`
+   where `OFF_STREET_FLOOR = 0.25`. Probing *outward* stops the far side of a
+   narrow plot scoring as well as the near side; the `facing` factor is what
+   stops a long side wall beating a short street frontage (see above). The
+   floor is nonzero so a winner always exists — a plot ringed by streets, or
+   one a street runs straight through, still resolves. With no network, no
+   street in range, or a degenerate `toStreet`, `facing` is 1 and the longest
+   chain simply wins.
+5. The winner's endpoints become `line` **verbatim, unswapped**;
    `flipped = dot(n, nOut) < 0`, where `n = [-dir.z, dir.x]` is the normal
    `blockFrame` would derive unflipped and `nOut` is the chain's outward
    normal. `blockFrame` reads the endpoints in reverse when `flipped`, which
    negates the normal — so this single boolean is the whole facing decision,
    and it is the same field the existing `f` / Flip side control writes.
-5. `depth = max over ALL outline vertices of (−nOut · (v − line.a))`,
+6. `depth = max over ALL outline vertices of (−nOut · (v − line.a))`,
    returned **unclamped** (`promoteParcel` clamps). Taking the max over every
    vertex, not just the winning chain's, is what makes an L-shaped plot's
    depth correct.
-6. Return `null` when the outline has <3 vertices, zero area, or a winning
-   chain shorter than `MIN_FRONTAGE = 2` m (0.2% of real buildings).
+7. Return `null` when the outline has <3 vertices, zero area, or EVERY chain
+   is shorter than `MIN_FRONTAGE = 2` m — a genuinely tiny footprint (a shed,
+   a canopy). 14 of 1,585 real buildings, 0.9%.
 
 **Two deliberate choices, with reasons:**
 

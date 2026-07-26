@@ -482,6 +482,16 @@ const STREET_PULL = 0.35;
  * Probing OUTWARD rather than at the midpoint is what stops the chain on the
  * far side of a narrow plot from scoring as well as the near one. */
 const PROBE_OUT = 0.5;
+/** Score multiplier for a chain whose outward normal does not point at the
+ * street at all. Nonzero so a winner always exists (a plot ringed by streets,
+ * or one whose nearest street runs straight through it, still resolves), but
+ * low enough that facing dominates length.
+ *
+ * Without this term, length alone decides: on a 6 m x 25 m canal house the
+ * 25 m PARTY WALL outscores the 6 m canal frontage, and the facade lands on
+ * the side of the building. Distance cannot fix that on its own, because a
+ * long edge running away from the street is still close to it at one end. */
+const OFF_STREET_FLOOR = 0.25;
 
 /** Pick the street-facing frontage chain and fit the block line, facing and
  * depth. `network` null or empty makes every chain score `length / 1`, so the
@@ -503,7 +513,11 @@ export function fitFrontage(
   for (const c of edgeChains(outline)) {
     const d = sub(c.b, c.a);
     const length = len(d);
-    if (length < 1e-9) continue;
+    // Too short to carry a facade => not a CANDIDATE, rather than a reason to
+    // reject the whole plot. A stepped frontage often has its best-facing run
+    // in a 1.5 m step; rejecting there would refuse a perfectly promotable
+    // building that has a longer usable chain right beside it.
+    if (length < MIN_FRONTAGE) continue;
     const u: Vec2 = [d[0] / length, d[1] / length];
     // For a positive (CCW) signed area the interior lies to the LEFT of each
     // directed edge, so the outward normal is the right-hand one.
@@ -513,13 +527,27 @@ export function fitFrontage(
       mid[0] + nOut[0] * PROBE_OUT,
       mid[1] + nOut[1] * PROBE_OUT,
     ];
-    const dist = network ? (nearestPointOnStreets(probe, network)?.dist ?? 0) : 0;
-    const score = length / (1 + STREET_PULL * dist);
+    // No network, no street in range, or a street running straight through
+    // the probe: there is no facing information, so every chain is treated as
+    // facing and the longest simply wins.
+    const proj = network ? nearestPointOnStreets(probe, network) : null;
+    const toStreet: Vec2 | null = proj ? sub(proj.point, probe) : null;
+    const toStreetLen = toStreet ? len(toStreet) : 0;
+    const facing =
+      toStreet && toStreetLen > 1e-9
+        ? OFF_STREET_FLOOR +
+          (1 - OFF_STREET_FLOOR) *
+            Math.max(0, dot(nOut, [toStreet[0] / toStreetLen, toStreet[1] / toStreetLen]))
+        : 1;
+    const dist = proj?.dist ?? 0;
+    const score = (length * facing) / (1 + STREET_PULL * dist);
     if (!best || score > best.score) {
       best = { score, a: c.a, b: c.b, nOut, length };
     }
   }
-  if (!best || best.length < MIN_FRONTAGE) return null;
+  // Null only when EVERY chain was below MIN_FRONTAGE — a genuinely tiny
+  // footprint (a shed, a canopy), not a stepped one.
+  if (!best) return null;
 
   const u: Vec2 = [
     (best.b[0] - best.a[0]) / best.length,
