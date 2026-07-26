@@ -295,6 +295,17 @@ export default function FacadePage() {
   // default so every existing path is byte-identical.
   const [streetNetwork, setStreetNetwork] =
     useState<StreetNetwork>(EMPTY_NETWORK);
+  // Whether the network currently holds any IMPORTED street — the
+  // `street-osm-` id prefix `loadStreets`/src/lib/geo/streets.ts stamps on
+  // every fetched street identifies them (hand-drawn streets never carry it).
+  // Drives the Auto-buildings toggle's disabled state (generating frontages
+  // for ~227 real streets would create thousands of lots — see IMPORTANT 5)
+  // and the stash/restore of the user's buildingsFromStreets preference
+  // around an import (loadStreets / handleClearTerrain below).
+  const hasImportedStreets = useMemo(
+    () => streetNetwork.streets.some((s) => s.id.startsWith("street-osm-")),
+    [streetNetwork],
+  );
   // Street-network selection: a clicked ribbon or a clicked derived
   // intersection opens its own inspector, mutually exclusive with the
   // block/lot/corner selection and the marquee. null by default so every
@@ -374,6 +385,12 @@ export default function FacadePage() {
   const [streetsLoading, setStreetsLoading] = useState(false);
   const [streetsError, setStreetsError] = useState<string | null>(null);
   const [streetsInfo, setStreetsInfo] = useState<{ truncated: boolean; total: number } | null>(null);
+  // The user's buildingsFromStreets preference from BEFORE the first import
+  // in a run — stashed below right before an import forces it off, restored
+  // by handleClearTerrain once the imported streets are gone. Default mirrors
+  // buildingsFromStreets' own initial value, so a Clear Terrain before any
+  // import is a no-op.
+  const buildingsFromStreetsStashRef = useRef(true);
 
   /** Fetch real streets + canals for a bbox and adopt them as the network.
    * Like the buildings loader, this deliberately swallows its error: a failed
@@ -402,15 +419,26 @@ export default function FacadePage() {
       setStreetsInfo({ truncated: !!json.truncated, total: json.total ?? json.streets.length });
       // syncStreetBlocks would otherwise generate parametric frontage
       // buildings along EVERY imported street — thousands of lots on top of
-      // the real footprints already loaded as context.
-      setBuildingsFromStreets(false);
+      // the real footprints already loaded as context. Stash the user's real
+      // preference only when no import is ALREADY live (hasImportedStreets
+      // reflects the network from before this fetch replaced it) — a second
+      // "Load place" on top of an existing import must not overwrite the
+      // stash with the already-forced-off value.
+      if (!hasImportedStreets) {
+        setBuildingsFromStreets((prev) => {
+          buildingsFromStreetsStashRef.current = prev;
+          return false;
+        });
+      } else {
+        setBuildingsFromStreets(false);
+      }
     } catch (e) {
       if (streetsReqRef.current !== token) return;
       setStreetsError(e instanceof Error ? e.message : String(e));
     } finally {
       if (streetsReqRef.current === token) setStreetsLoading(false);
     }
-  }, []);
+  }, [hasImportedStreets]);
 
   /** Replace the whole scene from a loaded document. Re-syncs corners
    * defensively (idempotent for clean saves; repairs hand-edited files) and
@@ -427,10 +455,25 @@ export default function FacadePage() {
     setContextBuildings([]);
     setBuildingsError(null);
     setBuildingsInfo(null);
+    // Invalidate any in-flight buildings fetch from the scene being replaced
+    // (same race handleClearTerrain guards against) — bump BEFORE the
+    // conditional re-fetch below so, when the loaded doc has a bbox, the
+    // fresh fetch's own token bump still wins and the stale fetch's `finally`
+    // becomes a no-op; when it doesn't, this bump+reset is the only thing
+    // that stops the stale fetch from resolving onto a bbox-less scene.
+    buildingsReqRef.current++;
+    setBuildingsLoading(false);
     // Footprints are not in the document — re-fetch them for the saved bbox.
     if (s.bbox && s.anchor) void loadContextBuildings(s.bbox, s.anchor);
     setStreetWidth(s.streetWidth);
     setMaxCornerAngle(s.maxCornerAngle);
+    // Invalidate any in-flight streets fetch too — the loaded document's own
+    // streetNetwork is adopted directly below (no re-fetch to race it), so a
+    // still-arriving import must not clobber it a few seconds later.
+    streetsReqRef.current++;
+    setStreetsLoading(false);
+    setStreetsError(null);
+    setStreetsInfo(null);
     setStreetNetwork(s.streetNetwork);
     setSelected(
       s.blocks.length > 0
@@ -532,7 +575,29 @@ export default function FacadePage() {
     setStreetsLoading(false);
     setStreetsError(null);
     setStreetsInfo(null);
-    setStreetNetwork(EMPTY_NETWORK);
+    // Surgical, not wholesale: drop only IMPORTED streets (the `street-osm-`
+    // id prefix loadStreets/src/lib/geo/streets.ts stamps on every fetched
+    // street) so hand-drawn streets survive "Clear terrain" the same way
+    // hand-drawn blocks already do — this button means "drop the loaded
+    // heightfield", not "delete my drawings". Pruning roundabouts/square
+    // monuments afterward drops any that would otherwise dangle on a
+    // removed junction.
+    setStreetNetwork((n) =>
+      pruneSquareMonuments(
+        pruneRoundabouts({
+          ...n,
+          streets: n.streets.filter((s) => !s.id.startsWith("street-osm-")),
+        }),
+      ),
+    );
+    // Restore the user's pre-import Auto-buildings preference now that the
+    // imported streets are gone — but only if an import had actually forced
+    // it off (hasImportedStreets reflects the network from before the filter
+    // above ran); otherwise this would silently override a preference the
+    // user set by hand before ever loading a place.
+    if (hasImportedStreets) {
+      setBuildingsFromStreets(buildingsFromStreetsStashRef.current);
+    }
     setGround((g) => ({ slope: g.slope, azimuth: g.azimuth })); // drop hf
     setAnchor(null);
     setBbox(null);
@@ -540,7 +605,7 @@ export default function FacadePage() {
     setHiddenIds(new Set());
     setBuildingsError(null);
     setBuildingsInfo(null);
-  }, []);
+  }, [hasImportedStreets]);
 
   /** Demolish one context building (click-to-hide), wired to ContextBuildings'
    * onHide via FacadeViewer/SceneContents (gated behind the Select tool). */
@@ -983,6 +1048,18 @@ export default function FacadePage() {
     setSelectedIntersection(null);
     setSelectedSquare(null);
     setMarquee(null);
+    // Invalidate any in-flight streets/buildings fetch — otherwise it can
+    // resolve after this clear and repopulate the just-wiped network (or the
+    // truncation/error banners) a few seconds later (same race
+    // handleClearTerrain guards against).
+    streetsReqRef.current++;
+    setStreetsLoading(false);
+    setStreetsError(null);
+    setStreetsInfo(null);
+    buildingsReqRef.current++;
+    setBuildingsLoading(false);
+    setBuildingsError(null);
+    setBuildingsInfo(null);
     try {
       localStorage.removeItem(AUTOSAVE_KEY);
     } catch {
@@ -1450,8 +1527,13 @@ export default function FacadePage() {
             type="button"
             onClick={() => setBuildingsFromStreets((v) => !v)}
             aria-pressed={buildingsFromStreets}
-            title="Auto-populate editable buildings along drawn streets"
-            className={`text-[11px] px-2 py-0.5 rounded border transition-colors ${
+            disabled={hasImportedStreets}
+            title={
+              hasImportedStreets
+                ? "Disabled while a real place is loaded — generating frontages for every imported street would create thousands of lots"
+                : "Auto-populate editable buildings along drawn streets"
+            }
+            className={`text-[11px] px-2 py-0.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
               buildingsFromStreets
                 ? "border-[var(--accent)] text-[var(--accent)]"
                 : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30"

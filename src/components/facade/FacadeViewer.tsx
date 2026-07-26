@@ -1539,18 +1539,41 @@ function PlanPane({
     () => [fit.cx, PLAN_CAM_Y, fit.cz - 2],
     [fit.cx, fit.cz],
   );
+  // Whether a left-drag tool currently owns the plan pane's pointer gesture
+  // (pen path, node/marquee drag, or the street pen). Shared by BOTH the
+  // mouse LEFT-button gate and the single-finger touch gate below so the two
+  // can never drift apart — a one-finger touch drag dispatches through
+  // OrbitControls' `touches.ONE`, entirely separate from `mouseButtons`, and
+  // is NOT gated by `enablePan` on its own (see the MapControls comment).
+  const planToolActive = drawMode || nodeDrag || selectMode || streetDrawMode;
   /** LEFT pans only when no left-drag tool owns the gesture; MIDDLE always
    * pans. RIGHT stays unmapped (rotation is off in the top-down plan). */
   const planMouseButtons = useMemo(
     () => ({
-      LEFT:
-        drawMode || nodeDrag || selectMode || streetDrawMode
-          ? undefined
-          : THREE.MOUSE.PAN,
+      LEFT: planToolActive ? undefined : THREE.MOUSE.PAN,
       MIDDLE: THREE.MOUSE.PAN,
       RIGHT: undefined,
     }),
-    [drawMode, nodeDrag, selectMode, streetDrawMode],
+    [planToolActive],
+  );
+  /** Same gate for single-finger touch: OrbitControls dispatches touch pan
+   * through `touches.ONE` (MapControls' default TOUCH.PAN), a path
+   * `mouseButtons` does not cover and whose only other guard is
+   * `enablePan` — which this pane deliberately leaves on (see below) so
+   * MIDDLE-mouse pan keeps working mid-draw. Left unmapped here, a one-finger
+   * drag falls through `onTouchStart`'s switch to its `default` case
+   * (`this.state = _STATE.NONE`), so `onTouchMove` also falls to `default`
+   * and does nothing — verified against
+   * node_modules/three/examples/jsm/controls/OrbitControls.js. TWO-finger
+   * dolly stays mapped to DOLLY_PAN (rotate is off in this ortho plan view
+   * anyway).
+   */
+  const planTouches = useMemo(
+    () => ({
+      ONE: planToolActive ? undefined : THREE.TOUCH.PAN,
+      TWO: THREE.TOUCH.DOLLY_PAN,
+    }),
+    [planToolActive],
   );
   return (
     <>
@@ -1656,6 +1679,7 @@ function PlanPane({
         // off wholesale. MIDDLE can't collide with any left-drag tool.
         enablePan
         mouseButtons={planMouseButtons}
+        touches={planTouches}
         target={target}
         zoomSpeed={1}
       />
