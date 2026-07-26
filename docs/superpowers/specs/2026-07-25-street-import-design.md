@@ -104,7 +104,7 @@ All projection goes through M1's `project(lat, lon, anchor)` (`east→+x`,
 `200 { streets, truncated, total }` | `400 { error }` | `500 { error }`.
 Overpass query (both sources in one union):
 ```
-[out:json][timeout:30];
+[out:json][timeout:25];
 (way["highway"](S,W,N,E);way["waterway"="canal"](S,W,N,E););
 out geom;
 ```
