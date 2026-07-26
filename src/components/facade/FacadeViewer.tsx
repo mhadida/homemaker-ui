@@ -1535,6 +1535,19 @@ function PlanPane({
     () => [fit.cx, PLAN_CAM_Y, fit.cz - 2],
     [fit.cx, fit.cz],
   );
+  /** LEFT pans only when no left-drag tool owns the gesture; MIDDLE always
+   * pans. RIGHT stays unmapped (rotation is off in the top-down plan). */
+  const planMouseButtons = useMemo(
+    () => ({
+      LEFT:
+        drawMode || nodeDrag || selectMode || streetDrawMode
+          ? undefined
+          : THREE.MOUSE.PAN,
+      MIDDLE: THREE.MOUSE.PAN,
+      RIGHT: undefined,
+    }),
+    [drawMode, nodeDrag, selectMode, streetDrawMode],
+  );
   return (
     <>
       <SceneContents
@@ -1631,7 +1644,14 @@ function PlanPane({
       <MapControls
         makeDefault
         enableRotate={false}
-        enablePan={!drawMode && !nodeDrag && !selectMode && !streetDrawMode}
+        // Panning stays ENABLED so the MIDDLE button can always pan — including
+        // mid-draw and mid-marquee, which is exactly when you need it. What the
+        // old `enablePan` gate really protected was the LEFT button (it would
+        // hijack a draw click or a marquee sweep); that intent is now expressed
+        // directly by unmapping LEFT in those modes instead of switching panning
+        // off wholesale. MIDDLE can't collide with any left-drag tool.
+        enablePan
+        mouseButtons={planMouseButtons}
         target={target}
         zoomSpeed={1}
       />
@@ -1972,9 +1992,12 @@ function PerspectivePane({
           rotateSpeed={0.5}
           zoomSpeed={1.0}
           touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
+          // MIDDLE pans rather than dollies: the wheel already dollies, so
+          // dolly-on-middle was redundant, and middle-drag-to-pan is the
+          // convention every 3D tool shares. RIGHT keeps panning too.
           mouseButtons={{
             LEFT: THREE.MOUSE.ROTATE,
-            MIDDLE: THREE.MOUSE.DOLLY,
+            MIDDLE: THREE.MOUSE.PAN,
             RIGHT: THREE.MOUSE.PAN,
           }}
         />
@@ -2153,6 +2176,12 @@ function ElevationPane({
           enableRotate={false}
           target={mid}
           screenSpacePanning
+          // Middle-drag pans here too, matching the plan and 3D panes.
+          mouseButtons={{
+            LEFT: THREE.MOUSE.PAN,
+            MIDDLE: THREE.MOUSE.PAN,
+            RIGHT: undefined,
+          }}
           zoomSpeed={1}
         />
       )}
