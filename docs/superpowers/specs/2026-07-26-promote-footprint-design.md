@@ -84,10 +84,20 @@ frontage >= 10 m:                           73%
 
 ```ts
 /** Set on blocks promoted from an imported real footprint (M4). The real
- * parcel polygon in local metres plus the source OSM id. Absent on drawn
- * and street-derived blocks. */
-parcel?: { source: string; outline: [number, number][] };
+ * parcel polygon in local metres, the source OSM id, and the CLAMPED plot
+ * depth. Absent on drawn and street-derived blocks. */
+parcel?: { source: string; outline: [number, number][]; depth: number };
 ```
+
+**Why `depth` is stored rather than re-derived.** `generateLot` draws
+`massingDepth` from 6–12 m, and BOTH `rerollBlock` and `refit` call it — so
+without a recoverable parcel depth, a reroll or a node drag would silently push
+a promoted building out through the back of its own outline. Re-deriving from
+the live block line is not an option either: the parcel is fixed while the line
+is not, so after a node drag the derived depth would change for a plot that has
+not moved. A pure `applyParcelDepth(block)` in `blocks.ts` (there, not in
+`promote.ts`, to avoid a `generate.ts ↔ promote.ts` import cycle) re-pins every
+lot after those mutations and returns non-promoted blocks by identity.
 
 **Page state:** adds `selectedContextBuilding: string | null`. No other new
 state — the suppression set is derived (above).
