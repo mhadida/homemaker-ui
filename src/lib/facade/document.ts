@@ -106,6 +106,29 @@ function validLine(line: unknown): boolean {
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null;
 
+/** A promoted block's real parcel (M4): a source id, a polygon of at least
+ * three finite [x, z] vertices, and a finite depth. Malformed values are
+ * DROPPED rather than failing the document — same idiom as validStreet /
+ * validHeightfield / validBBox, so one corrupted parcel cannot white-screen an
+ * otherwise-good save. */
+function validParcel(v: unknown): v is NonNullable<FacadeBlock["parcel"]> {
+  if (!isObject(v)) return false;
+  if (typeof v.source !== "string") return false;
+  if (!isFiniteNumber(v.depth)) return false;
+  const o = v.outline;
+  return (
+    Array.isArray(o) &&
+    o.length >= 3 &&
+    o.every(
+      (p) =>
+        Array.isArray(p) &&
+        p.length === 2 &&
+        isFiniteNumber(p[0]) &&
+        isFiniteNumber(p[1]),
+    )
+  );
+}
+
 /** Structural validation of one block — enough to keep the renderer from
  * crashing (id, line endpoints, a non-empty lots array whose lots each carry
  * an object `params`). Missing scalar fields are tolerated (the layout engine
@@ -206,15 +229,22 @@ export function validBBox(v: unknown): v is LngLatBBox {
   return (["west", "south", "east", "north"] as const).every((k) => isFiniteNumber(b[k]));
 }
 
-/** Normalize every lot's params so the loaded blocks are render-safe. */
+/** Normalize every lot's params so the loaded blocks are render-safe, and
+ * drop a malformed `parcel` (M4) so a corrupt outline can never reach the
+ * renderer — `ParcelOutline` would otherwise mount a fat line built from
+ * non-finite points. */
 function normalizeBlocks(blocks: Record<string, unknown>[]): FacadeBlock[] {
-  return blocks.map((b) => ({
-    ...(b as unknown as FacadeBlock),
-    lots: (b.lots as Record<string, unknown>[]).map((l) => ({
-      ...(l as { customized?: boolean; depthOffset?: number }),
-      params: normalizeParams(l.params as Record<string, unknown>),
-    })),
-  })) as FacadeBlock[];
+  return blocks.map((b) => {
+    const { parcel: rawParcel, ...rest } = b;
+    return {
+      ...(rest as unknown as FacadeBlock),
+      ...(validParcel(rawParcel) ? { parcel: rawParcel } : {}),
+      lots: (b.lots as Record<string, unknown>[]).map((l) => ({
+        ...(l as { customized?: boolean; depthOffset?: number }),
+        params: normalizeParams(l.params as Record<string, unknown>),
+      })),
+    };
+  }) as FacadeBlock[];
 }
 
 /** Pure: validate + normalize a parsed document into live scene state.

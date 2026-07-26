@@ -551,3 +551,96 @@ describe("sceneHasContent", () => {
     expect(sceneHasContent({ ...baseScene(), bbox: BBOX })).toBe(true);
   });
 });
+
+// --- M4: a promoted block's real parcel ---------------------------------
+
+const GOOD_PARCEL = {
+  source: "way/24601",
+  outline: [
+    [0, 0],
+    [10, 0],
+    [10, 6],
+    [0, 6],
+  ] as [number, number][],
+  depth: 6,
+};
+
+const sceneWithParcel = (parcel: unknown): SceneState => ({
+  ...scene(),
+  blocks: [{ ...mkBlock("block-2", [0, 0], [10, 0], [10]), parcel } as FacadeBlock],
+});
+
+describe("document round-trip of block.parcel", () => {
+  it("round-trips a valid parcel", () => {
+    const out = deserializeScene(
+      JSON.parse(JSON.stringify(serializeScene(sceneWithParcel(GOOD_PARCEL)))),
+    );
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.scene.blocks[0].parcel).toEqual(GOOD_PARCEL);
+  });
+
+  it("keeps SCENE_VERSION at 1 — a bump would reject every beta save", () => {
+    expect(SCENE_VERSION).toBe(1);
+  });
+
+  it("loads a block with no parcel at all (every older save)", () => {
+    const out = deserializeScene(
+      JSON.parse(JSON.stringify(serializeScene(sceneWithParcel(undefined)))),
+    );
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.scene.blocks[0].parcel).toBeUndefined();
+  });
+
+  it.each([
+    ["not an object", 42],
+    ["missing source", { outline: GOOD_PARCEL.outline, depth: 6 }],
+    ["non-string source", { source: 1, outline: GOOD_PARCEL.outline, depth: 6 }],
+    ["missing outline", { source: "way/1", depth: 6 }],
+    [
+      "outline too short",
+      {
+        source: "way/1",
+        outline: [
+          [0, 0],
+          [1, 1],
+        ],
+        depth: 6,
+      },
+    ],
+    [
+      "non-finite vertex",
+      {
+        source: "way/1",
+        outline: [
+          [0, 0],
+          [null, 0],
+          [1, 1],
+        ],
+        depth: 6,
+      },
+    ],
+    [
+      "bad vertex arity",
+      {
+        source: "way/1",
+        outline: [[0], [1, 1], [2, 2]],
+        depth: 6,
+      },
+    ],
+    ["missing depth", { source: "way/1", outline: GOOD_PARCEL.outline }],
+  ])(
+    "drops a malformed parcel (%s) without failing the document",
+    (_label, parcel) => {
+      const out = deserializeScene(
+        JSON.parse(JSON.stringify(serializeScene(sceneWithParcel(parcel)))),
+      );
+      expect(out.ok).toBe(true);
+      if (!out.ok) return;
+      // The block itself survives — only the parcel is dropped.
+      expect(out.scene.blocks).toHaveLength(1);
+      expect(out.scene.blocks[0].parcel).toBeUndefined();
+    },
+  );
+});
