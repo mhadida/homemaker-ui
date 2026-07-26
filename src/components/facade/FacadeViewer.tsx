@@ -131,9 +131,11 @@ interface FacadeViewerProps {
   contextBuildings: ContextBuilding[];
   hiddenIds: ReadonlySet<string>;
   contextVisible: boolean;
+  /** The context building the inspector is open on (M4). */
+  selectedContextBuilding: string | null;
   /** Click-to-hide a context building. Gated behind the Select tool the same
    * way as onSelectStreet/onSelectIntersection/onSelectSquare. */
-  onHideContextBuilding: (id: string) => void;
+  onSelectContextBuilding: (id: string) => void;
 }
 
 type PaneId = "plan" | "perspective" | "overview" | "detail";
@@ -1399,7 +1401,8 @@ function PlanPane({
   contextBuildings,
   hiddenIds,
   contextVisible,
-  onHideContextBuilding,
+  selectedContextBuilding,
+  onSelectContextBuilding,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -1450,8 +1453,10 @@ function PlanPane({
   contextBuildings: ContextBuilding[];
   hiddenIds: ReadonlySet<string>;
   contextVisible: boolean;
+  /** The context building the inspector is open on (M4). */
+  selectedContextBuilding: string | null;
   /** Undefined outside select mode → backdrop renders but doesn't hover/click. */
-  onHideContextBuilding?: (id: string) => void;
+  onSelectContextBuilding?: (id: string) => void;
 }) {
   const [nodeDrag, setNodeDrag] = useState(false);
   const dragEndAt = useRef(0);
@@ -1478,16 +1483,16 @@ function PlanPane({
   );
   // Same hazard as guardedSelectLot above: the context-buildings backdrop's
   // onClick (ContextBuildings.tsx) synthesizes just like a lot's, so a
-  // marquee sweep that starts and ends over a footprint would otherwise hide
-  // a building nobody meant to touch. `onHideContextBuilding` stays undefined
+  // marquee sweep that starts and ends over a footprint would otherwise select
+  // a building nobody meant to touch. `onSelectContextBuilding` stays undefined
   // outside select mode, so preserve that "not interactive" signal instead of
   // always handing SceneContents a defined callback.
-  const guardedHideContextBuilding = useCallback(
+  const guardedSelectContextBuilding = useCallback(
     (id: string) => {
       if (performance.now() - dragEndAt.current < 300) return;
-      onHideContextBuilding?.(id);
+      onSelectContextBuilding?.(id);
     },
-    [onHideContextBuilding],
+    [onSelectContextBuilding],
   );
   const bounds = useMemo(() => {
     if (blocks.length === 0) return { w: 30, d: 30, cx: 0, cz: 0 };
@@ -1598,8 +1603,9 @@ function PlanPane({
         contextBuildings={contextBuildings}
         hiddenIds={hiddenIds}
         contextVisible={contextVisible}
-        onHideContextBuilding={
-          onHideContextBuilding ? guardedHideContextBuilding : undefined
+        selectedContextBuilding={selectedContextBuilding}
+        onSelectContextBuilding={
+          onSelectContextBuilding ? guardedSelectContextBuilding : undefined
         }
       />
       <StreetGuides streetRef={streetRef} streetWidth={streetWidth} />
@@ -1925,7 +1931,8 @@ function PerspectivePane({
   contextBuildings,
   hiddenIds,
   contextVisible,
-  onHideContextBuilding,
+  selectedContextBuilding,
+  onSelectContextBuilding,
   walk,
   walkStart,
   onExitWalk,
@@ -1950,8 +1957,10 @@ function PerspectivePane({
   contextBuildings: ContextBuilding[];
   hiddenIds: ReadonlySet<string>;
   contextVisible: boolean;
+  /** The context building the inspector is open on (M4). */
+  selectedContextBuilding: string | null;
   /** Undefined outside select mode → backdrop renders but doesn't hover/click. */
-  onHideContextBuilding?: (id: string) => void;
+  onSelectContextBuilding?: (id: string) => void;
   walk: boolean;
   /** The picked start pose (street point + facing); null → drop in place. */
   walkStart: StreetProjection | null;
@@ -1984,7 +1993,8 @@ function PerspectivePane({
         contextBuildings={contextBuildings}
         hiddenIds={hiddenIds}
         contextVisible={contextVisible}
-        onHideContextBuilding={onHideContextBuilding}
+        selectedContextBuilding={selectedContextBuilding}
+        onSelectContextBuilding={onSelectContextBuilding}
       />
       {/* far is DERIVED (clip.ts) to always contain the ground out to its far
         * corner at full dolly-out; a hardcoded 2000 was smaller than that, so
@@ -2056,7 +2066,8 @@ function ElevationPane({
   contextBuildings,
   hiddenIds,
   contextVisible,
-  onHideContextBuilding,
+  selectedContextBuilding,
+  onSelectContextBuilding,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -2080,8 +2091,10 @@ function ElevationPane({
   contextBuildings: ContextBuilding[];
   hiddenIds: ReadonlySet<string>;
   contextVisible: boolean;
+  /** The context building the inspector is open on (M4). */
+  selectedContextBuilding: string | null;
   /** Undefined outside select mode → backdrop renders but doesn't hover/click. */
-  onHideContextBuilding?: (id: string) => void;
+  onSelectContextBuilding?: (id: string) => void;
 }) {
   // Zero-block world: `block` is undefined. Hooks below must still run
   // unconditionally (Rules of Hooks) — every derived value falls back to a
@@ -2188,7 +2201,8 @@ function ElevationPane({
         contextBuildings={contextBuildings}
         hiddenIds={hiddenIds}
         contextVisible={contextVisible}
-        onHideContextBuilding={onHideContextBuilding}
+        selectedContextBuilding={selectedContextBuilding}
+        onSelectContextBuilding={onSelectContextBuilding}
       />
       <OrthographicCamera
         ref={camRef}
@@ -2262,7 +2276,8 @@ export default function FacadeViewer({
   contextBuildings,
   hiddenIds,
   contextVisible,
-  onHideContextBuilding: rawHideContextBuilding,
+  selectedContextBuilding,
+  onSelectContextBuilding: rawSelectContextBuilding,
 }: FacadeViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null!);
   const planRef = useRef<HTMLDivElement>(null);
@@ -2326,8 +2341,8 @@ export default function FacadeViewer({
   const onSelectIntersection = selectMode ? rawSelectIntersection : undefined;
   const onSelectSquare = selectMode ? rawSelectSquare : undefined;
   // Same convention: undefined off, so the backdrop's hover highlight (which
-  // only shows when onHide is defined) disables along with the click-to-hide.
-  const onHideContextBuilding = selectMode ? rawHideContextBuilding : undefined;
+  // only shows when onSelect is defined) disables along with the click.
+  const onSelectContextBuilding = selectMode ? rawSelectContextBuilding : undefined;
   // Two-step confirm for the select-mode Clear-all button.
   const [confirmClear, setConfirmClear] = useState(false);
   // The street tool (draws the standalone road network). Mutually exclusive
@@ -2541,7 +2556,8 @@ export default function FacadeViewer({
             contextBuildings={contextBuildings}
             hiddenIds={hiddenIds}
             contextVisible={contextVisible}
-            onHideContextBuilding={onHideContextBuilding}
+            selectedContextBuilding={selectedContextBuilding}
+            onSelectContextBuilding={onSelectContextBuilding}
           />
         );
       case "perspective":
@@ -2566,7 +2582,8 @@ export default function FacadeViewer({
             contextBuildings={contextBuildings}
             hiddenIds={hiddenIds}
             contextVisible={contextVisible}
-            onHideContextBuilding={onHideContextBuilding}
+            selectedContextBuilding={selectedContextBuilding}
+            onSelectContextBuilding={onSelectContextBuilding}
             walk={walkMode}
             walkStart={walkStart}
             onExitWalk={() => {
@@ -2599,7 +2616,8 @@ export default function FacadeViewer({
             contextBuildings={contextBuildings}
             hiddenIds={hiddenIds}
             contextVisible={contextVisible}
-            onHideContextBuilding={onHideContextBuilding}
+            selectedContextBuilding={selectedContextBuilding}
+            onSelectContextBuilding={onSelectContextBuilding}
           />
         );
       case "detail":
@@ -2626,7 +2644,8 @@ export default function FacadeViewer({
             contextBuildings={contextBuildings}
             hiddenIds={hiddenIds}
             contextVisible={contextVisible}
-            onHideContextBuilding={onHideContextBuilding}
+            selectedContextBuilding={selectedContextBuilding}
+            onSelectContextBuilding={onSelectContextBuilding}
           />
         );
     }

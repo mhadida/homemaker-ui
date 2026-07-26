@@ -327,6 +327,11 @@ export default function FacadePage() {
     string | null
   >(null);
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
+  // The imported context building the M4 inspector is open on. UI-only —
+  // never serialized, never restored from the autosave.
+  const [selectedContextBuilding, setSelectedContextBuilding] = useState<
+    string | null
+  >(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Marquee (rubber-band) multi-selection. Coexists with single `selected`:
@@ -886,6 +891,7 @@ export default function FacadePage() {
       setSelectedStreet(null);
       setSelectedIntersection(null);
       setSelectedSquare(null);
+      setSelectedContextBuilding(null);
       // A single-lot chamfer block can bridge two corners (both ends of its
       // one lot). One facade mesh can't disambiguate which the user meant, so
       // we take the first — the plan-pane node handles reach either corner
@@ -985,6 +991,7 @@ export default function FacadePage() {
     setSelectedStreet(null);
     setSelectedIntersection(null);
     setSelectedSquare(null);
+    setSelectedContextBuilding(null);
     setMarquee(null);
   }, []);
 
@@ -1745,7 +1752,8 @@ export default function FacadePage() {
             contextBuildings={contextBuildings}
             hiddenIds={hiddenIds}
             contextVisible={contextVisible}
-            onHideContextBuilding={handleHideContextBuilding}
+            selectedContextBuilding={selectedContextBuilding}
+            onSelectContextBuilding={setSelectedContextBuilding}
           />
         </div>
 

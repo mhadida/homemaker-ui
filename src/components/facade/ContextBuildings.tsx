@@ -9,6 +9,8 @@ import type { Ground } from "@/lib/facade/terrain";
 /** Neutral grey — reads as backdrop against the app's warmer wall colours. */
 const CONTEXT_COLOR = "#8d8880";
 const HIGHLIGHT_COLOR = "#c0b8a8";
+/** Brighter than hover: the inspector is open on this one. */
+const SELECTED_COLOR = "#d8c48a";
 
 /** One merged geometry for every building, plus a per-TRIANGLE building-id
  * lookup: a raycast gives us `faceIndex`, and faceBuilding[faceIndex] is the
@@ -47,21 +49,28 @@ function buildMerged(buildings: ContextBuilding[], ground: Ground) {
   return { geo, faceBuilding };
 }
 
-/** Real building footprints as inert grey backdrop massing (M2). Renders
- * nothing when hidden or empty, so a scene with no place loaded is unchanged.
- * `onHide` undefined => not interactive (Select tool off): no hover, no click. */
+/** Real building footprints as inert grey backdrop massing (M2), selectable
+ * for promotion or demolition (M4). Renders nothing when hidden or empty, so a
+ * scene with no place loaded is unchanged. `onSelect` undefined => not
+ * interactive (Select tool off): no hover, no click.
+ *
+ * Clicking SELECTS rather than demolishing: an instant, unconfirmed demolition
+ * on a single click was a real hazard, and Demolish now lives in the inspector
+ * beside Promote. */
 export default function ContextBuildings({
   buildings,
   ground,
   hiddenIds,
   visible,
-  onHide,
+  selectedId,
+  onSelect,
 }: {
   buildings: ContextBuilding[];
   ground: Ground;
   hiddenIds: ReadonlySet<string>;
   visible: boolean;
-  onHide?: (id: string) => void;
+  selectedId?: string | null;
+  onSelect?: (id: string) => void;
 }) {
   const [hovered, setHovered] = useState<string | null>(null);
 
@@ -83,13 +92,21 @@ export default function ContextBuildings({
     [hovered, shown],
   );
 
-  // A hovered building needs its own little geometry — you cannot tint one
+  // Selection outranks hover, so the inspector's subject stays lit while the
+  // cursor wanders off it. Validated against the visible set too, so a stale
+  // id (its building was demolished or promoted) simply stops highlighting.
+  const litId = useMemo(() => {
+    const wanted = selectedId ?? validHovered;
+    return wanted && shown.some((b) => b.id === wanted) ? wanted : null;
+  }, [selectedId, validHovered, shown]);
+
+  // A lit building needs its own little geometry — you cannot tint one
   // building inside a merged mesh.
   const hoverGeo = useMemo(() => {
-    if (!onHide || !validHovered) return null;
-    const b = shown.find((x) => x.id === validHovered);
+    if (!litId) return null;
+    const b = shown.find((x) => x.id === litId);
     return b ? buildMerged([b], ground).geo : null;
-  }, [onHide, validHovered, shown, ground]);
+  }, [litId, shown, ground]);
   useEffect(() => () => hoverGeo?.dispose(), [hoverGeo]);
 
   if (!visible || !merged) return null;
@@ -103,7 +120,7 @@ export default function ContextBuildings({
         geometry={merged.geo}
         receiveShadow
         onPointerMove={
-          onHide
+          onSelect
             ? (e) => {
                 // No stopPropagation here (unlike onClick below): this mesh
                 // sits above MarqueeSurface's catcher plane in the plan view,
@@ -115,13 +132,13 @@ export default function ContextBuildings({
               }
             : undefined
         }
-        onPointerOut={onHide ? () => setHovered(null) : undefined}
+        onPointerOut={onSelect ? () => setHovered(null) : undefined}
         onClick={
-          onHide
+          onSelect
             ? (e) => {
                 e.stopPropagation();
                 const id = idAt(e);
-                if (id) onHide(id);
+                if (id) onSelect(id);
               }
             : undefined
         }
@@ -137,7 +154,7 @@ export default function ContextBuildings({
       {hoverGeo && (
         <mesh geometry={hoverGeo}>
           <meshStandardMaterial
-            color={HIGHLIGHT_COLOR}
+            color={selectedId === litId ? SELECTED_COLOR : HIGHLIGHT_COLOR}
             roughness={0.9}
             side={THREE.DoubleSide}
             polygonOffset

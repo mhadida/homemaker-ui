@@ -493,7 +493,8 @@ export default function SceneContents({
   contextBuildings,
   hiddenIds,
   contextVisible,
-  onHideContextBuilding,
+  selectedContextBuilding,
+  onSelectContextBuilding,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
@@ -530,8 +531,10 @@ export default function SceneContents({
   contextBuildings?: ContextBuilding[];
   hiddenIds?: ReadonlySet<string>;
   contextVisible?: boolean;
+  /** The context building the inspector is open on (M4). */
+  selectedContextBuilding?: string | null;
   /** undefined ⇒ not interactive (Select tool off). */
-  onHideContextBuilding?: (id: string) => void;
+  onSelectContextBuilding?: (id: string) => void;
 }) {
   const groundGeo = useGroundGeometry(streetNetwork, ground);
   const groundQuat = useMemo(() => {
@@ -843,7 +846,8 @@ export default function SceneContents({
         ground={ground}
         hiddenIds={hiddenIds ?? EMPTY_HIDDEN}
         visible={contextVisible ?? true}
-        onHide={onHideContextBuilding}
+        selectedId={selectedContextBuilding}
+        onSelect={onSelectContextBuilding}
       />
       {/* Ground plane + grid tilt to the slope so buildings sit on it at
        * their datums. polygonOffset keeps the sidewalk/road/grid winning
