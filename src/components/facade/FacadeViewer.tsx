@@ -88,6 +88,10 @@ interface FacadeViewerProps {
   onMoveStreetNode: (from: [number, number], to: [number, number]) => boolean;
   /** Wipe the whole scene (Select-mode Clear-all button, two-step confirm). */
   onClearAll: () => void;
+  /** Building render mode — pure view state, lifted to the page so the
+   * header-bar segmented control can drive it. full = detailed facades;
+   * massing = plain volume boxes; outline = wireframe; off = hidden. */
+  display: BuildingDisplay;
   view?: ViewSettings;
   onDrawModeChange?: (drawMode: boolean) => void;
   corners: Corner[];
@@ -2206,6 +2210,7 @@ export default function FacadeViewer({
   onMoveNode,
   onMoveStreetNode,
   onClearAll,
+  display,
   view = FACADE_DEFAULT_VIEW,
   onDrawModeChange,
   corners,
@@ -2248,9 +2253,6 @@ export default function FacadeViewer({
   };
 
   const [maximized, setMaximized] = useState<PaneId | null>(null);
-  // Building render mode — pure view state (not persisted). full = detailed
-  // facades; massing = plain volume boxes; outline = wireframe; off = hidden.
-  const [display, setDisplay] = useState<BuildingDisplay>("full");
   // First-person walk in the 3D pane (WASD + mouse-look, Esc exits). Entered
   // in two steps: ARM (the plan pane becomes a street picker) → PICK a start
   // point on a street → walk. `walkStart` carries the picked pose into
@@ -2984,31 +2986,6 @@ export default function FacadeViewer({
             }`}
           >
             {p.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Building display mode — pure view state. */}
-      <div className="absolute top-3 left-1/2 -translate-x-1/2 flex gap-0.5 rounded-lg bg-black/55 p-0.5 text-[11px] backdrop-blur-md">
-        {(
-          [
-            ["full", "Full"],
-            ["massing", "Massing"],
-            ["outline", "Outline"],
-            ["off", "Buildings off"],
-          ] as const
-        ).map(([mode, label]) => (
-          <button
-            key={mode}
-            type="button"
-            onClick={() => setDisplay(mode)}
-            className={`rounded-md px-2.5 py-1 transition-colors ${
-              display === mode
-                ? "bg-white/90 text-zinc-900"
-                : "text-white/80 hover:bg-white/10"
-            }`}
-          >
-            {label}
           </button>
         ))}
       </div>

@@ -27,6 +27,7 @@ import {
   reserveBlockIds,
   DEFAULT_GEN,
   type BlockGenSettings,
+  type BuildingDisplay,
   type FacadeBlock,
   type Selection,
 } from "@/lib/facade/blocks";
@@ -257,6 +258,9 @@ export default function FacadePage() {
   const [blocks, setBlocks] = useState<FacadeBlock[]>([]);
   const [selected, setSelected] = useState<Selection | null>(null);
   const [view, setView] = useState<ViewSettings>(FACADE_DEFAULT_VIEW);
+  // Building render mode — pure view state (not persisted). full = detailed
+  // facades; massing = plain volume boxes; outline = wireframe; off = hidden.
+  const [display, setDisplay] = useState<BuildingDisplay>("full");
   const [isAILoading, setIsAILoading] = useState(false);
   const [aiStatus, setAiStatus] = useState<string | null>(null);
   const [drawActive, setDrawActive] = useState(false);
@@ -1455,6 +1459,37 @@ export default function FacadePage() {
           >
             Auto-buildings
           </button>
+          <span className="mx-1 h-4 w-px bg-[var(--border)]" aria-hidden />
+          <div
+            role="group"
+            aria-label="Building display mode"
+            className="flex items-center rounded border border-[var(--border)] overflow-hidden text-[11px]"
+          >
+            {(
+              [
+                ["full", "Full"],
+                ["massing", "Massing"],
+                ["outline", "Outline"],
+                ["off", "Buildings off"],
+              ] as const
+            ).map(([mode, label], i) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setDisplay(mode)}
+                aria-pressed={display === mode}
+                className={`px-2 py-0.5 transition-colors ${
+                  i > 0 ? "border-l border-[var(--border)]" : ""
+                } ${
+                  display === mode
+                    ? "text-[var(--accent)]"
+                    : "text-[var(--muted)] hover:text-[var(--foreground)]"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex items-center gap-3 text-[11px] text-[var(--muted)] font-mono">
           {params && layout ? (
@@ -1486,6 +1521,7 @@ export default function FacadePage() {
             onUndoSegment={handleUndoSegment}
             onClearAll={handleClearAll}
             cornerChoices={cornerChoices}
+            display={display}
             view={view}
             onDrawModeChange={setDrawActive}
             corners={corners}
