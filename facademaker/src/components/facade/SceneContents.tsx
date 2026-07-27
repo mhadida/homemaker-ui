@@ -1,0 +1,934 @@
+"use client";
+
+import { useEffect, useMemo } from "react";
+import { Environment, ContactShadows, Grid } from "@react-three/drei";
+import * as THREE from "three";
+import FacadeMesh from "./FacadeMesh";
+import Line from "./NodeLine";
+import NodeGrid from "./NodeGrid";
+import { isWebGPUPath } from "./webgpu";
+import InstancedFacadeBoxes from "./InstancedFacadeBoxes";
+import ContextBuildings, {
+  type ContextGeometry,
+} from "./ContextBuildings";
+import StreetNetworkView from "@/components/street/StreetNetworkView";
+import type { StreetNetwork } from "@/lib/street/types";
+// Ground half-extent's single source of truth — the perspective far plane is
+// derived from it (src/lib/facade/clip.ts) so the two can never drift apart.
+import { GROUND_HALF } from "@/lib/facade/clip";
+import { effectiveWidth, minRadiusOf } from "@/lib/street/types";
+import { canalHoleOutline } from "@/lib/street/canal";
+import { filletCentreline } from "@/lib/street/geometry";
+import { deriveSquares, isSquareFrontingBlock } from "@/lib/street/squares";
+import type { FacadeParams } from "@/lib/facade/types";
+import type { ViewSettings } from "@/lib/building/types";
+import {
+  blockFrame,
+  lotPlacements,
+  type BlockFrame,
+  type BuildingDisplay,
+  type FacadeBlock,
+  type Selection,
+} from "@/lib/facade/blocks";
+import { computeLayout, MASSING_DEPTH_DEFAULT } from "@/lib/facade/layout";
+import {
+  detectCorners,
+  miterFor,
+  massMiterFor,
+  cornerChoice,
+  cornerFrame,
+  type CornerChoice,
+  type LotMiter,
+} from "@/lib/facade/corners";
+import { cornerRoofPlan, type CornerRoofPlan } from "@/lib/facade/cornerRoof";
+import {
+  openFillFor,
+  blockFootprint,
+  type OpenFill,
+} from "@/lib/facade/openBlock";
+import OpenBlockMesh from "./OpenBlockMesh";
+import { clampTurretRadius, TURRET_RADIUS_DEFAULT } from "@/lib/facade/turret";
+import { cornerDatumOverrides } from "@/lib/facade/cornerDatum";
+import CornerRoofMesh from "./CornerRoofMesh";
+import TurretMesh from "./TurretMesh";
+import { ROOF_COLORS } from "./FacadeMesh";
+import type { Marquee } from "@/lib/facade/marquee";
+import {
+  levelingFor,
+  groundNormal,
+  groundHeightAt,
+  sampleHF,
+  type Ground,
+  type Heightfield,
+} from "@/lib/facade/terrain";
+
+const BASEMENT_MIN = 0.3; // no sliver plinths below this drop
+const BASEMENT_COLOR = "#6f6a62"; // stone
+
+/** Desaturated gold for a real imported plot boundary (M4) — deliberately
+ * unlike the accent used for block/lot selection, so a parcel never reads as
+ * "selected". */
+const PARCEL_COLOR = "#a89060";
+
+/** Leveling plinth below a building on sloping ground: a stone box from the
+ * floor (local y=0) down to −drop, pierced by a row of thin horizontal
+ * semi-basement windows on the street face. */
+function Basement({ width, depth, drop }: { width: number; depth: number; drop: number }) {
+  if (drop < BASEMENT_MIN) return null;
+  const n = Math.max(1, Math.floor(width / 1.3));
+  const winW = Math.min(0.75, (width / n) * 0.7);
+  const winY = -Math.min(drop * 0.45, drop - 0.12);
+  return (
+    <group>
+      <mesh position={[0, -drop / 2, -depth / 2]} castShadow receiveShadow>
+        <boxGeometry args={[width, drop, depth]} />
+        <meshStandardMaterial color={BASEMENT_COLOR} roughness={0.92} />
+      </mesh>
+      {Array.from({ length: n }, (_, i) => {
+        const x = -width / 2 + ((i + 0.5) * width) / n;
+        return (
+          <mesh key={i} position={[x, winY, 0.03]}>
+            <boxGeometry args={[winW, 0.28, 0.05]} />
+            <meshStandardMaterial
+              color="#2a2e33"
+              roughness={0.2}
+              metalness={0.4}
+            />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
+/** Copied from BuildingViewer — sun azimuth/altitude → directional light pos. */
+function sunPositionFromAngles(
+  azimuthDeg: number,
+  altitudeDeg: number,
+): [number, number, number] {
+  const az = (azimuthDeg * Math.PI) / 180;
+  const alt = (altitudeDeg * Math.PI) / 180;
+  const r = 30;
+  const x = r * Math.cos(alt) * Math.sin(az);
+  const y = r * Math.sin(alt);
+  const z = r * Math.cos(alt) * Math.cos(az);
+  return [x, y, z];
+}
+
+/** A world-oriented (XZ, +Y up) plane over ±GROUND_HALF, each vertex displaced
+ * to the real ground height. Resolution tracks the heightfield spacing (the
+ * bbox gets detail; the clamp-to-edge far field stays coarse & flat). Takes
+ * the `Heightfield` directly (not the enclosing `Ground`) so the memo above
+ * that calls this only reads `ground.hf` — matching its declared dep array. */
+function displacedGroundGeometry(hf: Heightfield): THREE.BufferGeometry {
+  const seg = Math.max(
+    64,
+    Math.min(400, Math.round((2 * GROUND_HALF) / hf.spacing)),
+  );
+  const g = new THREE.PlaneGeometry(2 * GROUND_HALF, 2 * GROUND_HALF, seg, seg);
+  g.rotateX(-Math.PI / 2); // bake lie-flat: geometry now spans XZ, +Y up
+  const pos = g.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    pos.setY(i, sampleHF(hf, pos.getX(i), pos.getZ(i)));
+  }
+  pos.needsUpdate = true;
+  g.computeVertexNormals();
+  return g;
+}
+
+/** One simple opaque plane out to the horizon (replaces the old radially
+ * fading 200 m patch), with a REAL hole punched for every canal: the cut's
+ * rim hides under the canal's own sidewalks and the quay walls + bed line
+ * the channel. The same holes-in-terrain shape is where future cuts
+ * (sunken plazas, stairs) will go. */
+export function buildGroundGeometry(
+  streetNetwork: StreetNetwork | undefined,
+  heightfield: Heightfield | undefined,
+): THREE.BufferGeometry {
+  if (heightfield) return displacedGroundGeometry(heightfield);
+  const shape = new THREE.Shape([
+    new THREE.Vector2(-GROUND_HALF, -GROUND_HALF),
+    new THREE.Vector2(GROUND_HALF, -GROUND_HALF),
+    new THREE.Vector2(GROUND_HALF, GROUND_HALF),
+    new THREE.Vector2(-GROUND_HALF, GROUND_HALF),
+  ]);
+  for (const s of streetNetwork?.streets ?? []) {
+    if (s.type !== "canal") continue;
+    const cl = filletCentreline(s.points, minRadiusOf(s), 8, s.closed);
+    const outline = canalHoleOutline(cl, effectiveWidth(s));
+    if (!outline) continue;
+    // The plane is rotated −90° about X: plane (x, y) → world (x, −z).
+    shape.holes.push(
+      new THREE.Path(outline.map(([x, z]) => new THREE.Vector2(x, -z))),
+    );
+  }
+  return new THREE.ShapeGeometry(shape);
+}
+
+/** The 12 edges of a centred w×h×d box as segment endpoint pairs — what
+ * drei's `<Edges>` computes from a box via EdgesGeometry. Stated explicitly
+ * so the outline can render through NodeLine's segments mode on the WebGPU
+ * path (drei's Edges is built on the classic LineMaterial, which the node
+ * renderer rejects). */
+function boxEdgePoints(
+  w: number,
+  h: number,
+  d: number,
+): [number, number, number][] {
+  const x = w / 2;
+  const y = h / 2;
+  const z = d / 2;
+  const c = (sx: number, sy: number, sz: number): [number, number, number] => [
+    sx * x,
+    sy * y,
+    sz * z,
+  ];
+  return [
+    // bottom ring
+    c(-1, -1, -1), c(1, -1, -1),
+    c(1, -1, -1), c(1, -1, 1),
+    c(1, -1, 1), c(-1, -1, 1),
+    c(-1, -1, 1), c(-1, -1, -1),
+    // top ring
+    c(-1, 1, -1), c(1, 1, -1),
+    c(1, 1, -1), c(1, 1, 1),
+    c(1, 1, 1), c(-1, 1, 1),
+    c(-1, 1, 1), c(-1, 1, -1),
+    // verticals
+    c(-1, -1, -1), c(-1, 1, -1),
+    c(1, -1, -1), c(1, 1, -1),
+    c(1, -1, 1), c(1, 1, 1),
+    c(-1, -1, 1), c(-1, 1, 1),
+  ];
+}
+
+function SelectionMarker({ params }: { params: FacadeParams }) {
+  const h = useMemo(() => computeLayout(params).totalHeight, [params]);
+  const edges = useMemo(
+    () => boxEdgePoints(params.width + 0.15, h + 0.15, 0.7),
+    [params.width, h],
+  );
+  return (
+    <group position={[0, h / 2, -0.15]}>
+      <Line segments points={edges} color="#3b82f6" lineWidth={1.5} />
+    </group>
+  );
+}
+
+/** A lot's plain massing volume — one wall-coloured box, no facade detail —
+ * for the "massing" display mode. Footprint + height from the layout; sits
+ * behind the facade line like the real StripMass. */
+function MassingBox({ params }: { params: FacadeParams }) {
+  const l = useMemo(() => computeLayout(params), [params]);
+  return (
+    <mesh
+      position={[0, l.totalHeight / 2, -l.massingDepth / 2]}
+      castShadow
+      receiveShadow
+    >
+      <boxGeometry args={[params.width, l.totalHeight, l.massingDepth]} />
+      <meshStandardMaterial color={params.wallColor} roughness={0.9} />
+    </mesh>
+  );
+}
+
+/** A lot's volume as a wireframe outline — the "outline" display mode. */
+function OutlineBox({ params }: { params: FacadeParams }) {
+  const l = useMemo(() => computeLayout(params), [params]);
+  const edges = useMemo(
+    () => boxEdgePoints(params.width, l.totalHeight, l.massingDepth),
+    [params.width, l.totalHeight, l.massingDepth],
+  );
+  return (
+    <group position={[0, l.totalHeight / 2, -l.massingDepth / 2]}>
+      <Line segments points={edges} color="#6b7482" lineWidth={1.5} />
+    </group>
+  );
+}
+
+/** The per-block sidewalk strip, DRAPED to follow the landscape: its four
+ * corners (the frontage line and the same line pushed 2.5 m to the street side)
+ * each ride the tilted ground, so the strip lies flush with the slope instead
+ * of a horizontal box that floats/cuts in at its ends. Flat ground → all four
+ * corners at y=0 → the same flat strip as before (byte-identical). */
+const SIDEWALK_WIDTH = 2.5;
+function DrapedSidewalk({ frame, ground }: { frame: BlockFrame; ground: Ground }) {
+  const geo = useMemo(() => {
+    const { origin: o, dir: d, normal: n, length: L } = frame;
+    const W = SIDEWALK_WIDTH;
+    const y = (x: number, z: number): [number, number, number] => [
+      x,
+      groundHeightAt(x, z, ground) + 0.005,
+      z,
+    ];
+    const iA = y(o[0], o[1]);
+    const iB = y(o[0] + d[0] * L, o[1] + d[1] * L);
+    const oA = y(o[0] + n[0] * W, o[1] + n[1] * W);
+    const oB = y(o[0] + d[0] * L + n[0] * W, o[1] + d[1] * L + n[1] * W);
+    const pos = [...iA, ...iB, ...oB, ...iA, ...oB, ...oA];
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.computeVertexNormals();
+    return g;
+  }, [frame, ground]);
+  useEffect(() => () => geo.dispose(), [geo]);
+  return (
+    <mesh geometry={geo} receiveShadow>
+      <meshStandardMaterial color="#8f8a80" roughness={0.9} side={THREE.DoubleSide} />
+    </mesh>
+  );
+}
+
+/** A promoted block's real parcel boundary, draped on the ground (M4).
+ *
+ * Deliberately FIXED: it does not follow the block when lots are resized or a
+ * node is dragged, because it is a real plot boundary — seeing the building
+ * leave its plot is information the designer wants, not a bug. Dashed so it
+ * reads as a survey line rather than built geometry. */
+function ParcelOutline({
+  outline,
+  ground,
+}: {
+  outline: [number, number][];
+  ground: Ground;
+}) {
+  const points = useMemo(
+    () =>
+      // Closed loop: repeat the first vertex so the ring joins up. Sits just
+      // above the block line (0.06) so the two never z-fight.
+      [...outline, outline[0]].map(
+        ([x, z]) =>
+          [x, groundHeightAt(x, z, ground) + 0.07, z] as [number, number, number],
+      ),
+    [outline, ground],
+  );
+  // Never mount an empty fat line — a Line2 compiled with empty geometry
+  // produces invalid WGSL that stays cached.
+  if (outline.length < 3) return null;
+  return (
+    <Line
+      points={points}
+      color={PARCEL_COLOR}
+      lineWidth={1.4}
+      dashed
+      dashSize={0.7}
+      gapSize={0.45}
+    />
+  );
+}
+
+function BlockGroup({
+  block,
+  selected,
+  onSelectLot,
+  miters,
+  ground,
+  cornerSides,
+  marqueeLots,
+  massMiters,
+  noRoof,
+  datumOverride,
+  rearSkin,
+  openFill,
+  display,
+}: {
+  block: FacadeBlock;
+  selected: Selection | null;
+  onSelectLot: (blockId: string, lot: number) => void;
+  miters: Map<string, LotMiter>;
+  ground: Ground;
+  cornerSides: Set<string> | null;
+  /** Lot indices highlighted by a live marquee (whole enclosed block → all
+   * indices; partial block → its selected lots). */
+  marqueeLots: Set<number> | null;
+  /** Merged-corner elbow extensions / roof suppression / shared datums —
+   * empty when no unified corner touches this block. */
+  massMiters: Map<string, LotMiter>;
+  noRoof: Set<string>;
+  datumOverride: Map<string, number>;
+  /** This block lines a square's interior — each lot grows a second facade
+   * skin on the massing rear, facing the void. */
+  rearSkin: boolean;
+  /** Non-null → this frontage is too short for a terrace and renders as open
+   * space (plaza/park) instead of buildings. Null = normal building block. */
+  openFill: OpenFill | null;
+  /** Building render mode (full / massing / outline / off). */
+  display: BuildingDisplay;
+}) {
+  const placements = useMemo(() => lotPlacements(block), [block]);
+  const frame = useMemo(() => blockFrame(block), [block]);
+  const isSelectedBlock = selected?.blockId === block.id;
+  return (
+    <group>
+      {/* Open block: plaza/park fill replaces the buildings. The frontage line
+        * below still renders (plan view), byte-identical when openFill null. */}
+      {openFill && (
+        <OpenBlockMesh
+          footprint={blockFootprint(frame, MASSING_DEPTH_DEFAULT)}
+          fill={openFill}
+          seed={block.seed}
+          ground={ground}
+        />
+      )}
+      {!openFill &&
+        display !== "off" &&
+        block.lots.map((lot, i) => {
+        const pos = placements[i].position;
+        const depth = lot.params.massingDepth ?? MASSING_DEPTH_DEFAULT;
+        const key = `${block.id}:${i}`;
+        const { datum: ownDatum, drop: ownDrop } = levelingFor(
+          pos[0],
+          pos[2],
+          lot.params.width,
+          depth,
+          placements[i].rotationY,
+          ground,
+        );
+        // A merged corner levels both wings at the primary side's datum so
+        // the shared mass and L-roof can't tear on a slope; the basement
+        // grows by the lift so it still reaches the ground.
+        const datum = datumOverride.get(key) ?? ownDatum;
+        const drop = ownDrop + (datum - ownDatum);
+        return (
+          <group
+            key={`${block.id}-${i}`}
+            position={[pos[0], datum, pos[2]]}
+            rotation={[0, placements[i].rotationY, 0]}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelectLot(block.id, i);
+            }}
+          >
+            {display === "massing" && <MassingBox params={lot.params} />}
+            {display === "outline" && <OutlineBox params={lot.params} />}
+            {display === "full" && (
+              <>
+                <FacadeMesh
+                  params={lot.params}
+                  miter={miters.get(key)}
+                  massMiter={massMiters.get(key)}
+                  roof={!noRoof.has(key)}
+                />
+                {/* Second facade on the massing rear, facing the square void —
+                 * wall + openings + ornament only (skin mode); the front's
+                 * massing and roof already span the depth. */}
+                {rearSkin && (
+                  <group position={[0, 0, -depth]} rotation={[0, Math.PI, 0]}>
+                    <FacadeMesh params={lot.params} skin />
+                  </group>
+                )}
+                <Basement width={lot.params.width} depth={depth} drop={drop} />
+              </>
+            )}
+            {/* At a live corner, cornerSides lights both wings and suppresses
+             * the single-lot marker. When no corner resolves (lot/block level,
+             * or a dissolved corner), fall back to the plain selected-lot
+             * marker so the edited lot is always visibly highlighted. */}
+            {((isSelectedBlock && selected?.lot === i && !cornerSides) ||
+              cornerSides?.has(`${block.id}:${i}`) ||
+              marqueeLots?.has(i)) && (
+              <SelectionMarker params={lot.params} />
+            )}
+          </group>
+        );
+      })}
+      {/* Per-block sidewalk strip on the street side of the line, draped to
+        * follow the tilted ground. */}
+      {!openFill && <DrapedSidewalk frame={frame} ground={ground} />}
+      {/* Real parcel boundary for a promoted block (M4). Absent on drawn and
+        * street-derived blocks, so a scene with no place is byte-identical. */}
+      {block.parcel && (
+        <ParcelOutline outline={block.parcel.outline} ground={ground} />
+      )}
+      {/* The block's line — always visible in plan, accented when selected;
+       * each endpoint rides the tilted ground so it doesn't float on slopes */}
+      <Line
+        points={[
+          [
+            block.line.a[0],
+            groundHeightAt(block.line.a[0], block.line.a[1], ground) + 0.06,
+            block.line.a[1],
+          ],
+          [
+            block.line.b[0],
+            groundHeightAt(block.line.b[0], block.line.b[1], ground) + 0.06,
+            block.line.b[1],
+          ],
+        ]}
+        color={
+          isSelectedBlock && selected?.level === "block"
+            ? "#3b82f6"
+            : "#4a4a48"
+        }
+        lineWidth={isSelectedBlock && selected?.level === "block" ? 3 : 1.5}
+      />
+    </group>
+  );
+}
+
+export default function SceneContents({
+  blocks,
+  selected,
+  onSelectLot,
+  view,
+  maxCornerAngle,
+  ground,
+  marquee = null,
+  streetNetwork,
+  selectedStreet = null,
+  onSelectStreet,
+  selectedIntersection = null,
+  onSelectIntersection,
+  selectedSquare = null,
+  onSelectSquare,
+  gridAngleDeg = null,
+  cornerChoices,
+  display = "full",
+  sceneShadows = true,
+  groundGeometry,
+  contextGeometry,
+  selectedContextBuilding,
+  onSelectContextBuilding,
+}: {
+  blocks: FacadeBlock[];
+  selected: Selection | null;
+  onSelectLot: (blockId: string, lot: number) => void;
+  view: ViewSettings;
+  maxCornerAngle: number;
+  ground: Ground;
+  /** Rotate the drawn grid to the drawing-grid angle while grid lock is on
+   * (plan pane). null → axis-aligned, byte-identical. */
+  gridAngleDeg?: number | null;
+  /** Corner mode choices — unified corners merge into one mass with one
+   * L-roof. Absent → no merging (byte-identical). */
+  cornerChoices?: ReadonlyMap<string, CornerChoice>;
+  /** Live marquee selection to highlight (blocks/lots via SelectionMarker,
+   * nodes via a gold ring). null → no marquee (byte-identical). */
+  marquee?: Marquee | null;
+  /** Drawn streets + roundabouts, world space. undefined → nothing rendered
+   * (byte-identical to before street support existed). */
+  streetNetwork?: StreetNetwork;
+  /** Selected street id — highlights its ribbon. */
+  selectedStreet?: string | null;
+  /** Undefined → street ribbons aren't selectable. */
+  onSelectStreet?: (id: string) => void;
+  /** Selected intersection key — highlights its marker. */
+  selectedIntersection?: string | null;
+  /** Undefined → intersections aren't selectable. */
+  onSelectIntersection?: (key: string) => void;
+  /** Selected square (loop id) + selection callback. */
+  selectedSquare?: string | null;
+  onSelectSquare?: (streetId: string) => void;
+  /** Building render mode. Default "full" (byte-identical). */
+  display?: BuildingDisplay;
+  /** Expensive sun/contact shadow passes belong to the perspective pane. */
+  sceneShadows?: boolean;
+  /** Scene-wide ground geometry shared by every visible workspace pane. */
+  groundGeometry: THREE.BufferGeometry;
+  /** One scene-wide merged backdrop geometry, shared across workspace panes. */
+  contextGeometry?: ContextGeometry | null;
+  /** The context building the inspector is open on (M4). */
+  selectedContextBuilding?: string | null;
+  /** undefined ⇒ not interactive (Select tool off). */
+  onSelectContextBuilding?: (id: string) => void;
+}) {
+  const masksGround = Boolean(
+    ground.hf && streetNetwork?.streets.some((s) => s.type === "canal"),
+  );
+  const groundQuat = useMemo(() => {
+    const q = new THREE.Quaternion();
+    if (ground.hf) return q; // identity — displacement IS the terrain
+    q.setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(...groundNormal(ground)),
+    );
+    return q;
+  }, [ground]);
+  const sunPos = useMemo(
+    () => sunPositionFromAngles(view.sunAzimuth, view.sunAltitude),
+    [view.sunAzimuth, view.sunAltitude],
+  );
+  // Detected once, shared by every corner-derived memo below (this scene
+  // mounts once per workspace pane, so a single detectCorners call matters).
+  const corners = useMemo(
+    () => detectCorners(blocks, maxCornerAngle),
+    [blocks, maxCornerAngle],
+  );
+  const miters = useMemo(() => {
+    const m = new Map<string, LotMiter>();
+    for (const c of corners) {
+      const ext = miterFor(c);
+      for (const [side, e] of [
+        [c.a, ext.a],
+        [c.b, ext.b],
+      ] as const) {
+        if (e === 0) continue;
+        const key = `${side.blockId}:${side.lotIndex}`;
+        const cur = m.get(key) ?? { left: 0, right: 0 };
+        m.set(key, { ...cur, [side.lotSide]: e });
+      }
+    }
+    return m;
+  }, [corners]);
+  // Merged (unified) corners: elbow mass extensions, the shared datum both
+  // wings level to, per-lot roof suppression, and the L-roof plans
+  // (2026-07-17 corner-l-roof spec). Empty maps/sets when no corner is
+  // unified or a precondition fails — every path falls back byte-identical.
+  const cornerMerge = useMemo(() => {
+    const roofs: { key: string; plan: CornerRoofPlan; datum: number; color: string }[] = [];
+    const turrets: {
+      key: string;
+      x: number;
+      z: number;
+      datum: number;
+      baseY: number;
+      wallTop: number;
+      radius: number;
+      corbelled: boolean;
+      storeyLevels: number[];
+      outwardAngle: number;
+      wallColor: string;
+      trimColor: string;
+      roofColor: string;
+    }[] = [];
+    const massMiters = new Map<string, LotMiter>();
+    const noRoof = new Set<string>();
+    const datumOverride = new Map<string, number>();
+    if (!cornerChoices || corners.length === 0)
+      return { roofs, turrets, massMiters, noRoof, datumOverride };
+    const byId = new Map(blocks.map((b) => [b.id, b]));
+    // Shared corner datums for EVERY corner (unified OR two-facades): the two
+    // welded wings meet at the shared node, so their corner lots must level to
+    // ONE height — otherwise on a slope each wing levels to its own ground
+    // height and the frontage tears at the corner (walls/roofs at different
+    // heights, self-intersecting). Flat ground → all 0 → byte-identical.
+    for (const [k, v] of cornerDatumOverrides(corners, cornerChoices, blocks, ground))
+      datumOverride.set(k, v);
+    for (const c of corners) {
+      const choice = cornerChoice(cornerChoices, c, blocks);
+      // Everything below is the unified merge (elbow fill, L-roof, turret);
+      // two-facades corners only needed the shared datum, seeded above.
+      if (choice.mode !== "unified") continue;
+      const pSide = c[choice.primary];
+      const oSide = c[choice.primary === "a" ? "b" : "a"];
+      const pBlock = byId.get(pSide.blockId)!;
+      const pLot = pBlock.lots[pSide.lotIndex];
+      const oLot = byId.get(oSide.blockId)!.lots[oSide.lotIndex];
+      const pLayout = computeLayout(pLot.params);
+      const oLayout = computeLayout(oLot.params);
+      const D = pLayout.massingDepth;
+      // The shared corner datum (seeded above) — both corner-lot keys map to it.
+      const datum = datumOverride.get(`${c.a.blockId}:${c.a.lotIndex}`)!;
+
+      // Elbow fill — every unified corner, flat roofs included. Seed from
+      // the WALL miter so the untouched side keeps its wall extension.
+      const mm = massMiterFor(c, D);
+      for (const [side, e] of [
+        [c.a, mm.a],
+        [c.b, mm.b],
+      ] as const) {
+        if (e === 0) continue;
+        const key = `${side.blockId}:${side.lotIndex}`;
+        const cur =
+          massMiters.get(key) ??
+          { ...(miters.get(key) ?? { left: 0, right: 0 }) };
+        massMiters.set(key, { ...cur, [side.lotSide]: e });
+      }
+
+      // Corner turret — straddles the node; independent of the roof
+      // preconditions (a flat-roofed corner can still carry one).
+      const turret = choice.turret ?? "none";
+      if (turret !== "none") {
+        // Windows face the streets: the outward direction is the sum of the two
+        // wings' facade normals (each points toward its street). angle over
+        // plan (x,z) with radial = [cos, sin].
+        const tf = cornerFrame(c, blocks);
+        const ox = tf.nA[0] + tf.nB[0];
+        const oz = tf.nA[1] + tf.nB[1];
+        turrets.push({
+          key: c.key,
+          x: c.node[0],
+          z: c.node[1],
+          datum,
+          baseY: turret === "corbel" ? (pLayout.storeyLevels[1] ?? 0) : 0,
+          wallTop: pLayout.wallTop,
+          radius: clampTurretRadius(choice.turretRadius ?? TURRET_RADIUS_DEFAULT),
+          corbelled: turret === "corbel",
+          storeyLevels: pLayout.storeyLevels,
+          outwardAngle: Math.atan2(oz, ox),
+          wallColor: pLot.params.wallColor,
+          trimColor: pLot.params.trimColor,
+          roofColor: ROOF_COLORS[pLot.params.roofColor ?? "slate"],
+        });
+      }
+
+      // One L-roof only when every precondition holds; otherwise the wings
+      // keep their independent tents exactly as today.
+      if (!pLayout.roof) continue; // flat — the fill above still applies
+      if ((pLot.params.roofOrientation ?? "parallel") !== "parallel") continue;
+      if ((oLot.params.roofOrientation ?? "parallel") !== "parallel") continue;
+      if (oLayout.massingDepth !== D) continue;
+      if (oLayout.wallTop !== pLayout.wallTop) continue;
+      const frame = cornerFrame(c, blocks);
+      const plan = cornerRoofPlan({
+        V: frame.V,
+        uA: frame.uA,
+        uB: frame.uB,
+        nA: frame.nA,
+        nB: frame.nB,
+        D,
+        Wa: frame.Wa,
+        Wb: frame.Wb,
+        convex: c.convex,
+        type: pLayout.roof.type,
+        eaveY: pLayout.wallTop,
+        roofHeight: pLayout.roof.ridgeY - pLayout.roof.eaveY,
+      });
+      if (!plan) continue;
+      roofs.push({
+        key: c.key,
+        plan,
+        datum,
+        color: ROOF_COLORS[pLot.params.roofColor ?? "slate"],
+      });
+      noRoof.add(`${c.a.blockId}:${c.a.lotIndex}`);
+      noRoof.add(`${c.b.blockId}:${c.b.lotIndex}`);
+    }
+    return { roofs, turrets, massMiters, noRoof, datumOverride };
+  }, [cornerChoices, corners, blocks, miters, ground]);
+  // Square-fronting blocks: street-derived blocks lining a closed loop's
+  // interior back onto the square void, so they earn a second facade skin
+  // facing it. Empty set when no closed loops (byte-identical).
+  const squareFrontingIds = useMemo(() => {
+    if (!streetNetwork) return new Set<string>();
+    const squares = deriveSquares(streetNetwork);
+    if (squares.length === 0) return new Set<string>();
+    return new Set(
+      blocks.filter((b) => isSquareFrontingBlock(b, squares)).map((b) => b.id),
+    );
+  }, [streetNetwork, blocks]);
+  // Open blocks: frontages too short for a terrace render as plaza/park instead
+  // of buildings. Derived from seed + length — sparse, empty for a normal scene
+  // (byte-identical). Excluded below from the window instancer too.
+  const openFills = useMemo(() => {
+    const m = new Map<string, OpenFill>();
+    for (const b of blocks) {
+      const f = openFillFor(blockFrame(b).length, b.seed, b.gen.lotWidth.min);
+      if (f) m.set(b.id, f);
+    }
+    return m;
+  }, [blocks]);
+  const buildingBlocks = useMemo(
+    () => blocks.filter((b) => !openFills.has(b.id)),
+    [blocks, openFills],
+  );
+  // Both corner-side lots to highlight when a corner is selected. Null when
+  // no corner is selected OR the selected corner has dissolved (angle change
+  // / node drag) — the marker condition falls back to the plain lot marker.
+  const cornerSides = useMemo(() => {
+    if (selected?.level !== "corner" || !selected.cornerKey) return null;
+    const c = corners.find((x) => x.key === selected.cornerKey);
+    if (!c) return null;
+    return new Set([
+      `${c.a.blockId}:${c.a.lotIndex}`,
+      `${c.b.blockId}:${c.b.lotIndex}`,
+    ]);
+  }, [selected, corners]);
+  // Marquee highlight: per-block lot-index sets (enclosed block → every lot;
+  // partial block → its selected lots) + gold rings at selected node points.
+  const marqueeLotsByBlock = useMemo(() => {
+    if (!marquee) return null;
+    const byId = new Map<string, FacadeBlock>(blocks.map((b) => [b.id, b]));
+    const map = new Map<string, Set<number>>();
+    const add = (id: string, i: number) => {
+      const s = map.get(id) ?? new Set<number>();
+      s.add(i);
+      map.set(id, s);
+    };
+    for (const id of marquee.blocks) {
+      const b = byId.get(id);
+      if (b) b.lots.forEach((_, i) => add(id, i));
+    }
+    for (const key of marquee.lots) {
+      const sep = key.lastIndexOf(":");
+      add(key.slice(0, sep), Number(key.slice(sep + 1)));
+    }
+    return map;
+  }, [marquee, blocks]);
+  return (
+    <>
+      <ambientLight intensity={0.35} />
+      <directionalLight
+        position={sunPos}
+        intensity={1.4}
+        castShadow={sceneShadows}
+        shadow-mapSize-width={2048}
+        shadow-mapSize-height={2048}
+        shadow-camera-far={80}
+        shadow-camera-near={0.1}
+        shadow-camera-left={-25}
+        shadow-camera-right={25}
+        shadow-camera-top={25}
+        shadow-camera-bottom={-25}
+        shadow-bias={-0.0005}
+      />
+      <directionalLight position={[-8, 10, -6]} intensity={0.25} />
+      <pointLight position={[0, 30, 0]} intensity={0.3} />
+
+      {/* Bundled locally (CC0, Poly Haven) — a runtime CDN fetch here once
+       * took the whole viewer down when the network hiccuped. */}
+      <Environment files="/hdri/furstenstein_1k.hdr" background={false} />
+
+      {blocks.map((block) => (
+        <BlockGroup
+          key={block.id}
+          block={block}
+          selected={selected}
+          onSelectLot={onSelectLot}
+          miters={miters}
+          ground={ground}
+          cornerSides={cornerSides}
+          marqueeLots={marqueeLotsByBlock?.get(block.id) ?? null}
+          massMiters={cornerMerge.massMiters}
+          noRoof={cornerMerge.noRoof}
+          datumOverride={cornerMerge.datumOverride}
+          rearSkin={squareFrontingIds.has(block.id)}
+          openFill={openFills.get(block.id) ?? null}
+          display={display}
+        />
+      ))}
+      {/* Merged corner L-roofs — one hip/valley surface per unified corner,
+       * replacing the two suppressed per-wing tents. */}
+      {cornerMerge.roofs.map((r) => (
+        <CornerRoofMesh key={r.key} plan={r.plan} datum={r.datum} color={r.color} />
+      ))}
+      {/* Corner turrets (round towers straddling unified corner nodes). */}
+      {cornerMerge.turrets.map(({ key, ...t }) => (
+        <TurretMesh key={`turret-${key}`} {...t} />
+      ))}
+      {/* Scene-wide window glass + frames as two InstancedMeshes (perf). The
+       * per-block FacadeMesh skips WindowFill under USE_INSTANCING. */}
+      {/* Scene-wide window glass/frames — only in the detailed "full" mode. */}
+      {display === "full" && (
+        <InstancedFacadeBoxes blocks={buildingBlocks} ground={ground} />
+      )}
+      {marquee?.nodes.map(([x, z]) => (
+        <mesh
+          key={`marquee-node-${x}:${z}`}
+          position={[x, groundHeightAt(x, z, ground) + 0.12, z]}
+          rotation={[-Math.PI / 2, 0, 0]}
+        >
+          <ringGeometry args={[0.6, 0.95, 28]} />
+          <meshBasicMaterial
+            color="#d4a017"
+            transparent
+            opacity={0.95}
+            depthWrite={false}
+          />
+        </mesh>
+      ))}
+      {streetNetwork && (
+        <StreetNetworkView
+          network={streetNetwork}
+          selectedStreet={selectedStreet}
+          onSelectStreet={onSelectStreet}
+          selectedIntersection={selectedIntersection}
+          onSelectIntersection={onSelectIntersection}
+          selectedSquare={selectedSquare}
+          onSelectSquare={onSelectSquare}
+          ground={ground}
+        />
+      )}
+      <ContextBuildings
+        model={contextGeometry ?? null}
+        ground={ground}
+        selectedId={selectedContextBuilding}
+        onSelect={onSelectContextBuilding}
+      />
+      {/* Ground plane + grid tilt to the slope so buildings sit on it at
+       * their datums. polygonOffset keeps the sidewalk/road/grid winning
+       * the depth test. */}
+      <group quaternion={groundQuat}>
+        <mesh
+          rotation={ground.hf ? [0, 0, 0] : [-Math.PI / 2, 0, 0]}
+          receiveShadow
+          geometry={groundGeometry}
+          dispose={null}
+          renderOrder={masksGround ? -10 : 0}
+        >
+          <meshStandardMaterial
+            color="#a59e95"
+            roughness={0.95}
+            metalness={0}
+            polygonOffset
+            polygonOffsetFactor={1}
+            polygonOffsetUnits={1}
+            stencilWrite={masksGround}
+            stencilRef={1}
+            stencilFunc={THREE.NotEqualStencilFunc}
+            stencilFail={THREE.KeepStencilOp}
+            stencilZFail={THREE.KeepStencilOp}
+            stencilZPass={THREE.KeepStencilOp}
+          />
+        </mesh>
+
+        {/* drei's Grid is a GLSL ShaderMaterial the node renderer can't
+         * compile; NodeGrid is its TSL port with identical parameters. The
+         * wrapper group spins the grid to the drawing-grid angle while grid
+         * lock is on (5 m sections = the snap spacing). Real terrain has no
+         * flat plane for an infinite grid to ride on, so it's suppressed. */}
+        {!ground.hf && (
+          <group rotation={[0, ((gridAngleDeg ?? 0) * Math.PI) / 180, 0]}>
+            {isWebGPUPath() ? (
+              <NodeGrid
+                position={[0, 0, 0]}
+                args={[60, 60]}
+                cellSize={1}
+                cellThickness={0.7}
+                cellColor="#1f1d1b"
+                sectionSize={5}
+                sectionThickness={1.4}
+                sectionColor="#0d0c0b"
+                fadeDistance={70}
+                fadeStrength={1.2}
+                infiniteGrid
+              />
+            ) : (
+              <Grid
+                position={[0, 0, 0]}
+                args={[60, 60]}
+                cellSize={1}
+                cellThickness={0.7}
+                cellColor="#1f1d1b"
+                sectionSize={5}
+                sectionThickness={1.4}
+                sectionColor="#0d0c0b"
+                fadeDistance={70}
+                fadeStrength={1.2}
+                infiniteGrid
+              />
+            )}
+          </group>
+        )}
+      </group>
+
+      {/* drei's ContactShadows renders the scene through a MeshDepthMaterial,
+       * which the WebGPU node renderer can't compile (it was the spike's
+       * stubborn "MeshDepthMaterial is not compatible" error — not the sun's
+       * shadow map). On the WebGPU path the real sun shadow covers the ground
+       * contact; WebGL keeps the soft blob unchanged. Real terrain gets its
+       * contact cues from the sun's own shadow map, so the blob is suppressed
+       * too (it also assumes a flat ground plane at y≈0). */}
+      {sceneShadows && !isWebGPUPath() && !ground.hf && (
+        <ContactShadows
+          position={[0, 0.005, 0]}
+          opacity={0.45}
+          scale={50}
+          blur={2.5}
+          far={20}
+          resolution={1024}
+        />
+      )}
+    </>
+  );
+}

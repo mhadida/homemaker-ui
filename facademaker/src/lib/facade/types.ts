@@ -1,0 +1,224 @@
+import type { ViewSettings } from "@/lib/building/types";
+import { classicalStoreyHeights } from "@/lib/building/types";
+
+export type OpeningKind =
+  | "window"
+  | "door"
+  | "blank"
+  | "shopfront"
+  | "garage"
+  | "passage";
+
+export type GroundTreatment =
+  | "residential"
+  | "shopfront"
+  | "garage"
+  | "passage";
+
+export interface GroundFloorConfig {
+  treatment: GroundTreatment;
+  /** Which bay gets the entrance (0 = leftmost). Clamped to bays-1 by the
+   * layout engine, so stale values after a bay-count change are harmless. */
+  doorBay: number;
+  /** Entry steps in front of the door (residential treatment only). */
+  stoop: boolean;
+  /** Projecting awning over the glazing (shopfront treatment only). */
+  awning?: boolean;
+}
+
+export interface OrnamentConfig {
+  cornice: boolean;
+  parapet: boolean;
+  sills: boolean;
+  surrounds: boolean;
+}
+
+export interface CellOverride {
+  /** 0 = ground storey */
+  storey: number;
+  /** 0 = leftmost bay */
+  bay: number;
+  kind: OpeningKind;
+}
+
+export interface FacadeSection {
+  /** Consecutive bays this section spans (>= 1). Stale partitions (after a
+   * bay-count change) are refit proportionally by the layout engine, so any
+   * stored value is harmless (doorBay precedent). */
+  bays: number;
+  /** Perpendicular relief along the facade normal, metres; + is
+   * street-proud. Clamped to ±SECTION_OFFSET_MAX by the layout engine. */
+  offset: number;
+}
+
+export type PresetId = "georgian" | "victorian-shopfront" | "modern";
+
+export type WindowStyleId = "georgian" | "sash" | "victorian" | "none";
+
+/** Order matches the controls chip row. */
+export const WINDOW_STYLE_OPTIONS: { id: WindowStyleId; label: string }[] = [
+  { id: "georgian", label: "Georgian" },
+  { id: "sash", label: "Sash" },
+  { id: "victorian", label: "1-over-1" },
+  { id: "none", label: "Plain" },
+];
+
+export interface FacadeParams {
+  /** Lot width in meters */
+  width: number;
+  /** 1–6 */
+  storeys: number;
+  /** Baseline average storey height */
+  storeyHeight: number;
+  /** Per-storey heights (bottom-up), classical ratios. Falls back to
+   * storeyHeight per storey when absent/short. */
+  storeyHeights?: number[];
+  /** Vertical bay count, 1–9 */
+  bays: number;
+  /** Opening width as fraction of bay width */
+  windowWidthRatio: number;
+  /** Opening height as fraction of storey height */
+  windowHeightRatio: number;
+  /** Internal glazing-bar pattern for windows (and the door transom). */
+  windowStyle: WindowStyleId;
+  /** Sparse per-cell overrides of the default grid kinds */
+  cellOverrides?: CellOverride[];
+  /** Optional horizontal partition into offset strips. Absent/empty = one
+   * full-width flush section (pre-sections behavior byte-identical). */
+  sections?: FacadeSection[];
+  /** Mirror section bays/offsets around the facade center. Enforced at
+   * resolve time, so toggling is live. */
+  sectionsSymmetrical?: boolean;
+  /** Building-body depth behind the facade, metres. Clamped
+   * [MASSING_DEPTH_MIN, MASSING_DEPTH_MAX] by the layout engine. Absent =
+   * MASSING_DEPTH_DEFAULT (every building has a body). */
+  massingDepth?: number;
+  /** Roof form. Absent = "flat" (the flat mass top, no roof mesh). */
+  roofType?: "flat" | "gable" | "hip";
+  /** Ridge direction. Absent = "parallel" (to street). Ignored when flat. */
+  roofOrientation?: "parallel" | "perpendicular";
+  /** Ridge rise above the eaves, metres. Clamped [ROOF_HEIGHT_MIN,
+   * ROOF_HEIGHT_MAX]. Absent = ROOF_HEIGHT_DEFAULT. Ignored when flat. */
+  roofHeight?: number;
+  /** Roof covering. Absent = "slate". Ignored when flat. */
+  roofColor?: "slate" | "red";
+  /** Dormer windows on the street-facing roof slope (parallel pitched roofs
+   * only). Absent/0 = none. Clamped to the bay count by the layout engine. */
+  dormers?: number;
+  /** Shaped ("bent"/compound) front gable rising above the eave. Absent =
+   * none (plain wall top). */
+  gableStyle?: "curved" | "stepped";
+  /** Gable peak height above the eave, metres. Clamped [GABLE_HEIGHT_MIN,
+   * GABLE_HEIGHT_MAX]. Absent = GABLE_HEIGHT_DEFAULT. Ignored without a style. */
+  gableHeight?: number;
+  groundFloor: GroundFloorConfig;
+  ornament: OrnamentConfig;
+  /** #RRGGBB — wall render color */
+  wallColor: string;
+  /** #RRGGBB — cornice/sills/surrounds/frames */
+  trimColor: string;
+  /** #RRGGBB — door + garage panel */
+  doorColor: string;
+  preset?: PresetId;
+}
+
+export const FACADE_LIMITS = {
+  width: { min: 4, max: 20 },
+  storeys: { min: 1, max: 6 },
+  storeyHeight: { min: 2.2, max: 4.5 },
+  bays: { min: 1, max: 9 },
+  windowWidthRatio: { min: 0.2, max: 0.8 },
+  windowHeightRatio: { min: 0.3, max: 0.8 },
+} as const;
+
+export const DEFAULT_FACADE: FacadeParams = {
+  width: 7.5,
+  storeys: 3,
+  storeyHeight: 3.0,
+  storeyHeights: classicalStoreyHeights(3, 3.0),
+  bays: 3,
+  windowWidthRatio: 0.45,
+  windowHeightRatio: 0.55,
+  windowStyle: "sash",
+  groundFloor: { treatment: "residential", doorBay: 0, stoop: true },
+  ornament: { cornice: true, parapet: false, sills: true, surrounds: false },
+  wallColor: "#ebcf88", // scandi yellow
+  trimColor: "#f1ece1", // warm white
+  doorColor: "#3d4a42",
+};
+
+/** Facade-specific sun default. The facade faces +z (azimuth 0), so unlike
+ * the main app's DEFAULT_VIEW (135° = behind the building), the sun starts
+ * front-right to rake across the relief. */
+export const FACADE_DEFAULT_VIEW: ViewSettings = {
+  sunAzimuth: 30,
+  sunAltitude: 50,
+};
+
+/** Door + garage panel swatches — deep traditional door colors. */
+export const DOOR_SWATCHES: { id: string; label: string; hex: string }[] = [
+  { id: "racing-green", label: "Green", hex: "#3d4a42" },
+  { id: "oxblood", label: "Oxblood", hex: "#5c3a35" },
+  { id: "navy", label: "Navy", hex: "#2e3a4d" },
+  { id: "black", label: "Black", hex: "#26262a" },
+  { id: "white", label: "White", hex: "#e8e4da" },
+];
+
+/** Presets are parameter bundles, not code paths. Applying one spreads
+ * `params` over DEFAULT_FACADE and clears cellOverrides (done by the page). */
+export const FACADE_PRESETS: Record<
+  PresetId,
+  { label: string; params: Partial<FacadeParams> }
+> = {
+  georgian: {
+    label: "Georgian",
+    params: {
+      storeys: 3,
+      bays: 3,
+      storeyHeight: 3.2,
+      storeyHeights: classicalStoreyHeights(3, 3.2),
+      windowWidthRatio: 0.4,
+      windowHeightRatio: 0.6,
+      windowStyle: "georgian",
+      groundFloor: { treatment: "residential", doorBay: 0, stoop: true },
+      ornament: { cornice: true, parapet: true, sills: true, surrounds: false },
+      wallColor: "#ebcf88", // scandi yellow
+      trimColor: "#f1ece1", // warm white
+      doorColor: "#3d4a42",
+    },
+  },
+  "victorian-shopfront": {
+    label: "Shopfront",
+    params: {
+      storeys: 3,
+      bays: 3,
+      storeyHeight: 3.4,
+      storeyHeights: classicalStoreyHeights(3, 3.4),
+      windowWidthRatio: 0.5,
+      windowHeightRatio: 0.6,
+      windowStyle: "victorian",
+      groundFloor: { treatment: "shopfront", doorBay: 1, stoop: false },
+      ornament: { cornice: true, parapet: false, sills: true, surrounds: true },
+      wallColor: "#a85748", // barn red
+      trimColor: "#ece3cf", // cream
+      doorColor: "#26262a",
+    },
+  },
+  modern: {
+    label: "Modern",
+    params: {
+      storeys: 4,
+      bays: 2,
+      storeyHeight: 2.9,
+      storeyHeights: classicalStoreyHeights(4, 2.9),
+      windowWidthRatio: 0.7,
+      windowHeightRatio: 0.7,
+      windowStyle: "none",
+      groundFloor: { treatment: "residential", doorBay: 1, stoop: false },
+      ornament: { cornice: false, parapet: true, sills: false, surrounds: false },
+      wallColor: "#9fb8c6", // dusty blue
+      trimColor: "#f1ece1", // warm white
+      doorColor: "#26262a",
+    },
+  },
+};
