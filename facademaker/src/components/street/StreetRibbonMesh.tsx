@@ -5,6 +5,7 @@ import type { Street, Vec2 } from "@/lib/street/types";
 import { effectiveWidth, minRadiusOf, resolveTraffic } from "@/lib/street/types";
 import { filletCentreline, streetRibbon } from "@/lib/street/geometry";
 import { groundHeightAt, type Ground } from "@/lib/facade/terrain";
+import TerrainCutoutMask from "./TerrainCutoutMask";
 
 const PAVING: Record<Street["type"], string> = {
   alley: "#6f6a63",
@@ -86,34 +87,37 @@ export default function StreetRibbonMesh({
   useEffect(() => () => geo?.dispose(), [geo]);
   if (!geo) return null;
   return (
-    <mesh
-      geometry={geo}
-      receiveShadow
-      onClick={
-        onSelect
-          ? (e) => {
-              e.stopPropagation();
-              onSelect();
-            }
-          : undefined
-      }
-      onPointerOver={
-        onSelect
-          ? (e) => {
-              e.stopPropagation();
-              setHover(true);
-            }
-          : undefined
-      }
-      onPointerOut={onSelect ? () => setHover(false) : undefined}
-    >
-      <meshStandardMaterial
-        color={selected ? SELECTED_COLOR : hover ? "#7c8a9c" : pavingOf(street)}
-        roughness={0.95}
-        side={THREE.DoubleSide}
-        polygonOffset
-        polygonOffsetFactor={-1}
-      />
-    </mesh>
+    <>
+      <TerrainCutoutMask geometry={geo} enabled={Boolean(ground.hf)} />
+      <mesh
+        geometry={geo}
+        receiveShadow
+        onClick={
+          onSelect
+            ? (e) => {
+                e.stopPropagation();
+                onSelect();
+              }
+            : undefined
+        }
+        onPointerOver={
+          onSelect
+            ? (e) => {
+                e.stopPropagation();
+                setHover(true);
+              }
+            : undefined
+        }
+        onPointerOut={onSelect ? () => setHover(false) : undefined}
+      >
+        <meshStandardMaterial
+          color={selected ? SELECTED_COLOR : hover ? "#7c8a9c" : pavingOf(street)}
+          roughness={0.95}
+          side={THREE.DoubleSide}
+          polygonOffset
+          polygonOffsetFactor={-1}
+        />
+      </mesh>
+    </>
   );
 }

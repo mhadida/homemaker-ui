@@ -5,6 +5,7 @@ import type { Monument } from "@/lib/street/types";
 import { roundaboutRing } from "@/lib/street/geometry";
 import { groundHeightAt, groundNormal, type Ground } from "@/lib/facade/terrain";
 import MonumentMesh from "./MonumentMesh";
+import TerrainCutoutMask from "./TerrainCutoutMask";
 
 export default function RoundaboutMesh({
   centre,
@@ -46,6 +47,7 @@ export default function RoundaboutMesh({
   return (
     <group>
       <group position={[cx, baseY, cz]} quaternion={q}>
+        <TerrainCutoutMask geometry={geo} enabled={Boolean(ground.hf)} />
         <mesh geometry={geo} receiveShadow>
           <meshStandardMaterial color="#3f3f44" roughness={0.95} side={THREE.DoubleSide} />
         </mesh>

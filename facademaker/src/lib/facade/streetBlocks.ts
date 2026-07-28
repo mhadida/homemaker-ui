@@ -25,6 +25,14 @@ export interface SyncOpts {
   cornerChoices: Map<string, CornerChoice>;
 }
 
+/** Remove only blocks generated from street frontages. Hand-drawn and
+ * promoted parcel blocks have no `source` and must survive. */
+export function stripStreetBlocks(blocks: FacadeBlock[]): FacadeBlock[] {
+  return blocks.some((block) => block.source)
+    ? blocks.filter((block) => !block.source)
+    : blocks;
+}
+
 /** Buildings on a block share a rear building line, so street-derived blocks
  * use ONE depth (the generator's per-lot random 6–12 m would otherwise expose
  * blank return walls at every corner, where mismatched-depth wings meet). */

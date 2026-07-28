@@ -3,6 +3,7 @@ import { useMemo, useEffect } from "react";
 import * as THREE from "three";
 import type { Vec2 } from "@/lib/street/types";
 import { groundHeightAt, type Ground } from "@/lib/facade/terrain";
+import TerrainCutoutMask from "./TerrainCutoutMask";
 
 /** One junction pad: a star polygon fan-triangulated from `pos`, terrain-draped
  * on the same plane as the ribbons so it never z-fights them. Decoration only —
@@ -38,14 +39,17 @@ export default function JunctionPadMesh({
   useEffect(() => () => geo?.dispose(), [geo]);
   if (!geo) return null;
   return (
-    <mesh geometry={geo} receiveShadow>
-      <meshStandardMaterial
-        color={color}
-        roughness={0.95}
-        side={THREE.DoubleSide}
-        polygonOffset
-        polygonOffsetFactor={-1}
-      />
-    </mesh>
+    <>
+      <TerrainCutoutMask geometry={geo} enabled={Boolean(ground.hf)} />
+      <mesh geometry={geo} receiveShadow>
+        <meshStandardMaterial
+          color={color}
+          roughness={0.95}
+          side={THREE.DoubleSide}
+          polygonOffset
+          polygonOffsetFactor={-1}
+        />
+      </mesh>
+    </>
   );
 }

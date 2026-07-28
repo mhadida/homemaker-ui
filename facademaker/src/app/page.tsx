@@ -38,7 +38,10 @@ import {
   sceneHasContent,
   type SceneState,
 } from "@/lib/facade/document";
-import { syncStreetBlocks } from "@/lib/facade/streetBlocks";
+import {
+  stripStreetBlocks,
+  syncStreetBlocks,
+} from "@/lib/facade/streetBlocks";
 import { rerollBlock, generateBlock, deleteLot } from "@/lib/facade/generate";
 import {
   mergeBlock,
@@ -1580,7 +1583,10 @@ export default function FacadePage() {
   // keeps a pure hand-drawn / empty scene byte-identical (same reference in
   // → same reference out → React bails the re-render).
   useEffect(() => {
-    if (!buildingsFromStreets) return;
+    // Imported networks can contain hundreds of streets and produce thousands
+    // of lots. The control is disabled for them, so restored state must not
+    // bypass that UI invariant and regenerate an entire city.
+    if (!buildingsFromStreets || hasImportedStreets) return;
     setBlocks((cur) => {
       if (streetNetwork.streets.length === 0 && !cur.some((b) => b.source))
         return cur;
@@ -1590,7 +1596,13 @@ export default function FacadePage() {
         cornerChoices,
       });
     });
-  }, [streetNetwork, buildingsFromStreets, maxCornerAngle, cornerChoices]);
+  }, [
+    streetNetwork,
+    buildingsFromStreets,
+    hasImportedStreets,
+    maxCornerAngle,
+    cornerChoices,
+  ]);
 
   // While auto-buildings are OFF, keep derived blocks stripped — not just at
   // the moment of toggling off, but whenever a source-tagged block could
@@ -1602,9 +1614,16 @@ export default function FacadePage() {
   // removed and re-toggling on regenerates a fresh one. The toggle is an
   // "auto-buildings on/off" switch, not a hide/show of edited state.
   useEffect(() => {
-    if (buildingsFromStreets) return;
-    setBlocks((bs) => (bs.some((b) => b.source) ? bs.filter((b) => !b.source) : bs));
-  }, [buildingsFromStreets, streetNetwork]);
+    if (buildingsFromStreets && !hasImportedStreets) return;
+    setBlocks(stripStreetBlocks);
+  }, [buildingsFromStreets, hasImportedStreets, streetNetwork]);
+
+  // A loaded/autosaved document can restore imported streets before the
+  // transient toggle state settles. Keep the disabled control truthful and
+  // ensure the stripped state is what the next autosave persists.
+  useEffect(() => {
+    if (hasImportedStreets) setBuildingsFromStreets(false);
+  }, [hasImportedStreets]);
 
   const corners = useMemo(
     () => detectCorners(blocks, maxCornerAngle),

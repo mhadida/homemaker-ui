@@ -532,9 +532,10 @@ export default function SceneContents({
   /** undefined ⇒ not interactive (Select tool off). */
   onSelectContextBuilding?: (id: string) => void;
 }) {
-  const masksGround = Boolean(
-    ground.hf && streetNetwork?.streets.some((s) => s.type === "canal"),
-  );
+  // Every paved surface writes its footprint to stencil before displaced
+  // terrain renders. This prevents real terrain from poking through flat,
+  // unbanked roads on cross-slopes as well as through recessed canals.
+  const masksGround = Boolean(ground.hf && streetNetwork?.streets.length);
   const groundQuat = useMemo(() => {
     const q = new THREE.Quaternion();
     if (ground.hf) return q; // identity — displacement IS the terrain

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { syncStreetBlocks } from "./streetBlocks";
+import { stripStreetBlocks, syncStreetBlocks } from "./streetBlocks";
 import { DEFAULT_GEN, type FacadeBlock } from "./blocks";
 import { DEFAULT_FACADE } from "./types";
 import type { StreetNetwork, Vec2 } from "../street/types";
@@ -41,6 +41,32 @@ describe("syncStreetBlocks", () => {
     const moved = syncStreetBlocks(net([S("s1", [[0, 0], [24, 0]])]), pinned, OPTS);
     const b0 = moved.find((b) => b.id === first[0].id)!;
     expect(b0.lots.some((l) => l.customized)).toBe(true); // pin survived the refit
+  });
+});
+
+describe("stripStreetBlocks", () => {
+  it("removes generated frontages while preserving hand-drawn blocks", () => {
+    const generated = syncStreetBlocks(net([S("s1", [[0, 0], [30, 0]])]), [], OPTS);
+    const hand: FacadeBlock = {
+      id: "hand-1",
+      line: { a: [0, 50], b: [10, 50] },
+      flipped: false,
+      gen: DEFAULT_GEN,
+      seed: 1,
+      lots: [
+        {
+          params: { ...DEFAULT_FACADE, width: 10 },
+          customized: false,
+        },
+      ],
+    };
+
+    expect(stripStreetBlocks([...generated, hand])).toEqual([hand]);
+  });
+
+  it("preserves array identity when there is nothing to strip", () => {
+    const blocks: FacadeBlock[] = [];
+    expect(stripStreetBlocks(blocks)).toBe(blocks);
   });
 });
 

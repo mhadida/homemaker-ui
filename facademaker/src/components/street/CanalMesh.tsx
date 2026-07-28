@@ -11,6 +11,7 @@ import {
   CANAL_BED_DEPTH,
 } from "@/lib/street/canal";
 import { groundHeightAt, type Ground } from "@/lib/facade/terrain";
+import TerrainCutoutMask from "./TerrainCutoutMask";
 
 const WATER = "#2f86b5";
 const WATER_EMISSIVE = "#0d3449";
@@ -115,26 +116,7 @@ export default function CanalMesh({
        * ShapeGeometry holes used by flat ground. This invisible bank-width
        * prepass marks the canal cut in stencil; SceneContents' ground material
        * then rejects those pixels, revealing the recessed water and quay. */}
-      {geos.mask && (
-        <mesh
-          geometry={geos.mask}
-          renderOrder={-20}
-          raycast={() => {}}
-        >
-          <meshBasicMaterial
-            colorWrite={false}
-            depthTest={false}
-            depthWrite={false}
-            side={THREE.DoubleSide}
-            stencilWrite
-            stencilRef={1}
-            stencilFunc={THREE.AlwaysStencilFunc}
-            stencilFail={THREE.ReplaceStencilOp}
-            stencilZFail={THREE.ReplaceStencilOp}
-            stencilZPass={THREE.ReplaceStencilOp}
-          />
-        </mesh>
-      )}
+      {geos.mask && <TerrainCutoutMask geometry={geos.mask} enabled />}
       <mesh geometry={geos.walk} receiveShadow>
         <meshStandardMaterial color={walk} roughness={0.95} side={THREE.DoubleSide} />
       </mesh>

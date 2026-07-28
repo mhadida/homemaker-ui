@@ -8,11 +8,33 @@ export const EYE_HEIGHT = 1.75;
 /** Brisk walking speed, m/s. */
 export const WALK_SPEED = 2.5;
 
+/** Mouse movement → camera rotation, matching three's pointer-lock default. */
+export const WALK_LOOK_SENSITIVITY = 0.002;
+const WALK_PITCH_LIMIT = Math.PI / 2 - 0.01;
+
 export interface WalkKeys {
   forward: boolean;
   back: boolean;
   left: boolean;
   right: boolean;
+}
+
+/** Apply a mouse-look delta to yaw/pitch, clamping pitch short of vertical so
+ * the camera never flips. Used by both native pointer lock and drag fallback. */
+export function walkLookAngles(
+  yaw: number,
+  pitch: number,
+  movementX: number,
+  movementY: number,
+  sensitivity: number = WALK_LOOK_SENSITIVITY,
+): [number, number] {
+  return [
+    yaw - movementX * sensitivity,
+    Math.max(
+      -WALK_PITCH_LIMIT,
+      Math.min(WALK_PITCH_LIMIT, pitch - movementY * sensitivity),
+    ),
+  ];
 }
 
 /** Next plan position after `dt` seconds of walking.

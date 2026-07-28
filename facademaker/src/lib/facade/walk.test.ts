@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { walkStep, WALK_SPEED, type WalkKeys } from "./walk";
+import {
+  walkLookAngles,
+  walkStep,
+  WALK_LOOK_SENSITIVITY,
+  WALK_SPEED,
+  type WalkKeys,
+} from "./walk";
 
 const KEYS: WalkKeys = { forward: false, back: false, left: false, right: false };
 const k = (over: Partial<WalkKeys>): WalkKeys => ({ ...KEYS, ...over });
@@ -43,5 +49,21 @@ describe("walkStep", () => {
   it("scales with dt and honors a custom speed", () => {
     const out = walkStep([0, 0], [1, 0], k({ forward: true }), 0.5, 4);
     expect(out[0]).toBeCloseTo(2);
+  });
+});
+
+describe("walkLookAngles", () => {
+  it("maps mouse movement to yaw and pitch at pointer-lock sensitivity", () => {
+    expect(walkLookAngles(1, 0.5, 10, -20)).toEqual([
+      1 - 10 * WALK_LOOK_SENSITIVITY,
+      0.5 + 20 * WALK_LOOK_SENSITIVITY,
+    ]);
+  });
+
+  it("clamps pitch before the camera can flip", () => {
+    const [, up] = walkLookAngles(0, 0, 0, -100_000);
+    const [, down] = walkLookAngles(0, 0, 0, 100_000);
+    expect(up).toBeLessThan(Math.PI / 2);
+    expect(down).toBeGreaterThan(-Math.PI / 2);
   });
 });

@@ -15,10 +15,8 @@ import {
   MapControls,
   OrthographicCamera,
   PerspectiveCamera,
-  PointerLockControls,
   Stats,
 } from "@react-three/drei";
-import type { PointerLockControls as PointerLockControlsImpl } from "three-stdlib";
 import * as THREE from "three";
 import SceneContents, { buildGroundGeometry } from "./SceneContents";
 import {
@@ -53,7 +51,12 @@ import {
   perspectiveFitFor,
   type SceneBounds,
 } from "@/lib/facade/sceneBounds";
-import { walkStep, EYE_HEIGHT, type WalkKeys } from "@/lib/facade/walk";
+import {
+  walkLookAngles,
+  walkStep,
+  EYE_HEIGHT,
+  type WalkKeys,
+} from "@/lib/facade/walk";
 import { snapToGridAxis } from "@/lib/facade/grid";
 import {
   ORBIT_MAX_DISTANCE,
@@ -1777,15 +1780,16 @@ function WalkStartSurface({
   );
 }
 
-/** First-person walk: pointer-lock mouse-look + WASD at eye height. Mounted
- * INSTEAD of the pane's OrbitControls while walking. Esc leaves pointer lock
- * → onExit (with a look-at point a few metres ahead so the returning orbit
- * controls don't lurch to the scene origin). Movement math is the pure
- * walkStep; the camera pins to the ground surface each frame (slope-follow).
+/** First-person walk: mouse-look + WASD at eye height. Native pointer lock is
+ * preferred; embedded browsers fall back to left-drag look. Mounted INSTEAD
+ * of OrbitControls while walking. Esc exits with a look-at point a few metres
+ * ahead so the returning orbit controls don't lurch to the scene origin.
+ * Movement math is the pure walkStep; the camera follows the ground surface.
  * v1 is deliberately walk-through — no collision. */
 function WalkControls({
   ground,
   start,
+  lookElement,
   onExit,
 }: {
   ground: Ground;
@@ -1793,15 +1797,26 @@ function WalkControls({
    * direction. Null falls back to dropping in place at the orbit camera's
    * position (the pre-picker behaviour, kept as a safety net). */
   start: StreetProjection | null;
+  /** Perspective pane: pointer-lock target and drag-look fallback surface. */
+  lookElement: HTMLElement | null;
   onExit: (lookAt: [number, number, number]) => void;
 }) {
   const camera = useThree((s) => s.camera);
-  const controlsRef = useRef<PointerLockControlsImpl | null>(null);
   const keys = useRef<WalkKeys>({
     forward: false,
     back: false,
     left: false,
     right: false,
+  });
+  // Guarantee that a quick tap survives long enough to reach at least one
+  // animation frame. Without this, keydown+keyup can both occur between
+  // frames (especially in embedded browsers), making an otherwise valid tap
+  // appear to do nothing.
+  const keyTapUntil = useRef<Record<keyof WalkKeys, number>>({
+    forward: 0,
+    back: 0,
+    left: 0,
+    right: 0,
   });
   // Kept fresh so the unlock handler (fired by the browser on Esc) reports
   // the camera's final heading without a stale closure.
@@ -1810,42 +1825,148 @@ function WalkControls({
     exitRef.current = onExit;
   });
 
-  // lock() must run inside the user-activation window of the click that
-  // entered walk mode — the street-start pick in the plan pane, or the Walk
-  // button's drop-in-place fallback. WalkControls mounts synchronously with
-  // that click's setState, so it does. The drop to eye height happens on the
-  // first frame callback below (the immutability lint bars mutating the
-  // useThree camera in an effect). If the browser refuses pointer lock
-  // (headless, iframe policy), leave walk mode instead of sticking in a mode
-  // that can't move or look.
+  // Drag-look is the always-available baseline. Pointer lock is only an
+  // enhancement: requesting it from this component's mount effect can fall
+  // outside the browser's transient user-activation window, and some embedded
+  // browsers then leave the request pending forever without firing either
+  // pointerlockchange or pointerlockerror. That formerly left movement gated
+  // in a dead "pending" state. A pointer-down in the 3D pane is a valid user
+  // gesture, so we upgrade to native lock from there when the browser permits
+  // it while keeping drag-look and WASD live throughout.
+  const lookMode = useRef<"locked" | "drag">("drag");
+  const dragging = useRef(false);
+  const lastPointer = useRef<[number, number] | null>(null);
+  const lookDelta = useRef<[number, number]>([0, 0]);
+  const exiting = useRef(false);
+  const exitFwd = useRef(new THREE.Vector3());
+  const finishWalk = useCallback(() => {
+    if (exiting.current) return;
+    exiting.current = true;
+    camera.getWorldDirection(exitFwd.current);
+    exitRef.current([
+      camera.position.x + exitFwd.current.x * 8,
+      camera.position.y + exitFwd.current.y * 8,
+      camera.position.z + exitFwd.current.z * 8,
+    ]);
+  }, [camera]);
+
+  // Prefer native pointer lock, but embedded browsers may deny it by policy.
+  // In that case keep Walk mode alive and use left-drag mouse-look instead.
   useEffect(() => {
     const doc = document;
-    const failed = () =>
-      exitRef.current([camera.position.x, camera.position.y, camera.position.z - 8]);
-    doc.addEventListener("pointerlockerror", failed);
-    controlsRef.current?.lock();
-    return () => doc.removeEventListener("pointerlockerror", failed);
-  }, [camera]);
+    const target = lookElement;
+    exiting.current = false;
+    lookMode.current = "drag";
+    const fallback = () => {
+      // A denied lock request must not cancel the same pointer gesture that is
+      // already providing drag-look. Keep `dragging` and `lastPointer` intact;
+      // pointer-up owns their cleanup.
+      lookMode.current = "drag";
+    };
+    const lockChanged = () => {
+      if (doc.pointerLockElement === target) {
+        lookMode.current = "locked";
+        dragging.current = false;
+        lastPointer.current = null;
+      } else if (lookMode.current === "locked") {
+        finishWalk();
+      }
+    };
+    const addDelta = (dx: number, dy: number) => {
+      lookDelta.current[0] += dx;
+      lookDelta.current[1] += dy;
+    };
+    const mouseMove = (e: MouseEvent) => {
+      if (lookMode.current === "locked") {
+        addDelta(e.movementX, e.movementY);
+        return;
+      }
+      if (lookMode.current !== "drag" || !dragging.current) return;
+      const prev = lastPointer.current;
+      if (prev) addDelta(e.clientX - prev[0], e.clientY - prev[1]);
+      lastPointer.current = [e.clientX, e.clientY];
+    };
+    const pointerDown = (e: PointerEvent) => {
+      if (
+        lookMode.current !== "drag" ||
+        e.button !== 0 ||
+        (e.target instanceof Element && e.target.closest("button"))
+      )
+        return;
+      dragging.current = true;
+      lastPointer.current = [e.clientX, e.clientY];
+      // Pointer Lock must be requested during a trusted user gesture. Keep the
+      // drag active while the request is in flight so a denied or silently
+      // ignored request never disables looking or movement.
+      if (
+        target &&
+        doc.pointerLockElement !== target &&
+        typeof target.requestPointerLock === "function"
+      ) {
+        try {
+          const request = target.requestPointerLock();
+          request?.catch(fallback);
+        } catch {
+          fallback();
+        }
+      }
+    };
+    const pointerUp = () => {
+      dragging.current = false;
+      lastPointer.current = null;
+    };
+
+    doc.addEventListener("pointerlockchange", lockChanged);
+    doc.addEventListener("pointerlockerror", fallback);
+    doc.addEventListener("mousemove", mouseMove);
+    target?.addEventListener("pointerdown", pointerDown);
+    window.addEventListener("pointerup", pointerUp);
+
+    return () => {
+      exiting.current = true;
+      doc.removeEventListener("pointerlockchange", lockChanged);
+      doc.removeEventListener("pointerlockerror", fallback);
+      doc.removeEventListener("mousemove", mouseMove);
+      target?.removeEventListener("pointerdown", pointerDown);
+      window.removeEventListener("pointerup", pointerUp);
+      if (doc.pointerLockElement === target) doc.exitPointerLock();
+    };
+  }, [finishWalk, lookElement]);
   const placed = useRef(false);
 
   useEffect(() => {
-    const set = (code: string, on: boolean) => {
-      if (code === "KeyW" || code === "ArrowUp") keys.current.forward = on;
-      else if (code === "KeyS" || code === "ArrowDown") keys.current.back = on;
-      else if (code === "KeyA" || code === "ArrowLeft") keys.current.left = on;
-      else if (code === "KeyD" || code === "ArrowRight") keys.current.right = on;
+    const fieldFor = (code: string): keyof WalkKeys | null => {
+      if (code === "KeyW" || code === "ArrowUp") return "forward";
+      if (code === "KeyS" || code === "ArrowDown") return "back";
+      if (code === "KeyA" || code === "ArrowLeft") return "left";
+      if (code === "KeyD" || code === "ArrowRight") return "right";
+      return null;
     };
-    const down = (e: KeyboardEvent) => set(e.code, true);
-    const up = (e: KeyboardEvent) => set(e.code, false);
+    const down = (e: KeyboardEvent) => {
+      if (e.code === "Escape" && lookMode.current === "drag") {
+        finishWalk();
+        return;
+      }
+      const field = fieldFor(e.code);
+      if (!field) return;
+      e.preventDefault();
+      keys.current[field] = true;
+      keyTapUntil.current[field] = performance.now() + 100;
+    };
+    const up = (e: KeyboardEvent) => {
+      const field = fieldFor(e.code);
+      if (field) keys.current[field] = false;
+    };
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     return () => {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
-  }, []);
+  }, [finishWalk]);
 
   const fwd = useRef(new THREE.Vector3());
+  const lookEuler = useRef(new THREE.Euler(0, 0, 0, "YXZ"));
   // The camera is mutated through useFrame's state (not the useThree value)
   // — the render-phase immutability lint allows frame-callback mutation.
   useFrame((state, dt) => {
@@ -1873,12 +1994,31 @@ function WalkControls({
         cam.lookAt(cam.position.x + tx, cam.position.y, cam.position.z + tz);
       }
     }
-    if (!controlsRef.current?.isLocked) return;
+    const [dx, dy] = lookDelta.current;
+    if (dx !== 0 || dy !== 0) {
+      lookDelta.current = [0, 0];
+      lookEuler.current.setFromQuaternion(cam.quaternion, "YXZ");
+      [lookEuler.current.y, lookEuler.current.x] = walkLookAngles(
+        lookEuler.current.y,
+        lookEuler.current.x,
+        dx,
+        dy,
+      );
+      cam.quaternion.setFromEuler(lookEuler.current);
+    }
     cam.getWorldDirection(fwd.current);
+    const now = performance.now();
+    const activeKeys: WalkKeys = {
+      forward:
+        keys.current.forward || keyTapUntil.current.forward > now,
+      back: keys.current.back || keyTapUntil.current.back > now,
+      left: keys.current.left || keyTapUntil.current.left > now,
+      right: keys.current.right || keyTapUntil.current.right > now,
+    };
     const [x, z] = walkStep(
       [cam.position.x, cam.position.z],
       [fwd.current.x, fwd.current.z],
-      keys.current,
+      activeKeys,
       Math.min(dt, 0.1), // clamp tab-switch time spikes
     );
     cam.position.x = x;
@@ -1886,19 +2026,7 @@ function WalkControls({
     cam.position.y = groundHeightAt(x, z, ground) + EYE_HEIGHT;
   });
 
-  return (
-    <PointerLockControls
-      ref={controlsRef}
-      onUnlock={() => {
-        camera.getWorldDirection(fwd.current);
-        exitRef.current([
-          camera.position.x + fwd.current.x * 8,
-          camera.position.y + fwd.current.y * 8,
-          camera.position.z + fwd.current.z * 8,
-        ]);
-      }}
-    />
-  );
+  return null;
 }
 
 function PerspectivePane({
@@ -1925,6 +2053,7 @@ function PerspectivePane({
   onSelectContextBuilding,
   walk,
   walkStart,
+  lookElement,
   onExitWalk,
 }: {
   blocks: FacadeBlock[];
@@ -1954,6 +2083,8 @@ function PerspectivePane({
   walk: boolean;
   /** The picked start pose (street point + facing); null → drop in place. */
   walkStart: StreetProjection | null;
+  /** Perspective pane: pointer-lock target and drag-look fallback surface. */
+  lookElement: HTMLElement | null;
   onExitWalk: () => void;
 }) {
   // Where the orbit controls look after a walk ends — the walker's last
@@ -2013,6 +2144,7 @@ function PerspectivePane({
         <WalkControls
           ground={ground}
           start={walkStart}
+          lookElement={lookElement}
           onExit={(lookAt) => {
             setWalkExitTarget(lookAt);
             onExitWalk();
@@ -2634,6 +2766,7 @@ export default function FacadeViewer({
             onSelectContextBuilding={onSelectContextBuilding}
             walk={walkMode}
             walkStart={walkStart}
+            lookElement={perspectiveRef.current}
             onExitWalk={() => {
               setWalkMode(false);
               setWalkStart(null);
@@ -2901,33 +3034,43 @@ export default function FacadeViewer({
               {p.label}
             </div>
             {p.id === "perspective" && (
-              <button
-                type="button"
-                onClick={onWalkButton}
-                disabled={!walkMode && !walkArming && !hasStreets}
-                className={`absolute top-1 left-12 h-7 rounded-full px-3 text-[12px] font-medium shadow-lg transition-colors ${
-                  walkMode
-                    ? "bg-[#2f855a] text-white"
+              <>
+                <button
+                  type="button"
+                  onClick={onWalkButton}
+                  disabled={!walkMode && !walkArming && !hasStreets}
+                  className={`absolute top-1 left-12 h-7 rounded-full px-3 text-[12px] font-medium shadow-lg transition-colors ${
+                    walkMode
+                      ? "bg-[#2f855a] text-white"
+                      : walkArming
+                        ? "bg-[#7ee2a8] text-zinc-900"
+                        : "bg-white/90 text-zinc-900 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed"
+                  }`}
+                  title={
+                    walkMode
+                      ? "Walking — WASD or arrows to move, click or drag the 3D view to look, Esc to exit"
+                      : walkArming
+                        ? "Click a point on a street to start walking (Esc or click Walk to cancel)"
+                        : hasStreets
+                          ? "Walk in first person — pick a spot on a street to start"
+                          : "Draw a street first — walks start on a street"
+                  }
+                >
+                  {walkMode
+                    ? "🚶 Walking — Esc to exit"
                     : walkArming
-                      ? "bg-[#7ee2a8] text-zinc-900"
-                      : "bg-white/90 text-zinc-900 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed"
-                }`}
-                title={
-                  walkMode
-                    ? "Walking — WASD to move, mouse to look, Esc to exit"
-                    : walkArming
-                      ? "Click a point on a street to start walking (Esc or click Walk to cancel)"
-                      : hasStreets
-                        ? "Walk in first person — pick a spot on a street to start"
-                        : "Draw a street first — walks start on a street"
-                }
-              >
-                {walkMode
-                  ? "🚶 Walking — Esc to exit"
-                  : walkArming
-                    ? "📍 Click a street to start"
-                    : "🚶 Walk"}
-              </button>
+                      ? "📍 Click a street to start"
+                      : "🚶 Walk"}
+                </button>
+                {walkMode && (
+                  <div
+                    role="status"
+                    className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/65 px-3 py-1.5 text-[11px] font-medium text-white/90 shadow-lg"
+                  >
+                    Click or drag to look · WASD / arrows to move
+                  </div>
+                )}
+              </>
             )}
             {p.id === "plan" &&
               (drawMode || selectMode || streetDrawMode || walkArming) && (
