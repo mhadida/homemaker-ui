@@ -3,7 +3,11 @@
 import type { GeoAnchor } from "./project";
 import { project } from "./project";
 import type { Street, StreetType, TrafficMode, Vec2 } from "@/lib/street/types";
-import { reserveStreetIds } from "@/lib/street/types";
+import {
+  effectiveWidth,
+  reserveStreetIds,
+  STREET_SPECS,
+} from "@/lib/street/types";
 import { MIN_STREET_SEG } from "@/lib/street/intersections";
 
 export interface OsmWay {
@@ -75,6 +79,87 @@ export function parseWidth(tags: Record<string, string> | undefined): number | u
   return n;
 }
 
+const LANE_WIDTH = 3.2;
+
+/** Typical paved carriageway widths when OSM has no explicit width/lanes.
+ * These are deliberately narrower than the hand-drawn corridor defaults:
+ * an imported way is the vehicle/pedestrian surface centreline, not the whole
+ * street section including verges, sidewalks, median, etc. */
+const IMPORTED_HIGHWAY_WIDTH: Record<string, number> = {
+  motorway: 14,
+  motorway_link: 7,
+  trunk: 12,
+  trunk_link: 7,
+  primary: 10,
+  primary_link: 6,
+  secondary: 8,
+  secondary_link: 5,
+  tertiary: 7,
+  tertiary_link: 4,
+  residential: 6,
+  unclassified: 6,
+  living_street: 5,
+  busway: 3.5,
+  pedestrian: 4,
+  service: 3.5,
+};
+
+function parseLaneValue(raw: string | undefined): number | undefined {
+  if (typeof raw !== "string" || !/^\s*\d+(?:\.\d+)?\s*$/.test(raw))
+    return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 && n <= 12 ? n : undefined;
+}
+
+/** Best available paved-carriageway width from OSM tags.
+ *
+ * `STREET_SPECS` describes a whole hand-drawn street corridor. Imported OSM
+ * data is different: divided roads are commonly represented as TWO separate
+ * one-way centrelines. Giving each one the whole 14–24 m class width makes the
+ * two ribbons physically overlap. Prefer explicit width, then lane count; a
+ * one-way way with no lane tag gets a conservative carriageway width by class.
+ * A normal untagged two-way road stays undefined and keeps the class default. */
+export function inferWayWidth(
+  tags: Record<string, string> | undefined,
+  type: StreetType,
+): number | undefined {
+  const explicit = parseWidth(tags);
+  if (explicit !== undefined) return explicit;
+  if (!tags || type === "canal") return undefined;
+
+  const lanes =
+    parseLaneValue(tags.lanes) ??
+    (() => {
+      const forward = parseLaneValue(tags["lanes:forward"]);
+      const backward = parseLaneValue(tags["lanes:backward"]);
+      return forward !== undefined || backward !== undefined
+        ? (forward ?? 0) + (backward ?? 0)
+        : undefined;
+    })();
+  if (lanes !== undefined)
+    return Math.min(STREET_SPECS[type].width, lanes * LANE_WIDTH);
+
+  if (["yes", "true", "1", "-1"].includes(tags.oneway ?? "")) {
+    const oneWayWidth: Record<Exclude<StreetType, "canal">, number> = {
+      alley: 3.5,
+      street: 3.5,
+      road: 4,
+      boulevard: 7,
+    };
+    return Math.min(
+      STREET_SPECS[type].width,
+      oneWayWidth[type as Exclude<StreetType, "canal">],
+    );
+  }
+
+  const importedDefault = tags.highway
+    ? IMPORTED_HIGHWAY_WIDTH[tags.highway]
+    : undefined;
+  return importedDefault === undefined
+    ? undefined
+    : Math.min(STREET_SPECS[type].width, importedDefault);
+}
+
 const endKey = (p: { lat: number; lon: number }) => `${p.lat},${p.lon}`;
 
 function dist(a: Vec2, b: Vec2): number {
@@ -85,6 +170,112 @@ function polylineLength(points: Vec2[]): number {
   let total = 0;
   for (let i = 0; i < points.length - 1; i++) total += dist(points[i], points[i + 1]);
   return total;
+}
+
+const PARALLEL_SIN = Math.sin((3 * Math.PI) / 180);
+const PARALLEL_MIN_RUN = 8;
+const PARALLEL_EDGE_GAP = 0.15;
+const IMPORTED_WIDTH_MIN = 2;
+
+/** Removes sustained coincident ribbon area from imported networks.
+ *
+ * Old fixtures/saves predate tag-aware widths and therefore contain separate
+ * OSM carriageways at the full hand-drawn corridor width. For each pair of
+ * near-parallel imported segments sharing at least 8 m of run, cap their
+ * widths so the two ribbon edges retain a small gap. Widths only ever shrink,
+ * so constraints already satisfied by earlier pairs remain satisfied. Hand-
+ * drawn streets, canals, crossings, and short junction approaches are left
+ * alone. Pure: returns the original array when no width changes. */
+export function normalizeImportedStreetWidths(streets: Street[]): Street[] {
+  const widths = streets.map(effectiveWidth);
+  const changed = new Set<number>();
+  const segments: {
+    streetIdx: number;
+    a: Vec2;
+    b: Vec2;
+    ux: number;
+    uz: number;
+    length: number;
+  }[] = [];
+  streets.forEach((street, streetIdx) => {
+    if (!street.id.startsWith("street-osm-") || street.type === "canal") return;
+    for (let i = 0; i < street.points.length - 1; i++) {
+      const a = street.points[i];
+      const b = street.points[i + 1];
+      const dx = b[0] - a[0];
+      const dz = b[1] - a[1];
+      const length = Math.hypot(dx, dz);
+      if (length < 1e-6) continue;
+      segments.push({
+        streetIdx,
+        a,
+        b,
+        ux: dx / length,
+        uz: dz / length,
+        length,
+      });
+    }
+  });
+
+  for (let i = 0; i < segments.length; i++) {
+    const a = segments[i];
+    for (let j = i + 1; j < segments.length; j++) {
+      const b = segments[j];
+      if (a.streetIdx === b.streetIdx) continue;
+      if (Math.abs(a.ux * b.uz - a.uz * b.ux) > PARALLEL_SIN) continue;
+
+      // Signed perpendicular distance to A's supporting line. Opposite signs
+      // mean B crosses A — a junction, not parallel carriageways.
+      const side = (p: Vec2) =>
+        (p[0] - a.a[0]) * -a.uz + (p[1] - a.a[1]) * a.ux;
+      const d0 = side(b.a);
+      const d1 = side(b.b);
+      if (d0 * d1 < 0) continue;
+      const separation = Math.min(Math.abs(d0), Math.abs(d1));
+
+      const along = (p: Vec2) =>
+        (p[0] - a.a[0]) * a.ux + (p[1] - a.a[1]) * a.uz;
+      const t0 = along(b.a);
+      const t1 = along(b.b);
+      const run =
+        Math.min(a.length, Math.max(t0, t1)) -
+        Math.max(0, Math.min(t0, t1));
+      if (run < PARALLEL_MIN_RUN) continue;
+
+      const ai = a.streetIdx;
+      const bi = b.streetIdx;
+      const maxSum =
+        2 * Math.max(IMPORTED_WIDTH_MIN, separation - PARALLEL_EDGE_GAP);
+      const sum = widths[ai] + widths[bi];
+      if (sum <= maxSum + 1e-6) continue;
+
+      const ratio = maxSum / sum;
+      let aw = Math.max(IMPORTED_WIDTH_MIN, widths[ai] * ratio);
+      let bw = Math.max(IMPORTED_WIDTH_MIN, widths[bi] * ratio);
+      let excess = aw + bw - maxSum;
+      if (excess > 0) {
+        const takeA = Math.min(excess, Math.max(0, aw - IMPORTED_WIDTH_MIN));
+        aw -= takeA;
+        excess -= takeA;
+        bw -= Math.min(excess, Math.max(0, bw - IMPORTED_WIDTH_MIN));
+      }
+      if (aw < widths[ai] - 1e-6) {
+        widths[ai] = aw;
+        changed.add(ai);
+      }
+      if (bw < widths[bi] - 1e-6) {
+        widths[bi] = bw;
+        changed.add(bi);
+      }
+    }
+  }
+
+  if (changed.size === 0) return streets;
+  return streets.map((street, i) =>
+    changed.has(i)
+      ? { ...street, width: Math.round(widths[i] * 1000) / 1000 }
+      : street,
+  );
 }
 
 /** Collapses consecutive vertices closer than `minSeg`, keeping the first and
@@ -248,7 +439,7 @@ export function osmToStreets(
       }
     }
     if (points.length < 2) continue;
-    const width = parseWidth(chain[0].tags);
+    const width = inferWayWidth(chain[0].tags, cls.type);
     all.push({
       id: `street-osm-${chain[0].id}${chain.length > 1 ? "m" : ""}`,
       type: cls.type,
@@ -267,7 +458,9 @@ export function osmToStreets(
   // (~200+ ways) exceeds `maxStreets`.
   const ordered = [...all].sort((a, b) => polylineLength(b.points) - polylineLength(a.points));
   const truncated = total > maxStreets;
-  const streets = truncated ? ordered.slice(0, maxStreets) : ordered;
+  const streets = normalizeImportedStreetWidths(
+    truncated ? ordered.slice(0, maxStreets) : ordered,
+  );
   // Keep the session id counter clear of these ids so a later hand-drawn
   // street can never collide with an imported one.
   reserveStreetIds(streets);

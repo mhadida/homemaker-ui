@@ -1781,7 +1781,7 @@ function WalkStartSurface({
 }
 
 /** First-person walk: mouse-look + WASD at eye height. Native pointer lock is
- * preferred; embedded browsers fall back to left-drag look. Mounted INSTEAD
+ * preferred; embedded browsers fall back to hover mouse-look. Mounted INSTEAD
  * of OrbitControls while walking. Esc exits with a look-at point a few metres
  * ahead so the returning orbit controls don't lurch to the scene origin.
  * Movement math is the pure walkStep; the camera follows the ground surface.
@@ -1797,7 +1797,7 @@ function WalkControls({
    * direction. Null falls back to dropping in place at the orbit camera's
    * position (the pre-picker behaviour, kept as a safety net). */
   start: StreetProjection | null;
-  /** Perspective pane: pointer-lock target and drag-look fallback surface. */
+  /** Perspective pane: pointer-lock target and hover-look fallback surface. */
   lookElement: HTMLElement | null;
   onExit: (lookAt: [number, number, number]) => void;
 }) {
@@ -1825,16 +1825,11 @@ function WalkControls({
     exitRef.current = onExit;
   });
 
-  // Drag-look is the always-available baseline. Pointer lock is only an
-  // enhancement: requesting it from this component's mount effect can fall
-  // outside the browser's transient user-activation window, and some embedded
-  // browsers then leave the request pending forever without firing either
-  // pointerlockchange or pointerlockerror. That formerly left movement gated
-  // in a dead "pending" state. A pointer-down in the 3D pane is a valid user
-  // gesture, so we upgrade to native lock from there when the browser permits
-  // it while keeping drag-look and WASD live throughout.
-  const lookMode = useRef<"locked" | "drag">("drag");
-  const dragging = useRef(false);
+  // Native pointer lock is requested by the street-start click before this
+  // component mounts. Embedded browsers can deny it by policy, so hover-look
+  // is the always-live fallback: moving over the 3D pane rotates the view with
+  // no second click or held mouse button.
+  const lookMode = useRef<"locked" | "hover">("hover");
   const lastPointer = useRef<[number, number] | null>(null);
   const lookDelta = useRef<[number, number]>([0, 0]);
   const exiting = useRef(false);
@@ -1851,22 +1846,19 @@ function WalkControls({
   }, [camera]);
 
   // Prefer native pointer lock, but embedded browsers may deny it by policy.
-  // In that case keep Walk mode alive and use left-drag mouse-look instead.
+  // In that case keep Walk mode alive and use hover mouse-look instead.
   useEffect(() => {
     const doc = document;
     const target = lookElement;
     exiting.current = false;
-    lookMode.current = "drag";
+    lookMode.current = "hover";
     const fallback = () => {
-      // A denied lock request must not cancel the same pointer gesture that is
-      // already providing drag-look. Keep `dragging` and `lastPointer` intact;
-      // pointer-up owns their cleanup.
-      lookMode.current = "drag";
+      lookMode.current = "hover";
+      lastPointer.current = null;
     };
     const lockChanged = () => {
       if (doc.pointerLockElement === target) {
         lookMode.current = "locked";
-        dragging.current = false;
         lastPointer.current = null;
       } else if (lookMode.current === "locked") {
         finishWalk();
@@ -1881,54 +1873,37 @@ function WalkControls({
         addDelta(e.movementX, e.movementY);
         return;
       }
-      if (lookMode.current !== "drag" || !dragging.current) return;
+      if (
+        !target ||
+        !(e.target instanceof Node) ||
+        !target.contains(e.target)
+      )
+        return;
+      if (e.target instanceof Element && e.target.closest("button")) {
+        lastPointer.current = null;
+        return;
+      }
       const prev = lastPointer.current;
       if (prev) addDelta(e.clientX - prev[0], e.clientY - prev[1]);
       lastPointer.current = [e.clientX, e.clientY];
     };
-    const pointerDown = (e: PointerEvent) => {
-      if (
-        lookMode.current !== "drag" ||
-        e.button !== 0 ||
-        (e.target instanceof Element && e.target.closest("button"))
-      )
-        return;
-      dragging.current = true;
-      lastPointer.current = [e.clientX, e.clientY];
-      // Pointer Lock must be requested during a trusted user gesture. Keep the
-      // drag active while the request is in flight so a denied or silently
-      // ignored request never disables looking or movement.
-      if (
-        target &&
-        doc.pointerLockElement !== target &&
-        typeof target.requestPointerLock === "function"
-      ) {
-        try {
-          const request = target.requestPointerLock();
-          request?.catch(fallback);
-        } catch {
-          fallback();
-        }
-      }
-    };
-    const pointerUp = () => {
-      dragging.current = false;
+    const mouseLeave = () => {
       lastPointer.current = null;
     };
 
     doc.addEventListener("pointerlockchange", lockChanged);
     doc.addEventListener("pointerlockerror", fallback);
     doc.addEventListener("mousemove", mouseMove);
-    target?.addEventListener("pointerdown", pointerDown);
-    window.addEventListener("pointerup", pointerUp);
+    target?.addEventListener("mouseleave", mouseLeave);
+    // The start-click request can succeed before this effect subscribes.
+    lockChanged();
 
     return () => {
       exiting.current = true;
       doc.removeEventListener("pointerlockchange", lockChanged);
       doc.removeEventListener("pointerlockerror", fallback);
       doc.removeEventListener("mousemove", mouseMove);
-      target?.removeEventListener("pointerdown", pointerDown);
-      window.removeEventListener("pointerup", pointerUp);
+      target?.removeEventListener("mouseleave", mouseLeave);
       if (doc.pointerLockElement === target) doc.exitPointerLock();
     };
   }, [finishWalk, lookElement]);
@@ -1943,7 +1918,7 @@ function WalkControls({
       return null;
     };
     const down = (e: KeyboardEvent) => {
-      if (e.code === "Escape" && lookMode.current === "drag") {
+      if (e.code === "Escape" && lookMode.current === "hover") {
         finishWalk();
         return;
       }
@@ -2588,7 +2563,21 @@ export default function FacadeViewer({
     setMaximized((m) => (m === "perspective" ? null : m));
   }, [walkMode, walkArming]);
   // A pick on a street centreline commits the start pose and begins the walk.
+  // It is also the trusted gesture needed for native game-style pointer lock,
+  // so the user never has to click the 3D pane after choosing where to stand.
   const onPickWalkStart = useCallback((p: StreetProjection) => {
+    const target = perspectiveRef.current;
+    if (target && typeof target.requestPointerLock === "function") {
+      try {
+        const request = target.requestPointerLock();
+        request?.catch(() => {
+          // Embedded browsers may deny pointer lock; WalkControls immediately
+          // falls back to click-free hover mouse-look.
+        });
+      } catch {
+        // Same fallback as a rejected request.
+      }
+    }
     setWalkStart(p);
     setWalkArming(false);
     setWalkMode(true);
@@ -3048,7 +3037,7 @@ export default function FacadeViewer({
                   }`}
                   title={
                     walkMode
-                      ? "Walking — WASD or arrows to move, click or drag the 3D view to look, Esc to exit"
+                      ? "Walking — move the mouse to look, WASD or arrows to move, Esc to exit"
                       : walkArming
                         ? "Click a point on a street to start walking (Esc or click Walk to cancel)"
                         : hasStreets
@@ -3067,7 +3056,7 @@ export default function FacadeViewer({
                     role="status"
                     className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/65 px-3 py-1.5 text-[11px] font-medium text-white/90 shadow-lg"
                   >
-                    Click or drag to look · WASD / arrows to move
+                    Move mouse to look · WASD / arrows to move
                   </div>
                 )}
               </>

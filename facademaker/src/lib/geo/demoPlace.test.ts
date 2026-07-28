@@ -4,6 +4,8 @@ import path from "node:path";
 import type { Heightfield } from "@/lib/facade/terrain";
 import type { ContextBuilding } from "./buildings";
 import type { Street } from "@/lib/street/types";
+import { effectiveWidth } from "@/lib/street/types";
+import { normalizeImportedStreetWidths } from "./streets";
 import { project } from "./project";
 import {
   DEMO_ANCHOR,
@@ -22,6 +24,61 @@ const readFixture = (url: string) =>
   JSON.parse(
     readFileSync(path.join(FIXTURE_DIR, path.basename(url)), "utf8"),
   ) as unknown;
+
+function sustainedParallelOverlapCount(streets: Street[]): number {
+  const segments = streets.flatMap((street) =>
+    street.type === "canal"
+      ? []
+      : street.points.slice(0, -1).map((a, i) => ({
+          street,
+          a,
+          b: street.points[i + 1],
+        })),
+  );
+  let overlaps = 0;
+  for (let i = 0; i < segments.length; i++) {
+    const a = segments[i];
+    const adx = a.b[0] - a.a[0];
+    const adz = a.b[1] - a.a[1];
+    const al = Math.hypot(adx, adz);
+    if (al < 1e-6) continue;
+    const ux = adx / al;
+    const uz = adz / al;
+    for (let j = i + 1; j < segments.length; j++) {
+      const b = segments[j];
+      if (a.street.id === b.street.id) continue;
+      const bdx = b.b[0] - b.a[0];
+      const bdz = b.b[1] - b.a[1];
+      const bl = Math.hypot(bdx, bdz);
+      if (bl < 1e-6) continue;
+      if (
+        Math.abs(ux * (bdz / bl) - uz * (bdx / bl)) >
+        Math.sin((3 * Math.PI) / 180)
+      )
+        continue;
+      const side = (p: [number, number]) =>
+        (p[0] - a.a[0]) * -uz + (p[1] - a.a[1]) * ux;
+      const d0 = side(b.a);
+      const d1 = side(b.b);
+      if (d0 * d1 < 0) continue;
+      const separation = Math.min(Math.abs(d0), Math.abs(d1));
+      const along = (p: [number, number]) =>
+        (p[0] - a.a[0]) * ux + (p[1] - a.a[1]) * uz;
+      const t0 = along(b.a);
+      const t1 = along(b.b);
+      const run =
+        Math.min(al, Math.max(t0, t1)) -
+        Math.max(0, Math.min(t0, t1));
+      if (run < 8) continue;
+      if (
+        (effectiveWidth(a.street) + effectiveWidth(b.street)) / 2 >
+        separation + 0.01
+      )
+        overlaps++;
+    }
+  }
+  return overlaps;
+}
 
 describe("demoPlace fixtures", () => {
   it("recognizes only the exact serialized demo projection frame", () => {
@@ -87,6 +144,12 @@ describe("demoPlace fixtures", () => {
     const json = readFixture(DEMO_STREETS_URL) as { streets: Street[] };
     const canals = json.streets.filter((s) => s.type === "canal");
     expect(canals.length).toBeGreaterThan(0);
+  });
+
+  it("normalizes historical OSM widths without any sustained parallel ribbon overlap", () => {
+    const json = readFixture(DEMO_STREETS_URL) as { streets: Street[] };
+    const normalized = normalizeImportedStreetWidths(json.streets);
+    expect(sustainedParallelOverlapCount(normalized)).toBe(0);
   });
 
   it("DEMO_ANCHOR/DEMO_BBOX match the geometry terrain.json was actually captured against", () => {

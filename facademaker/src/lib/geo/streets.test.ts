@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   classifyWay,
   parseWidth,
+  inferWayWidth,
+  normalizeImportedStreetWidths,
   mergeWays,
   osmToStreets,
   collapseShortSegments,
@@ -124,6 +126,87 @@ describe("parseWidth", () => {
   });
 });
 
+describe("inferWayWidth", () => {
+  it("prefers an explicit width over lane and one-way inference", () => {
+    expect(
+      inferWayWidth(
+        { width: "5.2", lanes: "3", oneway: "yes" },
+        "boulevard",
+      ),
+    ).toBe(5.2);
+  });
+  it("uses 3.2 m per tagged lane without exceeding the class default", () => {
+    expect(inferWayWidth({ lanes: "2" }, "road")).toBe(6.4);
+    expect(inferWayWidth({ lanes: "20" }, "road")).toBeUndefined();
+    expect(
+      inferWayWidth(
+        { "lanes:forward": "1", "lanes:backward": "1" },
+        "street",
+      ),
+    ).toBe(6.4);
+  });
+  it("narrows untagged one-way carriageways by road class", () => {
+    expect(inferWayWidth({ oneway: "yes" }, "boulevard")).toBe(7);
+    expect(inferWayWidth({ oneway: "1" }, "road")).toBe(4);
+    expect(inferWayWidth({ oneway: "-1" }, "street")).toBe(3.5);
+  });
+  it("uses imported carriageway widths for ordinary two-way roads and pedestrian ways", () => {
+    expect(inferWayWidth({ highway: "residential" }, "street")).toBe(6);
+    expect(inferWayWidth({ highway: "tertiary" }, "road")).toBe(7);
+    expect(inferWayWidth({ highway: "pedestrian" }, "street")).toBe(4);
+    expect(inferWayWidth({ lanes: "2" }, "canal")).toBeUndefined();
+  });
+});
+
+describe("normalizeImportedStreetWidths", () => {
+  it("caps sustained parallel imported ribbons before their edges overlap", () => {
+    const streets = normalizeImportedStreetWidths([
+      {
+        id: "street-osm-a",
+        type: "boulevard",
+        points: [[0, 0], [40, 0]],
+      },
+      {
+        id: "street-osm-b",
+        type: "boulevard",
+        points: [[0, 8], [40, 8]],
+      },
+    ]);
+    expect(streets[0].width).toBeDefined();
+    expect(streets[1].width).toBeDefined();
+    expect((streets[0].width! + streets[1].width!) / 2).toBeLessThan(8);
+  });
+  it("does not shrink a proper crossing or hand-drawn streets", () => {
+    const imported = [
+      {
+        id: "street-osm-a",
+        type: "road" as const,
+        points: [[-20, 0], [20, 0]] as [number, number][],
+      },
+      {
+        id: "street-osm-b",
+        type: "road" as const,
+        points: [[0, -20], [0, 20]] as [number, number][],
+      },
+    ];
+    expect(normalizeImportedStreetWidths(imported)).toBe(imported);
+
+    const handDrawn = [
+      {
+        id: "street-1",
+        type: "boulevard" as const,
+        points: [[0, 0], [40, 0]] as [number, number][],
+      },
+      {
+        id: "street-2",
+        type: "boulevard" as const,
+        points: [[0, 8], [40, 8]] as [number, number][],
+      },
+    ];
+    expect(normalizeImportedStreetWidths(handDrawn)).toBe(handDrawn);
+  });
+});
+
 const way = (id: number, name: string | undefined, coords: [number, number][], highway = "residential"): OsmWay => ({
   type: "way",
   id,
@@ -223,14 +306,23 @@ describe("osmToStreets", () => {
     expect(r.truncated).toBe(true);
     expect(r.total).toBe(5);
   });
-  it("carries a sane width tag through and omits an insane one", () => {
+  it("carries a sane width tag through and falls back from an insane one", () => {
     const wide = way(1, undefined, [[0, 0], [0, 1]]);
     wide.tags!.width = "18";
     const junk = way(2, undefined, [[1, 0], [1, 1]]);
     junk.tags!.width = "999";
     const r = osmToStreets([wide, junk], ANCHOR, 10);
     expect(r.streets.find((s) => s.id === "street-osm-1")!.width).toBe(18);
-    expect(r.streets.find((s) => s.id === "street-osm-2")!.width).toBeUndefined();
+    expect(r.streets.find((s) => s.id === "street-osm-2")!.width).toBe(6);
+  });
+  it("stores lane/one-way carriageway widths on imported streets", () => {
+    const laneTagged = way(1, undefined, [[0, 0], [0, 1]], "primary");
+    laneTagged.tags!.lanes = "2";
+    const oneWay = way(2, undefined, [[1, 0], [1, 1]], "tertiary");
+    oneWay.tags!.oneway = "yes";
+    const r = osmToStreets([laneTagged, oneWay], ANCHOR, 10);
+    expect(r.streets.find((s) => s.id === "street-osm-1")!.width).toBe(6.4);
+    expect(r.streets.find((s) => s.id === "street-osm-2")!.width).toBe(4);
   });
   it("drops highway=*+area=yes polygons (pedestrian squares) entirely", () => {
     const square = way(1, "Dam Square", [[0, 0], [0, 1], [1, 1], [1, 0], [0, 0]], "pedestrian");

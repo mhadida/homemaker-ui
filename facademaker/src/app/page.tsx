@@ -55,6 +55,7 @@ import { DEFAULT_GROUND, type Ground, type Heightfield } from "@/lib/facade/terr
 import { streetRefOf, STREET_WIDTH_DEFAULT } from "@/lib/facade/street";
 import { anchorOf, type GeoAnchor, type LngLatBBox } from "@/lib/geo/project";
 import type { ContextBuilding } from "@/lib/geo/buildings";
+import { normalizeImportedStreetWidths } from "@/lib/geo/streets";
 import {
   DEMO_ANCHOR,
   DEMO_BBOX,
@@ -296,6 +297,11 @@ export default function FacadePage() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [terrainLoading, setTerrainLoading] = useState(false);
   const [terrainError, setTerrainError] = useState<string | null>(null);
+  // Synchronous gate shared by real/demo imports. React's disabled state does
+  // not commit until the next render, so two clicks in the same event turn
+  // could otherwise start two imports before either button visibly disables.
+  // A successful import keeps the gate closed until Clear terrain resets it.
+  const placeLoadLockRef = useRef(false);
   // "Demo place": loads the committed Amsterdam fixture (terrain + buildings
   // + streets) from static /fixtures/*.json — no Overpass/AWS calls. Own
   // loading/error UI, separate from the real-place loaders above.
@@ -331,6 +337,17 @@ export default function FacadePage() {
     () => streetNetwork.streets.some((s) => s.id.startsWith("street-osm-")),
     [streetNetwork],
   );
+  // A place is a single scene-level frame. Treat any surviving part of that
+  // frame as loaded so a partially restored document cannot be overlaid with
+  // a second place. "Clear terrain" removes all of these imported parts.
+  const hasLoadedPlace =
+    ground.hf !== undefined ||
+    anchor !== null ||
+    bbox !== null ||
+    hasImportedStreets ||
+    contextBuildings.length > 0;
+  const placeLoadBlocked =
+    hasLoadedPlace || terrainLoading || demoLoading;
   // Street-network selection: a clicked ribbon or a clicked derived
   // intersection opens its own inspector, mutually exclusive with the
   // block/lot/corner selection and the marquee. null by default so every
@@ -506,8 +523,19 @@ export default function FacadePage() {
    * defensively (idempotent for clean saves; repairs hand-edited files) and
    * bumps the block-id counter so newly-drawn blocks can't collide. */
   const applyScene = useCallback((s: SceneState) => {
+    const normalizedStreetNetwork = {
+      ...s.streetNetwork,
+      streets: normalizeImportedStreetWidths(s.streetNetwork.streets),
+    };
+    placeLoadLockRef.current =
+      s.ground.hf !== undefined ||
+      s.anchor !== null ||
+      s.bbox !== null ||
+      normalizedStreetNetwork.streets.some((street) =>
+        street.id.startsWith("street-osm-"),
+      );
     reserveBlockIds(s.blocks);
-    reserveStreetIds(s.streetNetwork.streets);
+    reserveStreetIds(normalizedStreetNetwork.streets);
     setBlocks(syncCorners(s.blocks, s.cornerChoices, s.maxCornerAngle));
     setCornerChoices(s.cornerChoices);
     setGround(s.ground);
@@ -538,7 +566,7 @@ export default function FacadePage() {
     setStreetsLoading(false);
     setStreetsError(null);
     setStreetsInfo(null);
-    setStreetNetwork(s.streetNetwork);
+    setStreetNetwork(normalizedStreetNetwork);
     setSelected(
       s.blocks.length > 0
         ? { blockId: s.blocks[0].id, lot: 0, level: "block" }
@@ -594,6 +622,9 @@ export default function FacadePage() {
   /** "Load place": fetch a real heightfield for the picked bbox and adopt it
    * as the ground, replacing the manual flat/tilted plane. */
   const handleLoadPlace = useCallback(async (bbox: LngLatBBox) => {
+    if (placeLoadLockRef.current || hasLoadedPlace) return;
+    placeLoadLockRef.current = true;
+    let adopted = false;
     setTerrainError(null);
     setTerrainLoading(true);
     try {
@@ -610,18 +641,23 @@ export default function FacadePage() {
       setBbox(bbox);
       setHiddenIds(new Set());
       setPickerOpen(false);
+      adopted = true;
       void loadContextBuildings(bbox, a);
       void loadStreets(bbox, a);
     } catch (e) {
       setTerrainError(e instanceof Error ? e.message : String(e));
     } finally {
+      // A failed request may be retried. A successful one stays locked until
+      // Clear terrain removes the loaded place from this scene.
+      if (!adopted) placeLoadLockRef.current = false;
       setTerrainLoading(false);
     }
-  }, [loadContextBuildings, loadStreets]);
+  }, [hasLoadedPlace, loadContextBuildings, loadStreets]);
 
   /** Drop the loaded heightfield, reverting to the manual flat/tilted plane
    * (the Topography sliders reappear). */
   const handleClearTerrain = useCallback(() => {
+    placeLoadLockRef.current = false;
     // Invalidate any in-flight buildings fetch — otherwise it can resolve
     // after this clear and repopulate contextBuildings on a bbox-less scene.
     // Also reset buildingsLoading directly: bumping the token makes the
@@ -678,6 +714,9 @@ export default function FacadePage() {
    * pre-import stash loadStreets uses (mirrored inline since there is no
    * server round-trip to await). */
   const handleLoadDemoPlace = useCallback(async () => {
+    if (placeLoadLockRef.current || hasLoadedPlace) return;
+    placeLoadLockRef.current = true;
+    let adopted = false;
     // Bump BOTH tokens before touching any state — an in-flight real
     // Overpass/terrain fetch from an earlier "Load place" must not be able
     // to land after this and clobber the demo (same race loadContextBuildings
@@ -720,12 +759,16 @@ export default function FacadePage() {
       if (buildingsReqRef.current !== bToken || streetsReqRef.current !== sToken)
         return;
 
-      reserveStreetIds(streetsJson.streets);
+      const normalizedStreets = normalizeImportedStreetWidths(
+        streetsJson.streets,
+      );
+      reserveStreetIds(normalizedStreets);
       setGround((g) => ({ ...g, hf: terrainJson.heightfield! }));
       setAnchor(DEMO_ANCHOR);
       setBbox(DEMO_BBOX);
       setHiddenIds(new Set());
       setPickerOpen(false);
+      adopted = true;
 
       setContextBuildings(buildingsJson.buildings);
       setBuildingsInfo({
@@ -734,7 +777,7 @@ export default function FacadePage() {
       });
 
       // Importing REPLACES the network, same as loadStreets.
-      setStreetNetwork({ ...EMPTY_NETWORK, streets: streetsJson.streets });
+      setStreetNetwork({ ...EMPTY_NETWORK, streets: normalizedStreets });
       setStreetsInfo({
         truncated: !!streetsJson.truncated,
         total: streetsJson.total ?? streetsJson.streets.length,
@@ -756,9 +799,10 @@ export default function FacadePage() {
     } finally {
       if (buildingsReqRef.current === bToken) setBuildingsLoading(false);
       if (streetsReqRef.current === sToken) setStreetsLoading(false);
+      if (!adopted) placeLoadLockRef.current = false;
       setDemoLoading(false);
     }
-  }, [hasImportedStreets]);
+  }, [hasImportedStreets, hasLoadedPlace]);
 
   /** Demolish one context building (click-to-hide), wired to ContextBuildings'
    * onHide via FacadeViewer/SceneContents (gated behind the Select tool). */
@@ -1780,18 +1824,33 @@ export default function FacadePage() {
           <button
             type="button"
             onClick={() => {
+              if (placeLoadBlocked) return;
               setTerrainError(null);
               setPickerOpen(true);
             }}
-            className="text-[11px] px-2 py-0.5 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30 transition-colors"
+            disabled={placeLoadBlocked}
+            title={
+              hasLoadedPlace
+                ? "Clear terrain before loading another place"
+                : terrainLoading || demoLoading
+                  ? "A place is already loading"
+                  : "Choose a real place to load"
+            }
+            className="text-[11px] px-2 py-0.5 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-[var(--muted)] disabled:hover:border-[var(--border)]"
           >
             Load place
           </button>
           <button
             type="button"
             onClick={handleLoadDemoPlace}
-            disabled={demoLoading}
-            title="Load a committed Amsterdam snapshot — terrain, buildings and streets with no network calls"
+            disabled={placeLoadBlocked}
+            title={
+              hasLoadedPlace
+                ? "Clear terrain before loading another place"
+                : terrainLoading || demoLoading
+                  ? "A place is already loading"
+                  : "Load a committed Amsterdam snapshot — terrain, buildings and streets with no network calls"
+            }
             className="text-[11px] px-2 py-0.5 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {demoLoading ? "Loading demo…" : "Demo place"}
