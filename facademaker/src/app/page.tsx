@@ -55,14 +55,26 @@ import { DEFAULT_GROUND, type Ground, type Heightfield } from "@/lib/facade/terr
 import { streetRefOf, STREET_WIDTH_DEFAULT } from "@/lib/facade/street";
 import { anchorOf, type GeoAnchor, type LngLatBBox } from "@/lib/geo/project";
 import type { ContextBuilding } from "@/lib/geo/buildings";
+import {
+  cadastralPlotForFootprint,
+  type CadastralParcel,
+} from "@/lib/geo/cadastralParcels";
+import {
+  applyParcelSubdivisionEdits,
+  autoSplitCadastralParcel,
+  mergeCadastralParcels,
+  recordParcelMerge,
+  recordParcelSplit,
+  splitCadastralParcel,
+  type ParcelSubdivisionEdit,
+} from "@/lib/geo/parcelSubdivision";
 import { normalizeImportedStreetWidths } from "@/lib/geo/streets";
 import {
-  DEMO_ANCHOR,
-  DEMO_BBOX,
-  DEMO_BUILDINGS_URL,
-  DEMO_STREETS_URL,
-  DEMO_TERRAIN_URL,
-  isDemoPlaceFrame,
+  DEFAULT_DEMO_PLACE_ID,
+  DEMO_PLACES,
+  demoPlaceForFrame,
+  type DemoPlace,
+  type DemoPlaceId,
 } from "@/lib/geo/demoPlace";
 import {
   EMPTY_NETWORK,
@@ -95,6 +107,12 @@ import {
   translateMarquee,
   type Marquee,
 } from "@/lib/facade/marquee";
+import {
+  scopeArea,
+  scopeFromPoint,
+  scopeFromRect,
+  type InterventionScope,
+} from "@/lib/facade/interventionScope";
 import type { ViewSettings } from "@/lib/building/types";
 import { WALL_SWATCHES } from "@/lib/building/types";
 import FacadeControls, {
@@ -104,6 +122,7 @@ import FacadeControls, {
   SquareInspector,
   ContextPanel,
   ContextBuildingPanel,
+  InterventionScopePanel,
 } from "@/components/facade/FacadeControls";
 import PromptInput from "@/components/demo/PromptInput";
 
@@ -132,7 +151,13 @@ interface FacadeSpec {
   sills?: boolean;
   surrounds?: boolean;
   windowSize?: "small" | "medium" | "large";
-  windowStyle?: "georgian" | "sash" | "victorian" | "none";
+  windowStyle?:
+    | "georgian"
+    | "sash"
+    | "victorian"
+    | "none"
+    | "circle"
+    | "ellipse";
   sections?: number;
   sectionPattern?: SectionPattern;
   wallColor?: string;
@@ -282,6 +307,20 @@ export default function FacadePage() {
   // Building render mode — pure view state (not persisted). full = detailed
   // facades; massing = plain volume boxes; outline = wireframe; off = hidden.
   const [display, setDisplay] = useState<BuildingDisplay>("full");
+  // Optional design overlay: actual editable lot rectangles plus official BRK
+  // cadastral parcels, draped onto the terrain. View-only, not persisted.
+  const [showLotOutlines, setShowLotOutlines] = useState(true);
+  // A view-only planning boundary, deliberately separate from editable-object
+  // selection. It is invalidated whenever the place coordinate frame changes.
+  const [interventionScope, setInterventionScope] =
+    useState<InterventionScope | null>(null);
+  const [parcelSplitActive, setParcelSplitActive] = useState(false);
+  const [parcelSplitError, setParcelSplitError] = useState<string | null>(null);
+  useEffect(() => {
+    if (interventionScope) return;
+    setParcelSplitActive(false);
+    setParcelSplitError(null);
+  }, [interventionScope]);
   const [isAILoading, setIsAILoading] = useState(false);
   const [aiStatus, setAiStatus] = useState<string | null>(null);
   const [drawActive, setDrawActive] = useState(false);
@@ -302,9 +341,13 @@ export default function FacadePage() {
   // could otherwise start two imports before either button visibly disables.
   // A successful import keeps the gate closed until Clear terrain resets it.
   const placeLoadLockRef = useRef(false);
-  // "Demo place": loads the committed Amsterdam fixture (terrain + buildings
-  // + streets) from static /fixtures/*.json — no Overpass/AWS calls. Own
-  // loading/error UI, separate from the real-place loaders above.
+  // Demo places load committed terrain + buildings + streets from static
+  // fixtures — no Overpass/AWS calls. The city choice is UI state only.
+  const [selectedDemoId, setSelectedDemoId] = useState<DemoPlaceId>(
+    DEFAULT_DEMO_PLACE_ID,
+  );
+  const selectedDemoPlace =
+    DEMO_PLACES.find((place) => place.id === selectedDemoId) ?? DEMO_PLACES[0];
   const [demoLoading, setDemoLoading] = useState(false);
   const [demoError, setDemoError] = useState<string | null>(null);
   // Context buildings (M2). The footprints are page state ONLY — never
@@ -317,6 +360,15 @@ export default function FacadePage() {
   const [buildingsLoading, setBuildingsLoading] = useState(false);
   const [buildingsError, setBuildingsError] = useState<string | null>(null);
   const [buildingsInfo, setBuildingsInfo] = useState<{ truncated: boolean; total: number } | null>(null);
+  // Property boundaries are a separate GIS layer from OSM building
+  // footprints. They come from Kadaster's BRK parcel collection via PDOK.
+  const [cadastralParcels, setCadastralParcels] = useState<
+    CadastralParcel[]
+  >([]);
+  const [parcelEdits, setParcelEdits] = useState<ParcelSubdivisionEdit[]>([]);
+  const [parcelsLoading, setParcelsLoading] = useState(false);
+  const [parcelsError, setParcelsError] = useState<string | null>(null);
+  const [parcelsTruncated, setParcelsTruncated] = useState(false);
   const [streetWidth, setStreetWidth] = useState(STREET_WIDTH_DEFAULT);
   // Auto-populate editable buildings along street frontages (SP-2c). Default
   // on; transient UI state (like drawActive/marquee) — not part of the saved
@@ -348,6 +400,140 @@ export default function FacadePage() {
     contextBuildings.length > 0;
   const placeLoadBlocked =
     hasLoadedPlace || terrainLoading || demoLoading;
+  const handleScopePoint = useCallback(
+    (point: Vec2) => {
+      const scope = scopeFromPoint(point, blocks, cadastralParcels);
+      if (scope) {
+        setInterventionScope(scope);
+        setParcelSplitActive(false);
+        setParcelSplitError(null);
+      }
+    },
+    [blocks, cadastralParcels],
+  );
+  const handleScopeRect = useCallback(
+    (a: Vec2, b: Vec2) => {
+      const scope = scopeFromRect(a, b, blocks, cadastralParcels);
+      if (scope) {
+        setInterventionScope(scope);
+        setParcelSplitActive(false);
+        setParcelSplitError(null);
+      }
+    },
+    [blocks, cadastralParcels],
+  );
+  const selectedParcelIds =
+    interventionScope?.lotIds
+      .filter((id) => id.startsWith("brk:"))
+      .map((id) => id.slice(4)) ?? [];
+  const selectedParcels = selectedParcelIds
+    .map((id) => cadastralParcels.find((parcel) => parcel.id === id))
+    .filter((parcel): parcel is CadastralParcel => !!parcel);
+  const selectedParcel =
+    selectedParcels.length === 1 ? selectedParcels[0] : null;
+  const canSplitParcel =
+    !!selectedParcel &&
+    selectedParcel.polygons.length === 1 &&
+    !!interventionScope;
+  const canMergeParcels =
+    selectedParcels.length >= 2 && selectedParcels.length <= 50;
+  const cancelParcelSplit = useCallback(() => {
+    setParcelSplitActive(false);
+    setParcelSplitError(null);
+  }, []);
+  const handleParcelSplit = useCallback(
+    (a: Vec2, b: Vec2) => {
+      if (!selectedParcel || !interventionScope) {
+        setParcelSplitError("Select one property parcel first.");
+        return;
+      }
+      const result = splitCadastralParcel(
+        selectedParcel,
+        interventionScope.outline,
+        a,
+        b,
+      );
+      if (!result.ok) {
+        setParcelSplitError(result.error);
+        return;
+      }
+      setCadastralParcels((current) =>
+        current.flatMap((parcel) =>
+          parcel.id === selectedParcel.id ? result.parcels : [parcel],
+        ),
+      );
+      setParcelEdits((current) =>
+        recordParcelSplit(current, selectedParcel, result.parcels),
+      );
+      setInterventionScope({
+        kind: "parcel",
+        outline: result.parcels[0].polygons[0][0],
+        lotIds: [`brk:${result.parcels[0].id}`],
+      });
+      setParcelSplitActive(false);
+      setParcelSplitError(null);
+    },
+    [selectedParcel, interventionScope],
+  );
+  const handleParcelAutoSplit = useCallback(
+    (count: number) => {
+      if (!selectedParcel || !interventionScope) {
+        setParcelSplitError("Select one property parcel first.");
+        return;
+      }
+      const result = autoSplitCadastralParcel(
+        selectedParcel,
+        interventionScope.outline,
+        count,
+      );
+      if (!result.ok) {
+        setParcelSplitError(result.error);
+        return;
+      }
+      setCadastralParcels((current) =>
+        current.flatMap((parcel) =>
+          parcel.id === selectedParcel.id ? result.parcels : [parcel],
+        ),
+      );
+      setParcelEdits((current) =>
+        recordParcelSplit(current, selectedParcel, result.parcels),
+      );
+      setInterventionScope({
+        kind: "parcel",
+        outline: interventionScope.outline,
+        lotIds: result.parcels.map((parcel) => `brk:${parcel.id}`),
+      });
+      setParcelSplitActive(false);
+      setParcelSplitError(null);
+    },
+    [selectedParcel, interventionScope],
+  );
+  const handleParcelMerge = useCallback(() => {
+    if (selectedParcels.length < 2) {
+      setParcelSplitError("Select at least two property parcels first.");
+      return;
+    }
+    const result = mergeCadastralParcels(selectedParcels);
+    if (!result.ok) {
+      setParcelSplitError(result.error);
+      return;
+    }
+    const selectedIds = new Set(selectedParcels.map((parcel) => parcel.id));
+    setCadastralParcels((current) => [
+      ...current.filter((parcel) => !selectedIds.has(parcel.id)),
+      result.parcel,
+    ]);
+    setParcelEdits((current) =>
+      recordParcelMerge(current, selectedParcels, result.parcel),
+    );
+    setInterventionScope({
+      kind: "parcel",
+      outline: result.parcel.polygons[0][0],
+      lotIds: [`brk:${result.parcel.id}`],
+    });
+    setParcelSplitActive(false);
+    setParcelSplitError(null);
+  }, [selectedParcels]);
   // Street-network selection: a clicked ribbon or a clicked derived
   // intersection opens its own inspector, mutually exclusive with the
   // block/lot/corner selection and the marquee. null by default so every
@@ -430,13 +616,13 @@ export default function FacadePage() {
   /** Restore the demo backdrop from the committed fixture. The terrain and
    * street network already live in the serialized scene; only context
    * footprints are intentionally omitted for localStorage size. */
-  const loadDemoContextBuildings = useCallback(async () => {
+  const loadDemoContextBuildings = useCallback(async (place: DemoPlace) => {
     const token = ++buildingsReqRef.current;
     setBuildingsError(null);
     setBuildingsInfo(null);
     setBuildingsLoading(true);
     try {
-      const res = await fetch(DEMO_BUILDINGS_URL);
+      const res = await fetch(place.buildingsUrl);
       const json = (await res.json()) as {
         buildings?: ContextBuilding[];
         truncated?: boolean;
@@ -458,6 +644,85 @@ export default function FacadePage() {
       if (buildingsReqRef.current === token) setBuildingsLoading(false);
     }
   }, []);
+
+  // Request token for cadastral parcels, matching the building/street loaders:
+  // a clear or replacement scene must invalidate any late PDOK response.
+  const parcelsReqRef = useRef(0);
+  const loadCadastralParcels = useCallback(
+    async (
+      box: LngLatBBox,
+      a: GeoAnchor,
+      edits: ParcelSubdivisionEdit[] = parcelEdits,
+    ) => {
+      const token = ++parcelsReqRef.current;
+      setParcelsError(null);
+      setParcelsTruncated(false);
+      setParcelsLoading(true);
+      try {
+        const res = await fetch("/api/parcels", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ bbox: box, anchor: a }),
+        });
+        const json = (await res.json()) as {
+          parcels?: CadastralParcel[];
+          truncated?: boolean;
+          error?: string;
+        };
+        if (!res.ok || !json.parcels)
+          throw new Error(json.error ?? `HTTP ${res.status}`);
+        if (parcelsReqRef.current !== token) return;
+        setCadastralParcels(
+          applyParcelSubdivisionEdits(json.parcels, edits),
+        );
+        setParcelsTruncated(!!json.truncated);
+      } catch (error) {
+        if (parcelsReqRef.current !== token) return;
+        setCadastralParcels([]);
+        setParcelsError(
+          error instanceof Error ? error.message : String(error),
+        );
+      } finally {
+        if (parcelsReqRef.current === token) setParcelsLoading(false);
+      }
+    },
+    [parcelEdits],
+  );
+
+  const loadDemoCadastralParcels = useCallback(
+    async (
+      place: DemoPlace,
+      edits: ParcelSubdivisionEdit[] = parcelEdits,
+    ) => {
+      const token = ++parcelsReqRef.current;
+      setParcelsError(null);
+      setParcelsTruncated(false);
+      setParcelsLoading(true);
+      try {
+        const res = await fetch(place.parcelsUrl);
+        const json = (await res.json()) as {
+          parcels?: CadastralParcel[];
+          truncated?: boolean;
+        };
+        if (!res.ok || !json.parcels)
+          throw new Error(`parcels fixture: HTTP ${res.status}`);
+        if (parcelsReqRef.current !== token) return;
+        setCadastralParcels(
+          applyParcelSubdivisionEdits(json.parcels, edits),
+        );
+        setParcelsTruncated(!!json.truncated);
+      } catch (error) {
+        if (parcelsReqRef.current !== token) return;
+        setCadastralParcels([]);
+        setParcelsError(
+          error instanceof Error ? error.message : String(error),
+        );
+      } finally {
+        if (parcelsReqRef.current === token) setParcelsLoading(false);
+      }
+    },
+    [parcelEdits],
+  );
 
   // Request token for `loadStreets`, same reasoning as `buildingsReqRef`.
   const streetsReqRef = useRef(0);
@@ -543,6 +808,9 @@ export default function FacadePage() {
     setBbox(s.bbox);
     setHiddenIds(s.hiddenIds);
     setContextBuildings([]);
+    setCadastralParcels([]);
+    setParcelEdits(s.parcelEdits ?? []);
+    setInterventionScope(null);
     setBuildingsError(null);
     setBuildingsInfo(null);
     // Invalidate any in-flight buildings fetch from the scene being replaced
@@ -553,10 +821,21 @@ export default function FacadePage() {
     // that stops the stale fetch from resolving onto a bbox-less scene.
     buildingsReqRef.current++;
     setBuildingsLoading(false);
+    parcelsReqRef.current++;
+    setParcelsLoading(false);
+    setParcelsError(null);
+    setParcelsTruncated(false);
     // Footprints are not in the document. The committed demo must remain
     // offline across refreshes; arbitrary real places re-fetch from Overpass.
-    if (isDemoPlaceFrame(s.bbox, s.anchor)) void loadDemoContextBuildings();
-    else if (s.bbox && s.anchor) void loadContextBuildings(s.bbox, s.anchor);
+    const savedDemoPlace = demoPlaceForFrame(s.bbox, s.anchor);
+    if (savedDemoPlace) {
+      setSelectedDemoId(savedDemoPlace.id);
+      void loadDemoContextBuildings(savedDemoPlace);
+      void loadDemoCadastralParcels(savedDemoPlace, s.parcelEdits ?? []);
+    } else if (s.bbox && s.anchor) {
+      void loadContextBuildings(s.bbox, s.anchor);
+      void loadCadastralParcels(s.bbox, s.anchor, s.parcelEdits ?? []);
+    }
     setStreetWidth(s.streetWidth);
     setMaxCornerAngle(s.maxCornerAngle);
     // Invalidate any in-flight streets fetch too — the loaded document's own
@@ -575,7 +854,12 @@ export default function FacadePage() {
     setSelectedStreet(null);
     setSelectedIntersection(null);
     setSelectedSquare(null);
-  }, [loadContextBuildings, loadDemoContextBuildings]);
+  }, [
+    loadCadastralParcels,
+    loadContextBuildings,
+    loadDemoCadastralParcels,
+    loadDemoContextBuildings,
+  ]);
 
   const handleSave = useCallback(() => {
     const text = toJSON({
@@ -588,6 +872,7 @@ export default function FacadePage() {
       anchor,
       bbox,
       hiddenIds,
+      parcelEdits,
     });
     const url = URL.createObjectURL(
       new Blob([text], { type: "application/json" }),
@@ -601,7 +886,18 @@ export default function FacadePage() {
     // Defer the revoke so the download has surely started (revoking on the
     // same tick is the fragile variant).
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
-  }, [blocks, cornerChoices, ground, streetWidth, maxCornerAngle, streetNetwork, anchor, bbox, hiddenIds]);
+  }, [
+    blocks,
+    cornerChoices,
+    ground,
+    streetWidth,
+    maxCornerAngle,
+    streetNetwork,
+    anchor,
+    bbox,
+    hiddenIds,
+    parcelEdits,
+  ]);
 
   const handleLoadFile = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -640,9 +936,11 @@ export default function FacadePage() {
       setAnchor(a);
       setBbox(bbox);
       setHiddenIds(new Set());
+      setInterventionScope(null);
       setPickerOpen(false);
       adopted = true;
       void loadContextBuildings(bbox, a);
+      void loadCadastralParcels(bbox, a);
       void loadStreets(bbox, a);
     } catch (e) {
       setTerrainError(e instanceof Error ? e.message : String(e));
@@ -652,7 +950,12 @@ export default function FacadePage() {
       if (!adopted) placeLoadLockRef.current = false;
       setTerrainLoading(false);
     }
-  }, [hasLoadedPlace, loadContextBuildings, loadStreets]);
+  }, [
+    hasLoadedPlace,
+    loadCadastralParcels,
+    loadContextBuildings,
+    loadStreets,
+  ]);
 
   /** Drop the loaded heightfield, reverting to the manual flat/tilted plane
    * (the Topography sliders reappear). */
@@ -668,6 +971,8 @@ export default function FacadePage() {
     // independently) repopulates `bbox` without starting a new fetch.
     buildingsReqRef.current++;
     setBuildingsLoading(false);
+    parcelsReqRef.current++;
+    setParcelsLoading(false);
     // Same reasoning for the streets fetch: bumping the token alone leaves
     // an in-flight loader's own `finally` a no-op (stale token), so
     // `streetsLoading` must be reset here directly too.
@@ -702,26 +1007,29 @@ export default function FacadePage() {
     setAnchor(null);
     setBbox(null);
     setContextBuildings([]);
+    setCadastralParcels([]);
+    setParcelEdits([]);
+    setInterventionScope(null);
     setHiddenIds(new Set());
     setBuildingsError(null);
     setBuildingsInfo(null);
+    setParcelsError(null);
+    setParcelsTruncated(false);
   }, [hasImportedStreets]);
 
-  /** "Demo place": adopt the committed Amsterdam fixture as the scene, byte-
-   * for-byte the same end state "Load place" would leave for that bbox — but
-   * fetching the three static /fixtures/*.json files instead of hitting
-   * Overpass/AWS. Reuses the same state shape and the same buildingsFromStreets
-   * pre-import stash loadStreets uses (mirrored inline since there is no
-   * server round-trip to await). */
-  const handleLoadDemoPlace = useCallback(async () => {
+  /** Adopt a committed demo fixture as the scene, byte-for-byte the same end
+   * state "Load place" would leave for that bbox — but without network GIS
+   * calls. Reuses the same state shape and pre-import preference stash. */
+  const handleLoadDemoPlace = useCallback(async (place: DemoPlace) => {
     if (placeLoadLockRef.current || hasLoadedPlace) return;
     placeLoadLockRef.current = true;
     let adopted = false;
-    // Bump BOTH tokens before touching any state — an in-flight real
+    // Bump all source tokens before touching any state — an in-flight real
     // Overpass/terrain fetch from an earlier "Load place" must not be able
     // to land after this and clobber the demo (same race loadContextBuildings
     // / loadStreets / handleClearTerrain guard against).
     const bToken = ++buildingsReqRef.current;
+    const pToken = ++parcelsReqRef.current;
     const sToken = ++streetsReqRef.current;
     setTerrainError(null);
     setDemoError(null);
@@ -729,34 +1037,48 @@ export default function FacadePage() {
     setBuildingsLoading(true);
     setBuildingsError(null);
     setBuildingsInfo(null);
+    setParcelsLoading(true);
+    setParcelsError(null);
+    setParcelsTruncated(false);
     setStreetsLoading(true);
     setStreetsError(null);
     setStreetsInfo(null);
     try {
-      const [terrainRes, buildingsRes, streetsRes] = await Promise.all([
-        fetch(DEMO_TERRAIN_URL),
-        fetch(DEMO_BUILDINGS_URL),
-        fetch(DEMO_STREETS_URL),
+      const [terrainRes, buildingsRes, parcelsRes, streetsRes] =
+        await Promise.all([
+        fetch(place.terrainUrl),
+        fetch(place.buildingsUrl),
+        fetch(place.parcelsUrl),
+        fetch(place.streetsUrl),
       ]);
-      const [terrainJson, buildingsJson, streetsJson] = (await Promise.all([
+      const [terrainJson, buildingsJson, parcelsJson, streetsJson] =
+        (await Promise.all([
         terrainRes.json(),
         buildingsRes.json(),
+        parcelsRes.json(),
         streetsRes.json(),
       ])) as [
         { heightfield?: Heightfield },
         { buildings?: ContextBuilding[]; truncated?: boolean; total?: number },
+        { parcels?: CadastralParcel[]; truncated?: boolean },
         { streets?: Street[]; truncated?: boolean; total?: number },
       ];
       if (!terrainRes.ok || !terrainJson.heightfield)
         throw new Error(`terrain fixture: HTTP ${terrainRes.status}`);
       if (!buildingsRes.ok || !buildingsJson.buildings)
         throw new Error(`buildings fixture: HTTP ${buildingsRes.status}`);
+      if (!parcelsRes.ok || !parcelsJson.parcels)
+        throw new Error(`parcels fixture: HTTP ${parcelsRes.status}`);
       if (!streetsRes.ok || !streetsJson.streets)
         throw new Error(`streets fixture: HTTP ${streetsRes.status}`);
 
       // A newer call (a real "Load place", another demo click, or a clear)
       // superseded this one while the fetches were in flight — drop it.
-      if (buildingsReqRef.current !== bToken || streetsReqRef.current !== sToken)
+      if (
+        buildingsReqRef.current !== bToken ||
+        parcelsReqRef.current !== pToken ||
+        streetsReqRef.current !== sToken
+      )
         return;
 
       const normalizedStreets = normalizeImportedStreetWidths(
@@ -764,9 +1086,10 @@ export default function FacadePage() {
       );
       reserveStreetIds(normalizedStreets);
       setGround((g) => ({ ...g, hf: terrainJson.heightfield! }));
-      setAnchor(DEMO_ANCHOR);
-      setBbox(DEMO_BBOX);
+      setAnchor(place.anchor);
+      setBbox(place.bbox);
       setHiddenIds(new Set());
+      setInterventionScope(null);
       setPickerOpen(false);
       adopted = true;
 
@@ -775,6 +1098,9 @@ export default function FacadePage() {
         truncated: !!buildingsJson.truncated,
         total: buildingsJson.total ?? buildingsJson.buildings.length,
       });
+      setCadastralParcels(parcelsJson.parcels);
+      setParcelEdits([]);
+      setParcelsTruncated(!!parcelsJson.truncated);
 
       // Importing REPLACES the network, same as loadStreets.
       setStreetNetwork({ ...EMPTY_NETWORK, streets: normalizedStreets });
@@ -794,10 +1120,15 @@ export default function FacadePage() {
         setBuildingsFromStreets(false);
       }
     } catch (e) {
-      if (buildingsReqRef.current === bToken && streetsReqRef.current === sToken)
+      if (
+        buildingsReqRef.current === bToken &&
+        parcelsReqRef.current === pToken &&
+        streetsReqRef.current === sToken
+      )
         setDemoError(e instanceof Error ? e.message : String(e));
     } finally {
       if (buildingsReqRef.current === bToken) setBuildingsLoading(false);
+      if (parcelsReqRef.current === pToken) setParcelsLoading(false);
       if (streetsReqRef.current === sToken) setStreetsLoading(false);
       if (!adopted) placeLoadLockRef.current = false;
       setDemoLoading(false);
@@ -815,6 +1146,15 @@ export default function FacadePage() {
     });
   }, []);
 
+  const handleSelectContextBuilding = useCallback((id: string) => {
+    setSelected(null);
+    setMarquee(null);
+    setSelectedStreet(null);
+    setSelectedIntersection(null);
+    setSelectedSquare(null);
+    setSelectedContextBuilding(id);
+  }, []);
+
   /** Bring every demolished context building back — a hidden one cannot be
    * clicked again, so this is the only way out. */
   const handleRestoreHidden = useCallback(() => setHiddenIds(new Set()), []);
@@ -827,7 +1167,9 @@ export default function FacadePage() {
     () =>
       new Set(
         blocks
-          .map((b) => b.parcel?.source)
+          .map(
+            (b) => b.parcel?.contextBuildingId ?? b.parcel?.source,
+          )
           .filter((s): s is string => s !== undefined),
       ),
     [blocks],
@@ -851,6 +1193,19 @@ export default function FacadePage() {
     [selectedContextBuilding, contextBuildings],
   );
 
+  /** The selected building's parent property. Promotion always consumes this
+   * BRK parcel, never the OSM building footprint itself. */
+  const selectedCadastralPlot = useMemo(() => {
+    if (!selectedContextObj) return null;
+    const plot = cadastralPlotForFootprint(
+      selectedContextObj.footprint,
+      cadastralParcels,
+    );
+    return plot
+      ? { ...plot, contextBuildingId: selectedContextObj.id }
+      : null;
+  }, [selectedContextObj, cadastralParcels]);
+
   /** The plot geometry promotion WOULD use. Goes through parcelPreview, the
    * same helper promoteParcel itself builds on, so the panel and the result
    * cannot disagree and the depth clamp is not duplicated. Critically it is
@@ -858,17 +1213,17 @@ export default function FacadePage() {
    * memo would bump the id counter on every render. */
   const promotePreview = useMemo(
     () =>
-      selectedContextObj
-        ? parcelPreview(selectedContextObj, streetNetwork)
+      selectedCadastralPlot
+        ? parcelPreview(selectedCadastralPlot, streetNetwork)
         : null,
-    [selectedContextObj, streetNetwork],
+    [selectedCadastralPlot, streetNetwork],
   );
 
   /** Promote the selected footprint into an editable block. */
   const handlePromoteContextBuilding = useCallback(() => {
-    if (!selectedContextObj) return;
+    if (!selectedCadastralPlot) return;
     const block = promoteParcel(
-      selectedContextObj,
+      selectedCadastralPlot,
       streetNetwork,
       DEFAULT_GEN,
       Math.floor(Math.random() * 1e9),
@@ -879,7 +1234,12 @@ export default function FacadePage() {
     setBlocks((bs) => syncCorners([...bs, block], cornerChoices, maxCornerAngle));
     setSelectedContextBuilding(null);
     setSelected({ blockId: block.id, lot: 0, level: "block" });
-  }, [selectedContextObj, streetNetwork, cornerChoices, maxCornerAngle]);
+  }, [
+    selectedCadastralPlot,
+    streetNetwork,
+    cornerChoices,
+    maxCornerAngle,
+  ]);
 
   // Restore the autosave once on mount (survives refresh/crash). Guarded so
   // Strict Mode's double-invoke can't apply it twice.
@@ -927,6 +1287,7 @@ export default function FacadePage() {
         anchor,
         bbox,
         hiddenIds,
+        parcelEdits,
       });
       // A full quota must NEVER take the editor down: this runs in a timeout,
       // so an uncaught QuotaExceededError escapes as an unhandled error and
@@ -949,7 +1310,18 @@ export default function FacadePage() {
       }
     }, 500);
     return () => window.clearTimeout(id);
-  }, [blocks, cornerChoices, ground, streetWidth, maxCornerAngle, streetNetwork, anchor, bbox, hiddenIds]);
+  }, [
+    blocks,
+    cornerChoices,
+    ground,
+    streetWidth,
+    maxCornerAngle,
+    streetNetwork,
+    anchor,
+    bbox,
+    hiddenIds,
+    parcelEdits,
+  ]);
 
   const selectedBlock = selected
     ? (blocks.find((b) => b.id === selected.blockId) ?? null)
@@ -1050,6 +1422,46 @@ export default function FacadePage() {
     [selected, cornerChoices, maxCornerAngle],
   );
 
+  const setLotKind = useCallback(
+    (kind: FacadeBlock["lots"][number]["kind"]) => {
+      if (!selected) return;
+      setBlocks((current) => {
+        const next = current.map((block) => {
+          if (block.id !== selected.blockId) return block;
+          const lotIndex = Math.min(selected.lot, block.lots.length - 1);
+          return {
+            ...block,
+            lots: block.lots.map((lot, index) => {
+              if (index !== lotIndex) return lot;
+              const nextLot = { ...lot, customized: true };
+              if (kind) nextLot.kind = kind;
+              else delete nextLot.kind;
+              return nextLot;
+            }),
+          };
+        });
+        return syncCorners(
+          next,
+          cornerChoices,
+          maxCornerAngle,
+          selected.blockId,
+        );
+      });
+      // A gate cannot be a unified corner shell; drop a stale corner-level
+      // selection immediately so the inspector reflects the chosen lot.
+      setSelected((current) =>
+        current
+          ? {
+              blockId: current.blockId,
+              lot: current.lot,
+              level: "lot",
+            }
+          : current,
+      );
+    },
+    [selected, cornerChoices, maxCornerAngle],
+  );
+
   // Latest detected corners, read by handleSelectLot without re-creating it.
   const cornersRef = useRef<Corner[]>([]);
   const handleSelectLot = useCallback(
@@ -1138,6 +1550,7 @@ export default function FacadePage() {
   const canSubdivide =
     !!selectedBlock &&
     selectedBlock.lots.length === 1 &&
+    selectedBlock.lots[0].kind !== "arch-gate" &&
     blockFrame(selectedBlock).length >= 2 * selectedBlock.gen.lotWidth.min;
 
   const canMerge =
@@ -1353,6 +1766,7 @@ export default function FacadePage() {
     setSelectedIntersection(null);
     setSelectedSquare(null);
     setMarquee(null);
+    setInterventionScope(null);
     // Invalidate any in-flight streets/buildings fetch — otherwise it can
     // resolve after this clear and repopulate the just-wiped network (or the
     // truncation/error banners) a few seconds later (same race
@@ -1840,21 +2254,42 @@ export default function FacadePage() {
           >
             Load place
           </button>
-          <button
-            type="button"
-            onClick={handleLoadDemoPlace}
-            disabled={placeLoadBlocked}
-            title={
-              hasLoadedPlace
-                ? "Clear terrain before loading another place"
-                : terrainLoading || demoLoading
-                  ? "A place is already loading"
-                  : "Load a committed Amsterdam snapshot — terrain, buildings and streets with no network calls"
-            }
-            className="text-[11px] px-2 py-0.5 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          <div
+            role="group"
+            aria-label="Offline demo place"
+            className="inline-flex items-center"
           >
-            {demoLoading ? "Loading demo…" : "Demo place"}
-          </button>
+            <select
+              aria-label="Choose demo place"
+              value={selectedDemoId}
+              onChange={(event) =>
+                setSelectedDemoId(event.target.value as DemoPlaceId)
+              }
+              disabled={placeLoadBlocked}
+              className="h-[23px] max-w-40 rounded-l border border-r-0 border-[var(--border)] bg-[var(--background)] px-1.5 text-[11px] text-[var(--muted)] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {DEMO_PLACES.map((place) => (
+                <option key={place.id} value={place.id}>
+                  {place.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => handleLoadDemoPlace(selectedDemoPlace)}
+              disabled={placeLoadBlocked}
+              title={
+                hasLoadedPlace
+                  ? "Clear terrain before loading another place"
+                  : terrainLoading || demoLoading
+                    ? "A place is already loading"
+                    : `Load the committed ${selectedDemoPlace.label} snapshot — terrain, buildings and streets with no network calls`
+              }
+              className="h-[23px] rounded-r border border-[var(--border)] px-2 text-[11px] text-[var(--muted)] transition-colors hover:border-[var(--foreground)]/30 hover:text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {demoLoading ? `Loading ${selectedDemoPlace.city}…` : "Load demo"}
+            </button>
+          </div>
           {demoError && (
             <span className="text-[11px] text-red-400" role="alert">
               {demoError}
@@ -1919,6 +2354,23 @@ export default function FacadePage() {
               </button>
             ))}
           </div>
+          <button
+            type="button"
+            onClick={() => setShowLotOutlines((shown) => !shown)}
+            aria-pressed={showLotOutlines}
+            title={
+              parcelsLoading
+                ? "Cadastral parcels are still loading; editable lot outlines are available now"
+                : "Show editable lots and official BRK cadastral parcel boundaries on the terrain"
+            }
+            className={`text-[11px] px-2 py-0.5 rounded border transition-colors ${
+              showLotOutlines
+                ? "border-[#d2b46f] text-[#d2b46f]"
+                : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30"
+            }`}
+          >
+            Parcel boundaries
+          </button>
         </div>
         <div className="ml-auto hidden shrink-0 items-center gap-3 text-[11px] text-[var(--muted)] font-mono 2xl:flex">
           {params && layout ? (
@@ -1951,6 +2403,20 @@ export default function FacadePage() {
             onClearAll={handleClearAll}
             cornerChoices={cornerChoices}
             display={display}
+            showLotOutlines={showLotOutlines}
+            interventionScope={interventionScope}
+            onScopePoint={handleScopePoint}
+            onScopeRect={handleScopeRect}
+            onScopeClear={() => {
+              setInterventionScope(null);
+              cancelParcelSplit();
+            }}
+            parcelSplitActive={parcelSplitActive}
+            parcelSplitOutline={
+              parcelSplitActive ? (interventionScope?.outline ?? null) : null
+            }
+            onParcelSplit={handleParcelSplit}
+            onParcelSplitCancel={cancelParcelSplit}
             view={view}
             onDrawModeChange={setDrawActive}
             corners={corners}
@@ -1975,10 +2441,11 @@ export default function FacadePage() {
             onSelectSquare={handleSelectSquare}
             onClearSelection={handleClearSelection}
             contextBuildings={contextBuildings}
+            cadastralParcels={cadastralParcels}
             hiddenIds={suppressedIds}
             contextVisible={contextVisible}
             selectedContextBuilding={selectedContextBuilding}
-            onSelectContextBuilding={setSelectedContextBuilding}
+            onSelectContextBuilding={handleSelectContextBuilding}
           />
         </div>
 
@@ -2004,15 +2471,47 @@ export default function FacadePage() {
               streetsTruncated={!!streetsInfo?.truncated}
               streetsTotal={streetsInfo?.total ?? 0}
               streetsError={streetsError}
+              parcelCount={cadastralParcels.length}
+              parcelsLoading={parcelsLoading}
+              parcelsTruncated={parcelsTruncated}
+              parcelsError={parcelsError}
             />
+            {interventionScope && (
+              <InterventionScopePanel
+                kind={interventionScope.kind}
+                area={scopeArea(interventionScope.outline)}
+                lotCount={interventionScope.lotIds.length}
+                mergeCount={selectedParcels.length}
+                canSplit={canSplitParcel}
+                canMerge={canMergeParcels}
+                splitActive={parcelSplitActive}
+                splitError={parcelSplitError}
+                onSplit={() => {
+                  setParcelSplitError(null);
+                  setParcelSplitActive(true);
+                }}
+                onAutoSplit={handleParcelAutoSplit}
+                onMerge={handleParcelMerge}
+                onCancelSplit={cancelParcelSplit}
+                onClear={() => {
+                  setInterventionScope(null);
+                  cancelParcelSplit();
+                }}
+              />
+            )}
             {/* M4 inspector — also above the selection ternary, for the same
              * reason: the flow is "load a place, click a building" with no
              * block selected. */}
             {selectedContextObj && (
               <ContextBuildingPanel
                 id={selectedContextObj.id}
-                area={parcelArea(selectedContextObj.footprint)}
-                vertices={selectedContextObj.footprint.length}
+                parcelId={selectedCadastralPlot?.id ?? null}
+                area={
+                  selectedCadastralPlot
+                    ? parcelArea(selectedCadastralPlot.outline)
+                    : null
+                }
+                vertices={selectedCadastralPlot?.outline.length ?? null}
                 preview={promotePreview}
                 onPromote={handlePromoteContextBuilding}
                 onDemolish={() => {
@@ -2061,22 +2560,28 @@ export default function FacadePage() {
             ) : selected && selectedBlock && params ? (
               <>
                 <div>
-                  <PromptInput
-                    onApply={handlePrompt}
-                    isLoading={isAILoading}
-                    variant="inline"
-                    placeholder="Describe your facade…"
-                    suggestions={FACADE_SUGGESTIONS}
-                  />
-                  {aiStatus && (
-                    <div className="mt-1 text-[10px] text-[var(--muted)]">
-                      {aiStatus}
-                    </div>
+                  {selectedLot?.kind !== "arch-gate" && (
+                    <>
+                      <PromptInput
+                        onApply={handlePrompt}
+                        isLoading={isAILoading}
+                        variant="inline"
+                        placeholder="Describe your facade…"
+                        suggestions={FACADE_SUGGESTIONS}
+                      />
+                      {aiStatus && (
+                        <div className="mt-1 text-[10px] text-[var(--muted)]">
+                          {aiStatus}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
                 <FacadeControls
                   params={params}
                   onChange={setParams}
+                  lotKind={selectedLot?.kind}
+                  onLotKindChange={setLotKind}
                   view={view}
                   onViewChange={setView}
                   selection={selected}

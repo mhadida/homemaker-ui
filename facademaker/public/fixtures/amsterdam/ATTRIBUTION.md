@@ -11,6 +11,7 @@ projected against; it must not be changed independently of the data).
 | File | Contents | Source |
 |---|---|---|
 | `buildings.json` | 1,585 building footprints | © OpenStreetMap contributors |
+| `parcels.json` | 1,753 cadastral parcels | Kadaster / PDOK |
 | `streets.json` | 212 streets and canals | © OpenStreetMap contributors |
 | `terrain.json` | 128 × 79 elevation heightfield | AWS Terrain Tiles (Terrarium) |
 
@@ -32,6 +33,16 @@ copy committed to the repository.
 `elevation-tiles-prod` bucket, which aggregates public sources (SRTM, NED,
 and others). See
 <https://registry.opendata.aws/terrain-tiles/> for the per-source attribution.
+
+## Cadastral parcels — Kadaster / PDOK, CC BY 4.0
+
+`parcels.json` is a frozen extract of the BRK Kadastrale Kaart `perceel`
+collection published by Kadaster through PDOK:
+<https://api.pdok.nl/kadaster/brk-kadastrale-kaart/ogc/v1?f=html>.
+
+The data is available under **CC BY 4.0**. The published parcel geometry
+indicates cadastral boundary locations; survey measurements cannot be derived
+from the Kadastrale Kaart.
 
 ## Why these are committed
 

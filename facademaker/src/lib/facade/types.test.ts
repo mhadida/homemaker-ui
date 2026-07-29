@@ -3,6 +3,7 @@ import {
   DEFAULT_FACADE,
   FACADE_PRESETS,
   FACADE_LIMITS,
+  suggestedBayCount,
 } from "./types";
 
 describe("facade types", () => {
@@ -30,7 +31,14 @@ describe("facade types", () => {
   });
 
   it("default and presets carry a valid windowStyle", () => {
-    const valid = ["georgian", "sash", "victorian", "none"];
+    const valid = [
+      "georgian",
+      "sash",
+      "victorian",
+      "none",
+      "circle",
+      "ellipse",
+    ];
     expect(DEFAULT_FACADE.windowStyle).toBe("sash");
     for (const [id, preset] of Object.entries(FACADE_PRESETS)) {
       const p = { ...DEFAULT_FACADE, ...preset.params };
@@ -39,5 +47,11 @@ describe("facade types", () => {
     expect(FACADE_PRESETS.georgian.params.windowStyle).toBe("georgian");
     expect(FACADE_PRESETS["victorian-shopfront"].params.windowStyle).toBe("victorian");
     expect(FACADE_PRESETS.modern.params.windowStyle).toBe("none");
+  });
+
+  it("suggests a repeatable 2.5m rhythm and caps extreme frontages", () => {
+    expect(suggestedBayCount(7.5)).toBe(3);
+    expect(suggestedBayCount(50)).toBe(20);
+    expect(suggestedBayCount(1_000)).toBe(FACADE_LIMITS.bays.max);
   });
 });

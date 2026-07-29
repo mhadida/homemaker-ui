@@ -41,33 +41,40 @@ export default function BayGrid({ params, onChange }: BayGridProps) {
   // Top storey renders first so the grid mirrors the facade.
   return (
     <div className="space-y-1">
-      {[...grid].reverse().map((row, ri) => {
-        const storey = grid.length - 1 - ri;
-        return (
-          <div key={storey} className="flex gap-1">
-            {row.map((kind, bay) => {
-              const overridden = (params.cellOverrides ?? []).some(
-                (o) => o.storey === storey && o.bay === bay,
-              );
-              return (
-                <button
-                  key={bay}
-                  type="button"
-                  onClick={() => cycleCell(storey, bay)}
-                  title={`Storey ${storey + 1}, bay ${bay + 1}: ${kind}`}
-                  className={`flex-1 aspect-square rounded text-sm grid place-items-center transition-colors ${
-                    overridden
-                      ? "bg-[var(--accent)]/30 text-[var(--foreground)]"
-                      : "bg-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]"
-                  }`}
-                >
-                  {GLYPH[kind]}
-                </button>
-              );
-            })}
-          </div>
-        );
-      })}
+      <div
+        className="max-w-full space-y-1 overflow-x-auto pb-1"
+        aria-label={`${params.storeys} storeys by ${params.bays} bays`}
+      >
+        {[...grid].reverse().map((row, ri) => {
+          const storey = grid.length - 1 - ri;
+          return (
+            <div key={storey} className="flex min-w-full gap-1">
+              {row.map((kind, bay) => {
+                const overridden = (params.cellOverrides ?? []).some(
+                  (o) => o.storey === storey && o.bay === bay,
+                );
+                const label = `Storey ${storey + 1}, bay ${bay + 1}: ${kind}`;
+                return (
+                  <button
+                    key={bay}
+                    type="button"
+                    onClick={() => cycleCell(storey, bay)}
+                    title={label}
+                    aria-label={label}
+                    className={`grid aspect-square min-w-7 flex-1 place-items-center rounded text-sm transition-colors ${
+                      overridden
+                        ? "bg-[var(--accent)]/30 text-[var(--foreground)]"
+                        : "bg-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]"
+                    }`}
+                  >
+                    {GLYPH[kind]}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
       <div className="text-[9px] text-[var(--muted)]">
         tap to cycle: ▢ window · blank ▯ door ▭ shopfront ▤ garage
       </div>

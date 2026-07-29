@@ -1,5 +1,4 @@
 import { describe, it, expect } from "vitest";
-import type { ContextBuilding } from "@/lib/geo/buildings";
 import type { StreetNetwork } from "@/lib/street/types";
 import { EMPTY_NETWORK } from "@/lib/street/types";
 import { DEFAULT_GEN, blockFrame } from "./blocks";
@@ -9,6 +8,7 @@ import {
   parcelPreview,
   promoteParcel,
   subdivideBlock,
+  type PromotableParcel,
 } from "./promote";
 
 const streetAtZ = (z: number): StreetNetwork => ({
@@ -25,10 +25,9 @@ const streetAtZ = (z: number): StreetNetwork => ({
   ],
 });
 
-const plot = (outline: [number, number][]): ContextBuilding => ({
-  id: "way/24601",
-  footprint: outline,
-  height: 20.1,
+const plot = (outline: [number, number][]): PromotableParcel => ({
+  id: "parcel/24601",
+  outline,
 });
 
 // 10 m frontage, 6 m deep, street to the south.
@@ -91,14 +90,14 @@ describe("promoteParcel", () => {
 
   it("stores the source id and the real outline verbatim", () => {
     const b = promoteParcel(PLOT, streetAtZ(-8), DEFAULT_GEN, 7)!;
-    expect(b.parcel!.source).toBe("way/24601");
-    expect(b.parcel!.outline).toEqual(PLOT.footprint);
+    expect(b.parcel!.source).toBe("parcel/24601");
+    expect(b.parcel!.outline).toEqual(PLOT.outline);
   });
 
-  it("copies the outline rather than aliasing the fetched footprint", () => {
+  it("copies the outline rather than aliasing the fetched parcel", () => {
     const b = promoteParcel(PLOT, streetAtZ(-8), DEFAULT_GEN, 7)!;
-    expect(b.parcel!.outline).not.toBe(PLOT.footprint);
-    expect(b.parcel!.outline[0]).not.toBe(PLOT.footprint[0]);
+    expect(b.parcel!.outline).not.toBe(PLOT.outline);
+    expect(b.parcel!.outline[0]).not.toBe(PLOT.outline[0]);
   });
 
   it("leaves the lot unpinned so Reroll still works", () => {

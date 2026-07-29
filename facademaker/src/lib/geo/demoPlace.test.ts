@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { Heightfield } from "@/lib/facade/terrain";
 import type { ContextBuilding } from "./buildings";
+import {
+  cadastralPlotForFootprint,
+  type CadastralParcel,
+} from "./cadastralParcels";
 import type { Street } from "@/lib/street/types";
 import { effectiveWidth } from "@/lib/street/types";
 import { normalizeImportedStreetWidths } from "./streets";
@@ -11,18 +15,21 @@ import {
   DEMO_ANCHOR,
   DEMO_BBOX,
   DEMO_BUILDINGS_URL,
+  DEMO_PLACES,
   DEMO_STREETS_URL,
   DEMO_TERRAIN_URL,
+  UTRECHT_DEMO_PLACE,
+  demoPlaceForFrame,
   isDemoPlaceFrame,
 } from "./demoPlace";
 
 // Reads the committed fixture files straight off disk (this is a Node-
 // environment vitest run, not a browser — DEMO_*_URL are the runtime fetch
 // paths the app uses; here we map them onto public/ directly).
-const FIXTURE_DIR = path.resolve(__dirname, "../../../public/fixtures/amsterdam");
+const PUBLIC_DIR = path.resolve(__dirname, "../../../public");
 const readFixture = (url: string) =>
   JSON.parse(
-    readFileSync(path.join(FIXTURE_DIR, path.basename(url)), "utf8"),
+    readFileSync(path.join(PUBLIC_DIR, url.replace(/^\//, "")), "utf8"),
   ) as unknown;
 
 function sustainedParallelOverlapCount(streets: Street[]): number {
@@ -85,6 +92,18 @@ describe("demoPlace fixtures", () => {
     expect(isDemoPlaceFrame(DEMO_BBOX, DEMO_ANCHOR)).toBe(true);
     expect(
       isDemoPlaceFrame(
+        UTRECHT_DEMO_PLACE.bbox,
+        UTRECHT_DEMO_PLACE.anchor,
+      ),
+    ).toBe(true);
+    expect(
+      demoPlaceForFrame(
+        UTRECHT_DEMO_PLACE.bbox,
+        UTRECHT_DEMO_PLACE.anchor,
+      )?.id,
+    ).toBe("utrecht");
+    expect(
+      isDemoPlaceFrame(
         { ...DEMO_BBOX, west: DEMO_BBOX.west + 0.0001 },
         DEMO_ANCHOR,
       ),
@@ -140,6 +159,36 @@ describe("demoPlace fixtures", () => {
     expect(json.total).toBe(212);
   });
 
+  it("parcels.json contains real BRK property boundaries", () => {
+    const json = readFixture(DEMO_PLACES[0].parcelsUrl) as {
+      parcels: CadastralParcel[];
+      truncated: boolean;
+    };
+    expect(json.truncated).toBe(false);
+    expect(json.parcels.length).toBe(1753);
+    for (const parcel of json.parcels) {
+      expect(typeof parcel.id).toBe("string");
+      expect(parcel.polygons.length).toBeGreaterThan(0);
+      expect(parcel.polygons[0][0].length).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it("places every imported building footprint inside a cadastral lot", () => {
+    const buildings = (
+      readFixture(DEMO_BUILDINGS_URL) as { buildings: ContextBuilding[] }
+    ).buildings;
+    const parcels = (
+      readFixture(DEMO_PLACES[0].parcelsUrl) as {
+        parcels: CadastralParcel[];
+      }
+    ).parcels;
+    const outside = buildings.filter(
+      (building) =>
+        cadastralPlotForFootprint(building.footprint, parcels) === null,
+    );
+    expect(outside.map((building) => building.id)).toEqual([]);
+  });
+
   it("has at least one canal — the visually distinctive part of this area", () => {
     const json = readFixture(DEMO_STREETS_URL) as { streets: Street[] };
     const canals = json.streets.filter((s) => s.type === "canal");
@@ -163,5 +212,79 @@ describe("demoPlace fixtures", () => {
     const [xW, zS] = project(DEMO_BBOX.south, DEMO_BBOX.west, DEMO_ANCHOR);
     expect(xW).toBeCloseTo(json.heightfield.originX, 6);
     expect(zS).toBeCloseTo(json.heightfield.originZ, 6);
+  });
+});
+
+describe("Utrecht demo fixture", () => {
+  const place = UTRECHT_DEMO_PLACE;
+
+  it("has the pinned terrain shape and projection origin", () => {
+    const json = readFixture(place.terrainUrl) as {
+      heightfield: Heightfield;
+    };
+    const hf = json.heightfield;
+    expect(hf.cols).toBe(128);
+    expect(hf.rows).toBe(99);
+    expect(hf.data.length).toBe(hf.cols * hf.rows);
+    const [xW, zS] = project(place.bbox.south, place.bbox.west, place.anchor);
+    expect(xW).toBeCloseTo(hf.originX, 6);
+    expect(zS).toBeCloseTo(hf.originZ, 6);
+  });
+
+  it("contains the pinned Smakkelaarsveld building snapshot", () => {
+    const json = readFixture(place.buildingsUrl) as {
+      buildings: ContextBuilding[];
+      truncated: boolean;
+      total: number;
+    };
+    expect(json.truncated).toBe(false);
+    expect(json.buildings.length).toBe(637);
+    expect(json.total).toBe(637);
+    for (const building of json.buildings) {
+      expect(typeof building.id).toBe("string");
+      expect(building.footprint.length).toBeGreaterThan(0);
+      expect(building.height).toBeGreaterThan(0);
+    }
+  });
+
+  it("contains the pinned street/canal snapshot without ribbon overlap", () => {
+    const json = readFixture(place.streetsUrl) as {
+      streets: Street[];
+      truncated: boolean;
+      total: number;
+    };
+    expect(json.truncated).toBe(false);
+    expect(json.streets.length).toBe(125);
+    expect(json.total).toBe(125);
+    expect(json.streets.filter((street) => street.type === "canal").length).toBe(
+      2,
+    );
+    expect(sustainedParallelOverlapCount(json.streets)).toBe(0);
+  });
+
+  it("contains the Smakkelaarsveld BRK parcel snapshot", () => {
+    const json = readFixture(place.parcelsUrl) as {
+      parcels: CadastralParcel[];
+      truncated: boolean;
+    };
+    expect(json.truncated).toBe(false);
+    expect(json.parcels.length).toBe(577);
+    expect(
+      json.parcels.every((parcel) => parcel.polygons.length > 0),
+    ).toBe(true);
+  });
+
+  it("places every Utrecht building footprint inside a cadastral lot", () => {
+    const buildings = (
+      readFixture(place.buildingsUrl) as { buildings: ContextBuilding[] }
+    ).buildings;
+    const parcels = (
+      readFixture(place.parcelsUrl) as { parcels: CadastralParcel[] }
+    ).parcels;
+    const outside = buildings.filter(
+      (building) =>
+        cadastralPlotForFootprint(building.footprint, parcels) === null,
+    );
+    expect(outside.map((building) => building.id)).toEqual([]);
   });
 });

@@ -53,7 +53,13 @@ export interface FacadeSection {
 
 export type PresetId = "georgian" | "victorian-shopfront" | "modern";
 
-export type WindowStyleId = "georgian" | "sash" | "victorian" | "none";
+export type WindowStyleId =
+  | "georgian"
+  | "sash"
+  | "victorian"
+  | "none"
+  | "circle"
+  | "ellipse";
 
 /** Order matches the controls chip row. */
 export const WINDOW_STYLE_OPTIONS: { id: WindowStyleId; label: string }[] = [
@@ -61,6 +67,8 @@ export const WINDOW_STYLE_OPTIONS: { id: WindowStyleId; label: string }[] = [
   { id: "sash", label: "Sash" },
   { id: "victorian", label: "1-over-1" },
   { id: "none", label: "Plain" },
+  { id: "circle", label: "Circle" },
+  { id: "ellipse", label: "Ellipse" },
 ];
 
 export interface FacadeParams {
@@ -73,7 +81,7 @@ export interface FacadeParams {
   /** Per-storey heights (bottom-up), classical ratios. Falls back to
    * storeyHeight per storey when absent/short. */
   storeyHeights?: number[];
-  /** Vertical bay count, 1–9 */
+  /** Vertical bay count, 1–64 */
   bays: number;
   /** Opening width as fraction of bay width */
   windowWidthRatio: number;
@@ -126,10 +134,25 @@ export const FACADE_LIMITS = {
   width: { min: 4, max: 20 },
   storeys: { min: 1, max: 6 },
   storeyHeight: { min: 2.2, max: 4.5 },
-  bays: { min: 1, max: 9 },
+  bays: { min: 1, max: 64 },
   windowWidthRatio: { min: 0.2, max: 0.8 },
   windowHeightRatio: { min: 0.3, max: 0.8 },
 } as const;
+
+/** A comfortable default facade rhythm for both ordinary houses and very
+ * long imported buildings. Manual bay counts can still override this. */
+export const TARGET_BAY_WIDTH = 2.5;
+
+export function suggestedBayCount(width: number): number {
+  const safeWidth = Number.isFinite(width) ? Math.max(0, width) : 0;
+  return Math.max(
+    FACADE_LIMITS.bays.min,
+    Math.min(
+      FACADE_LIMITS.bays.max,
+      Math.round(safeWidth / TARGET_BAY_WIDTH),
+    ),
+  );
+}
 
 export const DEFAULT_FACADE: FacadeParams = {
   width: 7.5,

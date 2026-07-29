@@ -174,8 +174,44 @@ describe("computeLayout", () => {
     ).toBeUndefined();
   });
 
+  it("resolves circular windows to equal width and height", () => {
+    const layout = computeLayout({
+      ...DEFAULT_FACADE,
+      windowStyle: "circle",
+      windowWidthRatio: 0.4,
+      windowHeightRatio: 0.8,
+    });
+    const windows = layout.openings.filter((o) => o.kind === "window");
+    expect(windows.length).toBeGreaterThan(0);
+    for (const window of windows) {
+      expect(window.elliptical).toBe(true);
+      expect(window.w).toBeCloseTo(window.h, 8);
+    }
+  });
+
+  it("keeps independent dimensions for elliptical windows", () => {
+    const layout = computeLayout({
+      ...DEFAULT_FACADE,
+      windowStyle: "ellipse",
+      windowWidthRatio: 0.4,
+      windowHeightRatio: 0.8,
+    });
+    const windows = layout.openings.filter((o) => o.kind === "window");
+    expect(windows.length).toBeGreaterThan(0);
+    for (const window of windows) {
+      expect(window.elliptical).toBe(true);
+      expect(window.h).toBeGreaterThan(window.w);
+    }
+  });
+
   it("extreme narrow bays (width 4, 9 bays) skip degenerate openings but never crash", () => {
     invariants(p({ width: 4, bays: 9 }));
+  });
+
+  it("supports dense window rhythms on very long buildings", () => {
+    const layout = computeLayout(p({ width: 120, bays: 48 }));
+    invariants(p({ width: 120, bays: 48 }));
+    expect(layout.openings.filter((o) => o.kind === "window").length).toBeGreaterThan(100);
   });
 
   it("max window ratios keep a pier between adjacent windows", () => {

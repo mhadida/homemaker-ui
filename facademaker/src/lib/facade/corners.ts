@@ -1,9 +1,9 @@
 import type { FacadeBlock } from "./blocks";
-import { blockFrame } from "./blocks";
+import { blockFrame, normalizeArchGateLots } from "./blocks";
 import { WALL_THICKNESS } from "./layout";
 import { deriveNodes } from "./nodes";
 import { isOpenSpace } from "./openBlock";
-import type { FacadeParams } from "./types";
+import { FACADE_LIMITS, type FacadeParams } from "./types";
 
 /** One block's side of a corner. lotSide names which end of that LOT's
  * local x-axis touches the node (frame origin = "left"). */
@@ -67,6 +67,15 @@ export function detectCorners(
     // never forms a corner — a neighbour must not miter its wall toward empty
     // space. Building-fill short blocks (isOpenSpace false) corner normally.
     if (isOpenSpace(A) || isOpenSpace(B)) continue;
+    const sideA = sideFor(A, ra.end);
+    const sideB = sideFor(B, rb.end);
+    // A gate replaces the facade/mass in its frontage slot, so it cannot
+    // participate in a wrapped corner shell or receive a wall miter.
+    if (
+      A.lots[sideA.lotIndex]?.kind === "arch-gate" ||
+      B.lots[sideB.lotIndex]?.kind === "arch-gate"
+    )
+      continue;
     // Continuous-frontage requirement: the two facades only meet as a
     // corner when one block's node-end sits at its frame ORIGIN and the
     // other's at its frame END (opposite atOrigin parity). Same-parity
@@ -86,8 +95,8 @@ export function detectCorners(
     corners.push({
       key: `${ra.blockId}:${ra.end}|${rb.blockId}:${rb.end}`,
       node: node.pos,
-      a: sideFor(A, ra.end),
-      b: sideFor(B, rb.end),
+      a: sideA,
+      b: sideB,
       turn,
       convex,
     });
@@ -216,7 +225,11 @@ function syncedParams(
   };
   if (unified) {
     const rhythm = source.width / source.bays;
-    next.bays = clamp(Math.round(target.width / rhythm), 1, 9);
+    next.bays = clamp(
+      Math.round(target.width / rhythm),
+      FACADE_LIMITS.bays.min,
+      FACADE_LIMITS.bays.max,
+    );
     next.windowWidthRatio = source.windowWidthRatio;
     next.windowHeightRatio = source.windowHeightRatio;
     next.groundFloor = {
@@ -276,6 +289,7 @@ export function syncCorners(
   maxTurnDeg: number,
   editedBlockId?: string,
 ): FacadeBlock[] {
+  blocks = normalizeArchGateLots(blocks);
   const corners = detectCorners(blocks, maxTurnDeg);
   if (corners.length === 0) return blocks;
   const work = new Map<string, FacadeBlock>();

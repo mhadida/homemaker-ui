@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Environment, ContactShadows, Grid } from "@react-three/drei";
 import * as THREE from "three";
 import FacadeMesh from "./FacadeMesh";
@@ -11,6 +11,10 @@ import InstancedFacadeBoxes from "./InstancedFacadeBoxes";
 import ContextBuildings, {
   type ContextGeometry,
 } from "./ContextBuildings";
+import LotOutlines from "./LotOutlines";
+import InterventionScopeOutline from "./InterventionScopeOutline";
+import type { InterventionScope } from "@/lib/facade/interventionScope";
+import StoneArch from "./StoneArch";
 import StreetNetworkView from "@/components/street/StreetNetworkView";
 import type { StreetNetwork } from "@/lib/street/types";
 // Ground half-extent's single source of truth — the perspective far plane is
@@ -202,7 +206,15 @@ function boxEdgePoints(
   ];
 }
 
-function SelectionMarker({ params }: { params: FacadeParams }) {
+function SelectionMarker({
+  params,
+  color = "#3b82f6",
+  lineWidth = 1.5,
+}: {
+  params: FacadeParams;
+  color?: string;
+  lineWidth?: number;
+}) {
   const h = useMemo(() => computeLayout(params).totalHeight, [params]);
   const edges = useMemo(
     () => boxEdgePoints(params.width + 0.15, h + 0.15, 0.7),
@@ -210,7 +222,7 @@ function SelectionMarker({ params }: { params: FacadeParams }) {
   );
   return (
     <group position={[0, h / 2, -0.15]}>
-      <Line segments points={edges} color="#3b82f6" lineWidth={1.5} />
+      <Line segments points={edges} color={color} lineWidth={lineWidth} />
     </group>
   );
 }
@@ -334,7 +346,8 @@ function BlockGroup({
 }: {
   block: FacadeBlock;
   selected: Selection | null;
-  onSelectLot: (blockId: string, lot: number) => void;
+  /** Undefined ⇒ buildings render but don't intercept terrain parcel picks. */
+  onSelectLot?: (blockId: string, lot: number) => void;
   miters: Map<string, LotMiter>;
   ground: Ground;
   cornerSides: Set<string> | null;
@@ -355,6 +368,7 @@ function BlockGroup({
   /** Building render mode (full / massing / outline / off). */
   display: BuildingDisplay;
 }) {
+  const [hoveredLot, setHoveredLot] = useState<number | null>(null);
   const placements = useMemo(() => lotPlacements(block), [block]);
   const frame = useMemo(() => blockFrame(block), [block]);
   const isSelectedBlock = selected?.blockId === block.id;
@@ -384,25 +398,73 @@ function BlockGroup({
           placements[i].rotationY,
           ground,
         );
+        // A gate has no basement, so its masonry starts at the lower of its
+        // two frontage ends instead of hovering over a sloped parcel.
+        const gateDatum =
+          lot.kind === "arch-gate"
+            ? Math.min(
+                groundHeightAt(
+                  pos[0] - frame.dir[0] * lot.params.width * 0.5,
+                  pos[2] - frame.dir[1] * lot.params.width * 0.5,
+                  ground,
+                ),
+                groundHeightAt(
+                  pos[0] + frame.dir[0] * lot.params.width * 0.5,
+                  pos[2] + frame.dir[1] * lot.params.width * 0.5,
+                  ground,
+                ),
+              )
+            : ownDatum;
         // A merged corner levels both wings at the primary side's datum so
         // the shared mass and L-roof can't tear on a slope; the basement
         // grows by the lift so it still reaches the ground.
-        const datum = datumOverride.get(key) ?? ownDatum;
+        const datum = datumOverride.get(key) ?? gateDatum;
         const drop = ownDrop + (datum - ownDatum);
         return (
           <group
             key={`${block.id}-${i}`}
             position={[pos[0], datum, pos[2]]}
             rotation={[0, placements[i].rotationY, 0]}
-            onClick={(e) => {
-              e.stopPropagation();
-              onSelectLot(block.id, i);
-            }}
+            onClick={
+              onSelectLot
+                ? (e) => {
+                    e.stopPropagation();
+                    onSelectLot(block.id, i);
+                  }
+                : undefined
+            }
+            onPointerOver={
+              onSelectLot
+                ? (event) => {
+                    event.stopPropagation();
+                    setHoveredLot(i);
+                  }
+                : undefined
+            }
+            onPointerOut={
+              onSelectLot
+                ? () => setHoveredLot((current) => (current === i ? null : current))
+                : undefined
+            }
           >
-            {display === "massing" && <MassingBox params={lot.params} />}
-            {display === "outline" && <OutlineBox params={lot.params} />}
-            {display === "full" && (
+            {lot.kind === "arch-gate" ? (
+              <StoneArch
+                width={lot.params.width}
+                depth={1.15}
+                selected={
+                  (isSelectedBlock &&
+                    selected?.lot === i &&
+                    !cornerSides) ||
+                  !!marqueeLots?.has(i) ||
+                  hoveredLot === i
+                }
+              />
+            ) : (
               <>
+                {display === "massing" && <MassingBox params={lot.params} />}
+                {display === "outline" && <OutlineBox params={lot.params} />}
+                {display === "full" && (
+                  <>
                 <FacadeMesh
                   params={lot.params}
                   miter={miters.get(key)}
@@ -418,17 +480,33 @@ function BlockGroup({
                   </group>
                 )}
                 <Basement width={lot.params.width} depth={depth} drop={drop} />
+                  </>
+                )}
               </>
             )}
             {/* At a live corner, cornerSides lights both wings and suppresses
              * the single-lot marker. When no corner resolves (lot/block level,
              * or a dissolved corner), fall back to the plain selected-lot
              * marker so the edited lot is always visibly highlighted. */}
-            {((isSelectedBlock && selected?.lot === i && !cornerSides) ||
-              cornerSides?.has(`${block.id}:${i}`) ||
-              marqueeLots?.has(i)) && (
-              <SelectionMarker params={lot.params} />
-            )}
+            {lot.kind !== "arch-gate" &&
+              ((isSelectedBlock && selected?.lot === i && !cornerSides) ||
+                cornerSides?.has(`${block.id}:${i}`) ||
+                marqueeLots?.has(i)) && (
+                <SelectionMarker params={lot.params} />
+              )}
+            {lot.kind !== "arch-gate" &&
+              hoveredLot === i &&
+              !(
+                (isSelectedBlock && selected?.lot === i && !cornerSides) ||
+                cornerSides?.has(`${block.id}:${i}`) ||
+                marqueeLots?.has(i)
+              ) && (
+                <SelectionMarker
+                  params={lot.params}
+                  color="#7dd3fc"
+                  lineWidth={1.2}
+                />
+              )}
           </group>
         );
       })}
@@ -487,12 +565,17 @@ export default function SceneContents({
   sceneShadows = true,
   groundGeometry,
   contextGeometry,
+  lotOutlineGeometry,
+  interventionScope,
+  hoveredParcelScope,
   selectedContextBuilding,
   onSelectContextBuilding,
+  onSelectGround,
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
-  onSelectLot: (blockId: string, lot: number) => void;
+  /** Undefined ⇒ editable buildings aren't interactive. */
+  onSelectLot?: (blockId: string, lot: number) => void;
   view: ViewSettings;
   maxCornerAngle: number;
   ground: Ground;
@@ -527,10 +610,18 @@ export default function SceneContents({
   groundGeometry: THREE.BufferGeometry;
   /** One scene-wide merged backdrop geometry, shared across workspace panes. */
   contextGeometry?: ContextGeometry | null;
+  /** Optional merged editable-lot + BRK cadastral-parcel terrain overlay. */
+  lotOutlineGeometry?: THREE.BufferGeometry | null;
+  /** Selected intervention boundary, shared across every workspace pane. */
+  interventionScope?: InterventionScope | null;
+  /** Transient parcel under the pointer; lighter than the selected scope. */
+  hoveredParcelScope?: InterventionScope | null;
   /** The context building the inspector is open on (M4). */
   selectedContextBuilding?: string | null;
   /** undefined ⇒ not interactive (Select tool off). */
   onSelectContextBuilding?: (id: string) => void;
+  /** Empty-terrain click, used to resolve cadastral parcels in plan or 3D. */
+  onSelectGround?: (point: [number, number]) => void;
 }) {
   // Every paved surface writes its footprint to stencil before displaced
   // terrain renders. This prevents real terrain from poking through flat,
@@ -846,6 +937,16 @@ export default function SceneContents({
         selectedId={selectedContextBuilding}
         onSelect={onSelectContextBuilding}
       />
+      <LotOutlines geometry={lotOutlineGeometry ?? null} />
+      <InterventionScopeOutline
+        scope={hoveredParcelScope ?? null}
+        ground={ground}
+        emphasis="hover"
+      />
+      <InterventionScopeOutline
+        scope={interventionScope ?? null}
+        ground={ground}
+      />
       {/* Ground plane + grid tilt to the slope so buildings sit on it at
        * their datums. polygonOffset keeps the sidewalk/road/grid winning
        * the depth test. */}
@@ -856,6 +957,14 @@ export default function SceneContents({
           geometry={groundGeometry}
           dispose={null}
           renderOrder={masksGround ? -10 : 0}
+          onClick={
+            onSelectGround
+              ? (e) => {
+                  e.stopPropagation();
+                  onSelectGround([e.point.x, e.point.z]);
+                }
+              : undefined
+          }
         >
           <meshStandardMaterial
             color="#a59e95"

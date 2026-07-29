@@ -84,4 +84,27 @@ describe("sceneWindowInstances — lot transform × local composition", () => {
     expect(inst.filter((i) => i.material === "glass").length).toBeGreaterThan(0);
     expect(inst.filter((i) => i.material === "trim").length).toBeGreaterThan(0);
   });
+
+  it("emits no facade windows when the lot is an arch gate", () => {
+    const gateBlock: FacadeBlock = {
+      ...block,
+      lots: [{ ...block.lots[0], kind: "arch-gate" }],
+    };
+    expect(sceneWindowInstances([gateBlock], flat)).toEqual([]);
+  });
+
+  it("leaves circle and ellipse windows to their curved inline renderer", () => {
+    for (const windowStyle of ["circle", "ellipse"] as const) {
+      const curvedBlock: FacadeBlock = {
+        ...block,
+        lots: [
+          {
+            ...block.lots[0],
+            params: { ...DEFAULT_FACADE, windowStyle },
+          },
+        ],
+      };
+      expect(sceneWindowInstances([curvedBlock], flat)).toEqual([]);
+    }
+  });
 });

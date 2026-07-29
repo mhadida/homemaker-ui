@@ -113,6 +113,7 @@ export function sceneWindowInstances(
   for (const block of blocks) {
     const placements = lotPlacements(block);
     block.lots.forEach((lot, i) => {
+      if (lot.kind === "arch-gate") return;
       const { position, rotationY } = placements[i];
       const yaw = rotationY;
       const depth = lot.params.massingDepth ?? MASSING_DEPTH_DEFAULT;
@@ -131,6 +132,7 @@ export function sceneWindowInstances(
       const sin = Math.sin(yaw);
       const layout = computeLayout(lot.params);
       const { windowStyle } = lot.params;
+      if (windowStyle === "circle" || windowStyle === "ellipse") return;
       // Window frames + glazing bars are white or black only (never the pastel
       // trim), chosen by wall lightness.
       const barColor = windowBarColor(lot.params.wallColor);

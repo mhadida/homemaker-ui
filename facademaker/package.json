@@ -12,7 +12,9 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "fixture:amsterdam": "node scripts/capture-fixture.mjs amsterdam",
+    "fixture:utrecht": "node scripts/capture-fixture.mjs utrecht"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

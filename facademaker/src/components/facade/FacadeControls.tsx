@@ -12,10 +12,17 @@ import {
   FACADE_LIMITS,
   DOOR_SWATCHES,
   WINDOW_STYLE_OPTIONS,
+  suggestedBayCount,
 } from "@/lib/facade/types";
 import type { ViewSettings } from "@/lib/building/types";
 import { WALL_SWATCHES, classicalStoreyHeights } from "@/lib/building/types";
-import type { Selection, FacadeBlock, BlockGenSettings } from "@/lib/facade/blocks";
+import type {
+  Selection,
+  FacadeBlock,
+  BlockGenSettings,
+  LotState,
+} from "@/lib/facade/blocks";
+import { DEFAULT_GEN } from "@/lib/facade/blocks";
 import type { Corner, CornerChoice } from "@/lib/facade/corners";
 import {
   clampTurretRadius,
@@ -59,11 +66,14 @@ import {
   GEN_STOREYS_BOUNDS,
   GEN_VARIATION_MAX,
 } from "@/lib/facade/genControls";
+import { autoParcelCountForArea } from "@/lib/geo/parcelSubdivision";
 import BayGrid from "./BayGrid";
 
 interface FacadeControlsProps {
   params: FacadeParams;
   onChange: (p: FacadeParams) => void;
+  lotKind: LotState["kind"];
+  onLotKindChange: (kind: LotState["kind"]) => void;
   view: ViewSettings;
   onViewChange: (v: ViewSettings) => void;
   // block inspector (Task 4)
@@ -121,6 +131,7 @@ function SliderRow({
         </span>
       </div>
       <input
+        aria-label={label}
         type="range"
         min={min}
         max={max}
@@ -159,16 +170,22 @@ function Toggle({
   label,
   on,
   onClick,
+  disabled = false,
+  title,
 }: {
   label: string;
   on: boolean;
   onClick: () => void;
+  disabled?: boolean;
+  title?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`px-2 py-1.5 rounded text-[11px] transition-colors ${
+      disabled={disabled}
+      title={title}
+      className={`px-2 py-1.5 rounded text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
         on
           ? "bg-[var(--accent)] text-white"
           : "bg-[var(--border)] text-zinc-500 hover:text-zinc-300"
@@ -223,6 +240,8 @@ const TREATMENTS: { id: GroundTreatment; label: string }[] = [
 export default function FacadeControls({
   params,
   onChange,
+  lotKind,
+  onLotKindChange,
   view,
   onViewChange,
   selection,
@@ -264,6 +283,13 @@ export default function FacadeControls({
   // to the plain lot view — never "block" — matching the null `corner` prop.
   const effectiveLevel: "lot" | "block" =
     selection.level === "block" ? "block" : "lot";
+  const canUseArchGate =
+    lotKind === "arch-gate" ||
+    (selection.lot > 0 &&
+      selection.lot < block.lots.length - 1 &&
+      block.lots[selection.lot - 1]?.kind !== "arch-gate" &&
+      block.lots[selection.lot + 1]?.kind !== "arch-gate");
+  const autoBays = suggestedBayCount(params.width);
 
   return (
     <div className="space-y-5">
@@ -311,6 +337,40 @@ export default function FacadeControls({
       )}
 
       {!corner && effectiveLevel === "lot" && (
+        <>
+      <Section title="Lot use">
+        <div className="grid grid-cols-2 gap-1">
+          <Toggle
+            label="Facade"
+            on={!lotKind}
+            onClick={() => onLotKindChange(undefined)}
+          />
+          <Toggle
+            label="Arch gate"
+            on={lotKind === "arch-gate"}
+            onClick={() => onLotKindChange("arch-gate")}
+            disabled={!canUseArchGate}
+            title={
+              canUseArchGate
+                ? "Replace this frontage with a masonry entrance"
+                : "Choose an interior lot between two buildings"
+            }
+          />
+        </div>
+        {lotKind === "arch-gate" && (
+          <p className="text-[10px] leading-snug text-[var(--muted)]">
+            Replaces this frontage with a masonry entrance to the lot behind.
+          </p>
+        )}
+        {!canUseArchGate && (
+          <p className="text-[10px] leading-snug text-[var(--muted)]">
+            Choose an interior lot between two buildings. Subdivide a wide
+            frontage first.
+          </p>
+        )}
+      </Section>
+
+      {lotKind !== "arch-gate" && (
         <>
       {/* Presets */}
       <div className="grid grid-cols-3 gap-1">
@@ -367,6 +427,19 @@ export default function FacadeControls({
       </Section>
 
       <Section title="Bays & Openings">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <span className="text-[10px] text-[var(--muted)]">
+            ≈ {(params.width / params.bays).toFixed(1)}m per bay
+          </span>
+          <button
+            type="button"
+            onClick={() => update({ bays: autoBays, preset: undefined })}
+            disabled={params.bays === autoBays}
+            className="rounded border border-[var(--border)] px-2 py-1 text-[10px] text-[var(--muted)] transition-colors hover:border-[var(--foreground)]/30 hover:text-[var(--foreground)] disabled:cursor-default disabled:opacity-40"
+          >
+            Auto rhythm · {autoBays}
+          </button>
+        </div>
         <SliderRow
           label="Bays"
           value={params.bays}
@@ -396,9 +469,9 @@ export default function FacadeControls({
         />
         <div>
           <span className="text-[10px] text-[var(--muted)] block mb-1">
-            Glazing
+            Window style
           </span>
-          <div className="grid grid-cols-4 gap-1">
+          <div className="grid grid-cols-3 gap-1">
             {WINDOW_STYLE_OPTIONS.map((ws) => (
               <Toggle
                 key={ws.id}
@@ -714,6 +787,22 @@ export default function FacadeControls({
         </>
       )}
 
+      {lotKind === "arch-gate" && (
+        <Section title="Gate span">
+          <SliderRow
+            label="Width"
+            value={params.width}
+            display={`${params.width.toFixed(1)}m`}
+            min={L.width.min}
+            max={L.width.max}
+            step={0.5}
+            onChange={(width) => update({ width, preset: undefined })}
+          />
+        </Section>
+      )}
+        </>
+      )}
+
       {/* Street + Topography are world state — always reachable. Topography
        * hides once real terrain is imported (Ground.hf drives the ground
        * instead of these sliders). */}
@@ -932,6 +1021,10 @@ function BlockInspector({
   );
   const gen = block.gen;
   const update = (u: Partial<BlockGenSettings>) => onGenChange({ ...gen, ...u });
+  const windowWidthRatio =
+    gen.windowWidthRatio ?? DEFAULT_GEN.windowWidthRatio;
+  const windowHeightRatio =
+    gen.windowHeightRatio ?? DEFAULT_GEN.windowHeightRatio;
   return (
     <div className="space-y-5">
       <Section title="Generation">
@@ -1011,6 +1104,77 @@ function BlockInspector({
             })
           }
         />
+        <div className="border-t border-[var(--border)] pt-2">
+          <span className="mb-1 block text-[10px] text-[var(--muted)]">
+            Window opening range
+          </span>
+          <div className="space-y-2">
+            <SliderRow
+              label="Width min"
+              value={windowWidthRatio.min}
+              display={`${Math.round(windowWidthRatio.min * 100)}%`}
+              min={FACADE_LIMITS.windowWidthRatio.min}
+              max={FACADE_LIMITS.windowWidthRatio.max}
+              step={0.05}
+              onChange={(min) =>
+                update({
+                  windowWidthRatio: {
+                    min,
+                    max: Math.max(min, windowWidthRatio.max),
+                  },
+                })
+              }
+            />
+            <SliderRow
+              label="Width max"
+              value={windowWidthRatio.max}
+              display={`${Math.round(windowWidthRatio.max * 100)}%`}
+              min={FACADE_LIMITS.windowWidthRatio.min}
+              max={FACADE_LIMITS.windowWidthRatio.max}
+              step={0.05}
+              onChange={(max) =>
+                update({
+                  windowWidthRatio: {
+                    min: Math.min(windowWidthRatio.min, max),
+                    max,
+                  },
+                })
+              }
+            />
+            <SliderRow
+              label="Height min"
+              value={windowHeightRatio.min}
+              display={`${Math.round(windowHeightRatio.min * 100)}%`}
+              min={FACADE_LIMITS.windowHeightRatio.min}
+              max={FACADE_LIMITS.windowHeightRatio.max}
+              step={0.05}
+              onChange={(min) =>
+                update({
+                  windowHeightRatio: {
+                    min,
+                    max: Math.max(min, windowHeightRatio.max),
+                  },
+                })
+              }
+            />
+            <SliderRow
+              label="Height max"
+              value={windowHeightRatio.max}
+              display={`${Math.round(windowHeightRatio.max * 100)}%`}
+              min={FACADE_LIMITS.windowHeightRatio.min}
+              max={FACADE_LIMITS.windowHeightRatio.max}
+              step={0.05}
+              onChange={(max) =>
+                update({
+                  windowHeightRatio: {
+                    min: Math.min(windowHeightRatio.min, max),
+                    max,
+                  },
+                })
+              }
+            />
+          </div>
+        </div>
         <SliderRow
           label="Shopfront share"
           value={gen.shopfrontShare}
@@ -1406,6 +1570,8 @@ export function StreetInspector({
 const MONUMENTS: { id: Monument["kind"]; label: string }[] = [
   { id: "obelisk", label: "Obelisk" },
   { id: "fountain", label: "Fountain" },
+  { id: "statue", label: "Statue" },
+  { id: "triumphal-arch", label: "Triumphal arch" },
 ];
 
 /** The Intersection inspector (Task 8): toggle a roundabout on/off at a
@@ -1438,7 +1604,7 @@ export function SquareInspector({
       </div>
 
       <Section title="Monument">
-        <div className="grid grid-cols-3 gap-1">
+        <div className="grid grid-cols-2 gap-1">
           <Toggle
             label="None"
             on={!monument}
@@ -1501,6 +1667,197 @@ export function IntersectionInspector({
   );
 }
 
+/** View-only planning boundary, kept separate from editable-object selection. */
+export function InterventionScopePanel({
+  kind,
+  area,
+  lotCount,
+  mergeCount,
+  canSplit,
+  canMerge,
+  splitActive,
+  splitError,
+  onSplit,
+  onAutoSplit,
+  onMerge,
+  onCancelSplit,
+  onClear,
+}: {
+  kind: "parcel" | "rectangle";
+  area: number;
+  lotCount: number;
+  mergeCount: number;
+  canSplit: boolean;
+  canMerge: boolean;
+  splitActive: boolean;
+  splitError: string | null;
+  onSplit: () => void;
+  onAutoSplit: (count: number) => void;
+  onMerge: () => void;
+  onCancelSplit: () => void;
+  onClear: () => void;
+}) {
+  const [autoMode, setAutoMode] = useState<"count" | "area">("count");
+  const [autoCount, setAutoCount] = useState(2);
+  const [targetArea, setTargetArea] = useState(() =>
+    Math.max(4, Math.round(area / 2)),
+  );
+  useEffect(() => {
+    setTargetArea(Math.max(4, Math.round(area / 2)));
+  }, [area]);
+  const resolvedAutoCount =
+    autoMode === "count"
+      ? Math.max(1, Math.min(50, Math.floor(autoCount)))
+      : autoParcelCountForArea(area, targetArea);
+  const areaLabel =
+    area >= 10_000
+      ? `${(area / 10_000).toFixed(2)} ha`
+      : `${Math.round(area).toLocaleString()} m²`;
+  return (
+    <Section title="Intervention scope">
+      <div className="rounded-md border border-[#0f9f9a]/50 bg-[#0f9f9a]/10 p-2.5">
+        <p className="text-[11px] font-medium text-[var(--foreground)]">
+          {kind === "parcel" ? "Property parcel" : "Drawn area"}
+        </p>
+        <p className="mt-1 text-[11px] font-mono text-[var(--muted)]">
+          {areaLabel} · {lotCount.toLocaleString()}{" "}
+          {lotCount === 1 ? "parcel" : "parcels"}
+        </p>
+      </div>
+      <p className="text-[10px] leading-relaxed text-[var(--muted)]">
+        This boundary defines the study area without changing or selecting the
+        buildings inside it.
+      </p>
+      {mergeCount > 1 && (
+        <div className="space-y-1.5 rounded border border-[var(--border)] p-2.5">
+          <p className="text-[10px] font-medium text-[var(--foreground)]">
+            Combine parcels
+          </p>
+          <button
+            type="button"
+            disabled={!canMerge}
+            onClick={onMerge}
+            className="w-full rounded bg-[var(--accent)] px-2.5 py-1.5 text-[11px] font-medium text-white transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Merge {mergeCount.toLocaleString()} parcels
+          </button>
+          <p className="text-[10px] leading-relaxed text-[var(--muted)]">
+            Selected parcels must share boundaries and form one connected
+            property.
+          </p>
+        </div>
+      )}
+      {kind === "parcel" && lotCount === 1 && (
+        <>
+          <button
+            type="button"
+            disabled={!canSplit}
+            onClick={splitActive ? onCancelSplit : onSplit}
+            className={`w-full rounded px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
+              splitActive
+                ? "border border-[#f59e0b]/60 bg-[#f59e0b]/10 text-[#f59e0b]"
+                : "bg-[var(--accent)] text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+            }`}
+          >
+            {splitActive ? "Cancel parcel cut" : "✂ Split parcel"}
+          </button>
+          <p className="text-[10px] leading-relaxed text-[var(--muted)]">
+            Draw one cut between two property edges. Endpoints snap to the
+            boundary; invalid cuts and sliver parcels are rejected.
+          </p>
+          <div className="space-y-2 rounded border border-[var(--border)] p-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] font-medium text-[var(--foreground)]">
+                Automatic subdivision
+              </p>
+              <div
+                role="group"
+                aria-label="Automatic parcel split method"
+                className="flex rounded border border-[var(--border)] p-0.5"
+              >
+                {(["count", "area"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    aria-pressed={autoMode === mode}
+                    onClick={() => setAutoMode(mode)}
+                    className={`rounded px-2 py-0.5 text-[10px] transition-colors ${
+                      autoMode === mode
+                        ? "bg-[var(--foreground)] text-[var(--background)]"
+                        : "text-[var(--muted)] hover:text-[var(--foreground)]"
+                    }`}
+                  >
+                    {mode === "count" ? "By count" : "By area"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {autoMode === "count" ? (
+              <label className="flex items-center justify-between gap-3 text-[10px] text-[var(--muted)]">
+                Number of parcels
+                <input
+                  aria-label="Number of parcels"
+                  type="number"
+                  min={2}
+                  max={50}
+                  step={1}
+                  value={autoCount}
+                  onChange={(event) => setAutoCount(Number(event.target.value))}
+                  className="w-20 rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-right font-mono text-[11px] text-[var(--foreground)]"
+                />
+              </label>
+            ) : (
+              <label className="flex items-center justify-between gap-3 text-[10px] text-[var(--muted)]">
+                Target area
+                <span className="flex items-center gap-1">
+                  <input
+                    aria-label="Target parcel area"
+                    type="number"
+                    min={4}
+                    step={1}
+                    value={targetArea}
+                    onChange={(event) =>
+                      setTargetArea(Number(event.target.value))
+                    }
+                    className="w-20 rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-right font-mono text-[11px] text-[var(--foreground)]"
+                  />
+                  m²
+                </span>
+              </label>
+            )}
+            <button
+              type="button"
+              disabled={!canSplit || resolvedAutoCount < 2}
+              onClick={() => onAutoSplit(resolvedAutoCount)}
+              className="w-full rounded bg-[var(--accent)] px-2.5 py-1.5 text-[11px] font-medium text-white transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Split into {resolvedAutoCount.toLocaleString()} parcels
+            </button>
+            <p className="text-[10px] leading-relaxed text-[var(--muted)]">
+              Generates approximately equal areas using clean straight cuts.
+              Complex parcels may require the manual tool.
+            </p>
+          </div>
+        </>
+      )}
+      {splitError && (
+        <p role="alert" className="text-[10px] leading-relaxed text-red-400">
+          {splitError}
+        </p>
+      )}
+      <div>
+        <button
+          type="button"
+          onClick={onClear}
+          className="text-[11px] rounded border border-[var(--border)] px-2 py-0.5 text-[var(--muted)] transition-colors hover:border-[var(--foreground)]/30 hover:text-[var(--foreground)]"
+        >
+          Clear scope
+        </button>
+      </div>
+    </Section>
+  );
+}
+
 /**
  * M2 context buildings — visibility toggle, count, truncation notice, fetch
  * error, and Restore hidden. Rendered by the page OUTSIDE the block/street/
@@ -1528,6 +1885,10 @@ export function ContextPanel({
   streetsTruncated,
   streetsTotal,
   streetsError,
+  parcelCount,
+  parcelsLoading,
+  parcelsTruncated,
+  parcelsError,
 }: {
   contextLoaded?: boolean;
   contextCount?: number;
@@ -1544,6 +1905,10 @@ export function ContextPanel({
   streetsTruncated?: boolean;
   streetsTotal?: number;
   streetsError?: string | null;
+  parcelCount?: number;
+  parcelsLoading?: boolean;
+  parcelsTruncated?: boolean;
+  parcelsError?: string | null;
 }) {
   if (!contextLoaded) return null;
   return (
@@ -1576,6 +1941,39 @@ export function ContextPanel({
       {contextError && (
         <p className="text-[11px] text-red-400" role="alert">
           Buildings unavailable: {contextError}
+        </p>
+      )}
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] text-[var(--muted)]">
+          {parcelsLoading
+            ? "Loading parcels…"
+            : `${(parcelCount ?? 0).toLocaleString()} cadastral parcels`}
+        </span>
+      </div>
+      {parcelsTruncated && (
+        <p className="text-[11px] text-[var(--muted)]">
+          Parcel results were capped — zoom into a smaller area for complete
+          boundaries.
+        </p>
+      )}
+      {parcelsError && (
+        <p className="text-[11px] text-red-400" role="alert">
+          Parcels unavailable: {parcelsError}
+        </p>
+      )}
+      {!parcelsLoading && !parcelsError && (parcelCount ?? 0) > 0 && (
+        <p className="text-[10px] leading-relaxed text-[var(--muted)]">
+          BRK Kadastrale Kaart via{" "}
+          <a
+            href="https://api.pdok.nl/kadaster/brk-kadastrale-kaart/ogc/v1?f=html"
+            target="_blank"
+            rel="noreferrer"
+            className="underline underline-offset-2 hover:text-[var(--foreground)]"
+          >
+            PDOK / Kadaster
+          </a>
+          {" · "}
+          CC BY 4.0 · indicative geometry, not survey measurements
         </p>
       )}
       {(hiddenCount ?? 0) > 0 && (
@@ -1623,6 +2021,7 @@ export function ContextPanel({
  */
 export function ContextBuildingPanel({
   id,
+  parcelId,
   area,
   vertices,
   preview,
@@ -1631,8 +2030,9 @@ export function ContextBuildingPanel({
   onClose,
 }: {
   id: string;
-  area: number;
-  vertices: number;
+  parcelId: string | null;
+  area: number | null;
+  vertices: number | null;
   /** null when the parcel cannot carry a facade. */
   preview: { width: number; depth: number } | null;
   onPromote: () => void;
@@ -1642,9 +2042,22 @@ export function ContextBuildingPanel({
   return (
     <Section title="Context building">
       <p className="text-[11px] text-[var(--muted)]">{id}</p>
-      <p className="text-[11px] text-[var(--muted)]">
-        {Math.round(area).toLocaleString()} m² · {vertices} vertices
-      </p>
+      {parcelId && area !== null && vertices !== null ? (
+        <>
+          <p className="break-all text-[10px] text-[var(--muted)]">
+            Parent parcel {parcelId}
+          </p>
+          <p className="text-[11px] text-[var(--muted)]">
+            {Math.round(area).toLocaleString()} m² lot · {vertices} boundary
+            vertices
+          </p>
+        </>
+      ) : (
+        <p className="text-[11px] text-red-400" role="alert">
+          No containing cadastral parcel was found. This building cannot be
+          promoted to a lot.
+        </p>
+      )}
       {preview ? (
         <p className="text-[11px] text-[var(--muted)]">
           Promotes to a {preview.width.toFixed(1)} m frontage,{" "}
@@ -1652,7 +2065,9 @@ export function ContextBuildingPanel({
         </p>
       ) : (
         <p className="text-[11px] text-[var(--muted)]">
-          This footprint is too small to carry a facade.
+          {parcelId
+            ? "This parcel is too small to carry a facade."
+            : "Promotion requires a parent parcel."}
         </p>
       )}
       <div className="flex items-center gap-2 flex-wrap">

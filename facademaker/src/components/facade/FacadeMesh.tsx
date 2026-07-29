@@ -231,7 +231,18 @@ function buildStripGeometry(
   for (const o of layout.openings) {
     if (!inStrip(o.bay, strip)) continue;
     const hole = new THREE.Path();
-    if (o.arched) {
+    if (o.elliptical) {
+      hole.absellipse(
+        o.x + o.w / 2,
+        o.y + o.h / 2,
+        o.w / 2,
+        o.h / 2,
+        0,
+        Math.PI * 2,
+        true,
+        0,
+      );
+    } else if (o.arched) {
       // Semicircular head (radius w/2 at springline y + h − w/2): up the
       // jambs, then an arc right → top → left across the crown.
       const r = o.w / 2;
@@ -280,6 +291,112 @@ function Glass({ w, h }: { w: number; h: number }) {
 
 function Trim({ color }: { color: string }) {
   return <meshStandardMaterial color={color} roughness={0.6} />;
+}
+
+/** Centred ellipse/circle with an optional inset hole and shallow extrusion.
+ * The independent x/y radii keep the frame thickness visually consistent on
+ * both circular and oval openings. */
+function buildEllipseGeometry(
+  w: number,
+  h: number,
+  inset = 0,
+  depth = 0,
+): THREE.BufferGeometry {
+  const shape = new THREE.Shape();
+  shape.absellipse(0, 0, w / 2, h / 2, 0, Math.PI * 2, false, 0);
+  if (inset > 0) {
+    const hole = new THREE.Path();
+    hole.absellipse(
+      0,
+      0,
+      Math.max(0.01, w / 2 - inset),
+      Math.max(0.01, h / 2 - inset),
+      0,
+      Math.PI * 2,
+      true,
+      0,
+    );
+    shape.holes.push(hole);
+  }
+  if (depth <= 0) return new THREE.ShapeGeometry(shape, 40);
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth,
+    bevelEnabled: false,
+    curveSegments: 40,
+  });
+  geometry.translate(0, 0, -depth / 2);
+  return geometry;
+}
+
+function EllipticalWindowFill({
+  o,
+  barColor,
+}: {
+  o: OpeningRect;
+  barColor: string;
+}) {
+  const glassGeometry = useMemo(
+    () => buildEllipseGeometry(o.w, o.h),
+    [o.w, o.h],
+  );
+  const frameGeometry = useMemo(
+    () => buildEllipseGeometry(o.w, o.h, FRAME_T, FRAME_D),
+    [o.w, o.h],
+  );
+  useEffect(
+    () => () => {
+      glassGeometry.dispose();
+      frameGeometry.dispose();
+    },
+    [glassGeometry, frameGeometry],
+  );
+  return (
+    <group
+      position={[
+        o.x + o.w / 2,
+        o.y + o.h / 2,
+        -GLASS_RECESS,
+      ]}
+    >
+      <mesh geometry={glassGeometry} position={[0, 0, -0.02]}>
+        <meshStandardMaterial
+          color="#8fa9bd"
+          roughness={0.08}
+          metalness={0.6}
+          envMapIntensity={3.0}
+          transparent
+          opacity={0.9}
+          depthWrite={false}
+        />
+      </mesh>
+      <mesh geometry={frameGeometry} castShadow>
+        <Trim color={barColor} />
+      </mesh>
+    </group>
+  );
+}
+
+function EllipticalSurround({
+  o,
+  color,
+}: {
+  o: OpeningRect;
+  color: string;
+}) {
+  const geometry = useMemo(
+    () => buildEllipseGeometry(o.w + 0.28, o.h + 0.28, 0.14, 0.1),
+    [o.w, o.h],
+  );
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  return (
+    <mesh
+      geometry={geometry}
+      position={[o.x + o.w / 2, o.y + o.h / 2, 0]}
+      castShadow
+    >
+      <Trim color={color} />
+    </mesh>
+  );
 }
 
 /** Internal glazing bars for a w×h pane, centered on the group origin.
@@ -348,6 +465,9 @@ function WindowFill({
   barColor: string;
   windowStyle: WindowStyleId;
 }) {
+  if (o.elliptical) {
+    return <EllipticalWindowFill o={o} barColor={barColor} />;
+  }
   const cx = o.x + o.w / 2;
   const cy = o.y + o.h / 2;
   return (
@@ -794,7 +914,7 @@ export default function FacadeMesh({
                     // (buildStripGeometry), sills and surrounds stay here.
                     // Skin facades are NOT in the instancer (it only walks
                     // front placements), so they always fill inline.
-                    return USE_INSTANCING && !skin ? null : (
+                    return USE_INSTANCING && !skin && !o.elliptical ? null : (
                       <WindowFill
                         key={key}
                         o={o}
@@ -846,6 +966,9 @@ export default function FacadeMesh({
             {layout.surrounds
               .filter((o) => inStrip(o.bay, strip))
               .map((o, i) => (
+                o.elliptical ? (
+                  <EllipticalSurround key={i} o={o} color={params.trimColor} />
+                ) : (
                 <group key={i}>
                   <mesh position={[o.x + o.w / 2, o.y + o.h + 0.07, 0]} castShadow>
                     <boxGeometry args={[o.w + 0.28, 0.14, 0.1]} />
@@ -860,6 +983,7 @@ export default function FacadeMesh({
                     <Trim color={params.trimColor} />
                   </mesh>
                 </group>
+                )
               ))}
 
             <CorniceSegment

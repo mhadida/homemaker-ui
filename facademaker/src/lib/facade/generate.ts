@@ -1,8 +1,13 @@
 import type { FacadeParams, WindowStyleId } from "./types";
-import { DEFAULT_FACADE, FACADE_PRESETS, DOOR_SWATCHES } from "./types";
+import {
+  DEFAULT_FACADE,
+  FACADE_PRESETS,
+  FACADE_LIMITS,
+  DOOR_SWATCHES,
+} from "./types";
 import { WALL_SWATCHES, classicalStoreyHeights } from "@/lib/building/types";
 import type { BlockGenSettings, FacadeBlock, LotState } from "./blocks";
-import { applyParcelDepth, blockFrame } from "./blocks";
+import { applyParcelDepth, blockFrame, DEFAULT_GEN } from "./blocks";
 
 /** Deterministic PRNG (mulberry32) — same seed, same street. */
 export function mulberry32(seed: number): () => number {
@@ -69,7 +74,15 @@ export function generateLot(
     2.4,
     4.0,
   ).toFixed(2);
-  const bays = clampRange(Math.round(width / randIn(rand, 2.2, 3.0)), 1, 6);
+  const bays = clampRange(
+    Math.round(width / randIn(rand, 2.2, 3.0)),
+    FACADE_LIMITS.bays.min,
+    FACADE_LIMITS.bays.max,
+  );
+  const widthRange =
+    gen.windowWidthRatio ?? DEFAULT_GEN.windowWidthRatio;
+  const heightRange =
+    gen.windowHeightRatio ?? DEFAULT_GEN.windowHeightRatio;
   // The shopfrontShare roll is the SOLE authority over retail: a false roll
   // must never yield a shopfront, even when the picked preset's base
   // treatment is "shopfront" (victorian-shopfront) — fall back to
@@ -87,16 +100,16 @@ export function generateLot(
     storeyHeight,
     storeyHeights: classicalStoreyHeights(storeys, storeyHeight),
     bays,
-    windowWidthRatio: clampRange(
-      base.windowWidthRatio + jitter(rand, 0.1 * v),
-      0.2,
-      0.8,
-    ),
-    windowHeightRatio: clampRange(
-      base.windowHeightRatio + jitter(rand, 0.1 * v),
-      0.3,
-      0.8,
-    ),
+    windowWidthRatio: +randIn(
+      rand,
+      Math.max(0.2, Math.min(widthRange.min, widthRange.max)),
+      Math.min(0.8, Math.max(widthRange.min, widthRange.max)),
+    ).toFixed(3),
+    windowHeightRatio: +randIn(
+      rand,
+      Math.max(0.3, Math.min(heightRange.min, heightRange.max)),
+      Math.min(0.8, Math.max(heightRange.min, heightRange.max)),
+    ).toFixed(3),
     groundFloor: {
       treatment,
       doorBay: randInt(rand, 0, bays - 1),

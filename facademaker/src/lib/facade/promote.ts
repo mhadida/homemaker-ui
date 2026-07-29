@@ -1,6 +1,7 @@
-/** Promotion (M4): turn an imported real footprint into an ordinary editable
- * FacadeBlock. Reality contributes the PLOT — frontage line, facing, width and
- * depth; the generator contributes storeys, style, roof and colour.
+/** Promotion (M4): turn the cadastral parcel containing an imported building
+ * into an ordinary editable FacadeBlock. Reality contributes the PLOT —
+ * frontage line, facing, width and depth; the generator contributes storeys,
+ * style, roof and colour.
  *
  * The rectangular-box facade engine is untouched: the real polygon rides along
  * on `block.parcel` and is drawn on the ground as the lot boundary, with the
@@ -10,7 +11,6 @@
  *
  * Spec: docs/superpowers/specs/2026-07-26-promote-footprint-design.md */
 
-import type { ContextBuilding } from "@/lib/geo/buildings";
 import type { Vec2 } from "@/lib/geo/parcel";
 import { fitFrontage } from "@/lib/geo/parcel";
 import type { StreetNetwork } from "@/lib/street/types";
@@ -24,6 +24,13 @@ import { MASSING_DEPTH_MAX, MASSING_DEPTH_MIN } from "./layout";
 const clampDepth = (d: number): number =>
   Math.max(MASSING_DEPTH_MIN, Math.min(MASSING_DEPTH_MAX, d));
 
+export interface PromotableParcel {
+  id: string;
+  outline: Vec2[];
+  /** Existing OSM building replaced by the editable result. */
+  contextBuildingId?: string;
+}
+
 /** The plot geometry a promotion would use: frontage width and clamped depth,
  * or null when the parcel cannot carry a facade.
  *
@@ -32,10 +39,10 @@ const clampDepth = (d: number): number =>
  * `promoteParcel` builds on it, so the panel and the result cannot diverge and
  * the depth clamp still lives in one place. */
 export function parcelPreview(
-  building: ContextBuilding,
+  parcel: PromotableParcel,
   network: StreetNetwork | null,
 ): { line: { a: [number, number]; b: [number, number] }; flipped: boolean; width: number; depth: number } | null {
-  const fit = fitFrontage(building.footprint as Vec2[], network);
+  const fit = fitFrontage(parcel.outline, network);
   if (!fit) return null;
   const line = {
     a: [fit.line.a[0], fit.line.a[1]] as [number, number],
@@ -57,12 +64,12 @@ export function parcelPreview(
  * NOT pure — it allocates a block id, so it must not be called during render.
  * Use `parcelPreview` to show what promotion would produce. */
 export function promoteParcel(
-  building: ContextBuilding,
+  parcel: PromotableParcel,
   network: StreetNetwork | null,
   gen: BlockGenSettings,
   seed: number,
 ): FacadeBlock | null {
-  const fit = parcelPreview(building, network);
+  const fit = parcelPreview(parcel, network);
   if (!fit) return null;
   const { line, width, depth } = fit;
 
@@ -89,11 +96,14 @@ export function promoteParcel(
       },
     ],
     parcel: {
-      source: building.id,
-      // Copied, not aliased: the fetched footprint array is shared with the
-      // context-buildings backdrop and must not become block state.
-      outline: building.footprint.map((p) => [p[0], p[1]] as [number, number]),
+      source: parcel.id,
+      // Copied, not aliased: the fetched BRK array is shared with the parcel
+      // overlay and must not become mutable block state.
+      outline: parcel.outline.map((p) => [p[0], p[1]] as [number, number]),
       depth,
+      ...(parcel.contextBuildingId
+        ? { contextBuildingId: parcel.contextBuildingId }
+        : {}),
     },
   };
 }

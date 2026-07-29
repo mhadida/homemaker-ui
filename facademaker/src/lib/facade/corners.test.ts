@@ -46,6 +46,13 @@ describe("detectCorners", () => {
     expect(c.key).toBe("A:b|B:a");
   });
 
+  it("does not merge a gate frontage into a building corner", () => {
+    const A = mkBlock("A", [0, 0], [10, 0], [5, 5]);
+    const B = mkBlock("B", [10, 0], [10, 10], [5, 5]);
+    A.lots[1].kind = "arch-gate";
+    expect(detectCorners([A, B], 150)).toEqual([]);
+  });
+
   it("respects the max turn threshold (boundary inclusive)", () => {
     const A = mkBlock("A", [0, 0], [10, 0], [10]);
     const B = mkBlock("B", [10, 0], [10, 10], [10]);

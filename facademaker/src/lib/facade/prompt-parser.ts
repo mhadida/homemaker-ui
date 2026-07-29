@@ -103,6 +103,10 @@ export function parseFacadePromptLocal(prompt: string): FacadePromptUpdates {
     updates.windowStyle = "georgian";
   } else if (/\bsash\b/.test(lower)) {
     updates.windowStyle = "sash";
+  } else if (/\belliptical windows?\b|\boval windows?\b/.test(lower)) {
+    updates.windowStyle = "ellipse";
+  } else if (/\bcircular windows?\b|\bcircle windows?\b|\bround windows?\b/.test(lower)) {
+    updates.windowStyle = "circle";
   } else if (/\bsingle pane\b|\bplain glass\b|\bplain windows?\b/.test(lower)) {
     updates.windowStyle = "none";
   }

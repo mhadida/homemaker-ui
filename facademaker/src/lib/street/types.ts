@@ -38,7 +38,7 @@ export interface Street {
 }
 
 export interface Monument {
-  kind: "obelisk" | "fountain";
+  kind: "obelisk" | "fountain" | "statue" | "triumphal-arch";
 }
 
 /** Roundabout ring outer radius (m). Single source of truth — used by the

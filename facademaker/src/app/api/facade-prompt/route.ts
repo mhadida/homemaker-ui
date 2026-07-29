@@ -30,16 +30,23 @@ const DOOR_COLOR_IDS = [
 const FacadeSpec = z.object({
   storeys: z.number().int().min(1).max(6),
   width: z.number().min(4).max(20),
-  bays: z.number().int().min(1).max(9),
+  bays: z.number().int().min(1).max(64),
   treatment: z.enum(["residential", "shopfront", "garage", "passage"]),
-  doorBay: z.number().int().min(1).max(9), // 1 = leftmost bay (1-based for the model)
+  doorBay: z.number().int().min(1).max(64), // 1 = leftmost bay (1-based for the model)
   stoop: z.boolean(),
   cornice: z.boolean(),
   parapet: z.boolean(),
   sills: z.boolean(),
   surrounds: z.boolean(),
   windowSize: z.enum(["small", "medium", "large"]),
-  windowStyle: z.enum(["georgian", "sash", "victorian", "none"]),
+  windowStyle: z.enum([
+    "georgian",
+    "sash",
+    "victorian",
+    "none",
+    "circle",
+    "ellipse",
+  ]),
   // Sections: vertical strips of whole bays with small forward/back relief.
   sections: z.number().int().min(1).max(9),
   sectionPattern: z.enum([
@@ -115,7 +122,7 @@ function SYSTEM_PROMPT(current: Partial<FacadeSpec> | undefined): string {
     "- stoop: entry steps in front of the door (residential only).",
     "- windowSize small/medium/large controls window proportions within each bay.",
     "- doorBay is 1-based from the left and must not exceed bays.",
-    '- windowStyle: internal glazing bars — georgian (small-pane grid), sash (2-over-2), victorian (1-over-1), none (plain glass). Echo current unless the user mentions panes/glazing.',
+    '- windowStyle: window shape/glazing — georgian (small-pane grid), sash (2-over-2), victorian (1-over-1), none (plain rectangular glass), circle (round opening), ellipse (oval opening). Echo current unless the user mentions window shape, panes, or glazing.',
     '- sections: the facade divides into that many vertical strips of whole bays; sectionPattern names their relief — recessed-center / projected-center (center strip steps back/forward), alternating, flush (no relief), custom (user-sculpted). Echo the current values unless the user asks about sections, relief, or a projecting/recessed part.',
     "- preset: georgian (classical terrace), victorian-shopfront (retail ground floor), modern (minimal). Set it when the user names a style; otherwise echo the current value.",
   ].join("\n");

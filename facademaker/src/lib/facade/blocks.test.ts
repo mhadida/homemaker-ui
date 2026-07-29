@@ -8,6 +8,8 @@ import {
   snapPoint,
   DEFAULT_GEN,
   applyParcelDepth,
+  isArchGateLot,
+  normalizeArchGateLots,
   type FacadeBlock,
 } from "./blocks";
 import { DEFAULT_FACADE } from "./types";
@@ -26,6 +28,28 @@ const block = (over: Partial<FacadeBlock>): FacadeBlock => ({
   seed: 1,
   lots: [lot(10)],
   ...over,
+});
+
+describe("arch-gate lot use", () => {
+  it("accepts only an interior slot with a building on both sides", () => {
+    const terrace = block({
+      lots: [lot(6), { ...lot(6), kind: "arch-gate" }, lot(6)],
+    });
+    expect(isArchGateLot(terrace, 1)).toBe(true);
+
+    const endGate = block({
+      lots: [{ ...lot(6), kind: "arch-gate" }, lot(6), lot(6)],
+    });
+    expect(isArchGateLot(endGate, 0)).toBe(false);
+  });
+
+  it("drops a gate use when deletion leaves it without two neighbors", () => {
+    const invalid = block({
+      lots: [{ ...lot(6), kind: "arch-gate" }, lot(6)],
+    });
+    const [normalized] = normalizeArchGateLots([invalid]);
+    expect(normalized.lots[0].kind).toBeUndefined();
+  });
 });
 
 describe("blockFrame", () => {

@@ -44,8 +44,11 @@ import {
   visibleBuildings,
   type ContextBuilding,
 } from "@/lib/geo/buildings";
+import type { CadastralParcel } from "@/lib/geo/cadastralParcels";
+import { nearestParcelBoundaryPoint } from "@/lib/geo/parcelSubdivision";
+import { buildLotOutlineGeometry } from "@/lib/facade/lotOutlines";
 import type { Ground } from "@/lib/facade/terrain";
-import { groundHeightAt } from "@/lib/facade/terrain";
+import { groundHeightAt, groundNormal } from "@/lib/facade/terrain";
 import {
   deriveSceneBounds,
   perspectiveFitFor,
@@ -67,6 +70,10 @@ import {
   WALK_CATCHER_Y,
 } from "@/lib/facade/clip";
 import { marqueeEmpty, type Marquee } from "@/lib/facade/marquee";
+import {
+  scopeFromPoint,
+  type InterventionScope,
+} from "@/lib/facade/interventionScope";
 import {
   streetLines,
   streetAwareFlipped,
@@ -107,6 +114,16 @@ interface FacadeViewerProps {
    * header-bar segmented control can drive it. full = detailed facades;
    * massing = plain volume boxes; outline = wireframe; off = hidden. */
   display: BuildingDisplay;
+  /** Show terrain-draped editable lot and cadastral parcel outlines. */
+  showLotOutlines: boolean;
+  interventionScope: InterventionScope | null;
+  onScopePoint: (point: Vec2) => void;
+  onScopeRect: (a: Vec2, b: Vec2) => void;
+  onScopeClear: () => void;
+  parcelSplitActive: boolean;
+  parcelSplitOutline: Vec2[] | null;
+  onParcelSplit: (a: Vec2, b: Vec2) => void;
+  onParcelSplitCancel: () => void;
   view?: ViewSettings;
   onDrawModeChange?: (drawMode: boolean) => void;
   corners: Corner[];
@@ -144,6 +161,7 @@ interface FacadeViewerProps {
   onClearSelection: () => void;
   /** Real footprints loaded as backdrop context (M2). Empty = nothing renders. */
   contextBuildings: ContextBuilding[];
+  cadastralParcels: CadastralParcel[];
   hiddenIds: ReadonlySet<string>;
   contextVisible: boolean;
   /** The context building the inspector is open on (M4). */
@@ -154,6 +172,41 @@ interface FacadeViewerProps {
 }
 
 type PaneId = "plan" | "perspective" | "overview" | "detail";
+type SelectFilterKey = "buildings" | "roads" | "parcels";
+
+function sameScope(
+  a: InterventionScope | null,
+  b: InterventionScope | null,
+): boolean {
+  if (!a || !b) return a === b;
+  return (
+    a.kind === b.kind &&
+    a.lotIds.length === b.lotIds.length &&
+    a.lotIds.every((id, index) => id === b.lotIds[index])
+  );
+}
+
+const SELECT_FILTER_OPTIONS: {
+  key: SelectFilterKey;
+  label: string;
+  title: string;
+}[] = [
+  {
+    key: "buildings",
+    label: "Buildings",
+    title: "Editable buildings, gates, corners, and imported buildings",
+  },
+  {
+    key: "roads",
+    label: "Roads",
+    title: "Roads, canals, intersections, and squares",
+  },
+  {
+    key: "parcels",
+    label: "Parcels",
+    title: "Property boundaries and editable lots",
+  },
+];
 
 const PANES: { id: PaneId; label: string; index: number }[] = [
   { id: "plan", label: "Plan", index: 1 },
@@ -970,6 +1023,296 @@ function MarqueeSurface({
   );
 }
 
+// ── Intervention scope surface ───────────────────────────────────────────────
+
+const SCOPE_COLOR = "#0f9f9a";
+const SCOPE_CLICK_EPS = 0.4;
+
+/** Click selects the parcel under the pointer; click-drag defines a rectangular
+ * intervention boundary. Plan-pane only, mutually exclusive with every other
+ * left-button tool. */
+function ScopeSurface({
+  active,
+  onPoint,
+  onRect,
+  onExit,
+}: {
+  active: boolean;
+  onPoint: (point: Vec2) => void;
+  onRect: (a: Vec2, b: Vec2) => void;
+  onExit: () => void;
+}) {
+  const [rect, setRect] = useState<{ a: Vec2; b: Vec2 } | null>(null);
+  const anchorRef = useRef<Vec2 | null>(null);
+  const lastRef = useRef<Vec2 | null>(null);
+
+  const reset = useCallback(() => {
+    anchorRef.current = null;
+    lastRef.current = null;
+    setRect(null);
+  }, []);
+
+  const finalize = useCallback(() => {
+    const a = anchorRef.current;
+    const b = lastRef.current ?? a;
+    reset();
+    if (!active || !a || !b) return;
+    if (Math.hypot(b[0] - a[0], b[1] - a[1]) < SCOPE_CLICK_EPS)
+      onPoint(a);
+    else onRect(a, b);
+  }, [active, onPoint, onRect, reset]);
+
+  const finalizeRef = useRef(finalize);
+  useEffect(() => {
+    finalizeRef.current = finalize;
+  });
+
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      reset();
+      onExit();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, onExit, reset]);
+
+  if (!active) return null;
+
+  const box = rect
+    ? {
+        x0: Math.min(rect.a[0], rect.b[0]),
+        x1: Math.max(rect.a[0], rect.b[0]),
+        z0: Math.min(rect.a[1], rect.b[1]),
+        z1: Math.max(rect.a[1], rect.b[1]),
+      }
+    : null;
+
+  return (
+    <>
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, 0.03, 0]}
+        onPointerDown={(event) => {
+          event.stopPropagation();
+          const point: Vec2 = [event.point.x, event.point.z];
+          anchorRef.current = point;
+          lastRef.current = point;
+          setRect({ a: point, b: point });
+          window.addEventListener(
+            "pointerup",
+            () => finalizeRef.current(),
+            { once: true },
+          );
+        }}
+        onPointerMove={(event) => {
+          if (!anchorRef.current) return;
+          const point: Vec2 = [event.point.x, event.point.z];
+          lastRef.current = point;
+          setRect({ a: anchorRef.current, b: point });
+        }}
+        onPointerUp={() => finalizeRef.current()}
+      >
+        <planeGeometry args={[600, 600]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+      {box && (
+        <>
+          <Line
+            points={[
+              [box.x0, 0.1, box.z0],
+              [box.x1, 0.1, box.z0],
+              [box.x1, 0.1, box.z1],
+              [box.x0, 0.1, box.z1],
+              [box.x0, 0.1, box.z0],
+            ]}
+            color={SCOPE_COLOR}
+            lineWidth={2}
+            depthTest={false}
+            depthWrite={false}
+            renderOrder={GUIDE_RENDER_ORDER}
+          />
+          <mesh
+            position={[
+              (box.x0 + box.x1) / 2,
+              0.05,
+              (box.z0 + box.z1) / 2,
+            ]}
+            rotation={[-Math.PI / 2, 0, 0]}
+            renderOrder={GUIDE_RENDER_ORDER}
+          >
+            <planeGeometry
+              args={[
+                Math.max(box.x1 - box.x0, 0.01),
+                Math.max(box.z1 - box.z0, 0.01),
+              ]}
+            />
+            <meshBasicMaterial
+              color={SCOPE_COLOR}
+              transparent
+              opacity={0.14}
+              depthTest={false}
+              depthWrite={false}
+            />
+          </mesh>
+        </>
+      )}
+    </>
+  );
+}
+
+/** Invisible terrain-shaped catcher for parcel hover. It stays behind
+ * buildings and streets in ray order, so their hover handlers retain priority
+ * while empty terrain still yields a deterministic world-space point. */
+function ParcelHoverSurface({
+  ground,
+  geometry,
+  onHover,
+}: {
+  ground: Ground;
+  geometry: THREE.BufferGeometry;
+  onHover?: (point: Vec2 | null) => void;
+}) {
+  const quaternion = useMemo(() => {
+    const q = new THREE.Quaternion();
+    if (ground.hf) return q;
+    q.setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(...groundNormal(ground)),
+    );
+    return q;
+  }, [ground]);
+  if (!onHover) return null;
+  return (
+    <group quaternion={quaternion}>
+      <mesh
+        rotation={ground.hf ? [0, 0, 0] : [-Math.PI / 2, 0, 0]}
+        geometry={geometry}
+        dispose={null}
+        onPointerMove={(event) =>
+          onHover([event.point.x, event.point.z])
+        }
+        onPointerOut={() => onHover(null)}
+      >
+        <meshBasicMaterial
+          transparent
+          opacity={0}
+          colorWrite={false}
+          depthWrite={false}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+/** Two-click cadastral cut. Pointer positions are projected onto the selected
+ * parcel boundary before preview and commit, so the resulting line always
+ * begins and ends on an actual property edge. */
+function ParcelSplitSurface({
+  active,
+  outline,
+  onCommit,
+  onCancel,
+}: {
+  active: boolean;
+  outline: Vec2[] | null;
+  onCommit: (a: Vec2, b: Vec2) => void;
+  onCancel: () => void;
+}) {
+  const [start, setStart] = useState<Vec2 | null>(null);
+  const [hover, setHover] = useState<Vec2 | null>(null);
+  const snap = useCallback(
+    (point: Vec2) =>
+      outline
+        ? (nearestParcelBoundaryPoint(point, outline)?.point ?? null)
+        : null,
+    [outline],
+  );
+
+  const [wasActive, setWasActive] = useState(active);
+  if (active !== wasActive) {
+    setWasActive(active);
+    if (!active) {
+      setStart(null);
+      setHover(null);
+    }
+  }
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setStart(null);
+      setHover(null);
+      onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, onCancel]);
+
+  if (!active || !outline) return null;
+  const previewEnd = hover ?? start;
+  return (
+    <>
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, WALK_CATCHER_Y, 0]}
+        onPointerMove={(event) => {
+          const point = snap([event.point.x, event.point.z]);
+          if (point) setHover(point);
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          const point = snap([event.point.x, event.point.z]);
+          if (!point) return;
+          if (!start) {
+            setStart(point);
+            setHover(point);
+            return;
+          }
+          setStart(null);
+          setHover(null);
+          onCommit(start, point);
+        }}
+      >
+        <planeGeometry args={[4000, 4000]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+      {start && previewEnd && (
+        <Line
+          points={[
+            [start[0], WALK_CATCHER_Y + 0.05, start[1]],
+            [previewEnd[0], WALK_CATCHER_Y + 0.05, previewEnd[1]],
+          ]}
+          color="#f59e0b"
+          lineWidth={3}
+          depthTest={false}
+          depthWrite={false}
+          renderOrder={GUIDE_RENDER_ORDER}
+        />
+      )}
+      {[start, hover].map(
+        (point, index) =>
+          point && (
+            <mesh
+              key={index}
+              position={[point[0], WALK_CATCHER_Y + 0.08, point[1]]}
+              rotation={[-Math.PI / 2, 0, 0]}
+              renderOrder={GUIDE_RENDER_ORDER}
+            >
+              <ringGeometry args={[0.5, 0.9, 28]} />
+              <meshBasicMaterial
+                color="#f59e0b"
+                depthTest={false}
+                depthWrite={false}
+              />
+            </mesh>
+          ),
+      )}
+    </>
+  );
+}
+
 /** The street centreline (dashed light) + mirror/far-frontage (dashed dim)
  * construction guides, plan pane only. */
 function StreetGuides({
@@ -1378,9 +1721,14 @@ function PlanPane({
   onSelectLot,
   view,
   display,
+  lotOutlineGeometry,
+  interventionScope,
   size,
   drawMode,
   selectMode,
+  scopeMode,
+  parcelSplitActive,
+  parcelSplitOutline,
   streetDrawMode,
   walkArming,
   onPickWalkStart,
@@ -1408,6 +1756,14 @@ function PlanPane({
   onMarqueeMoveStart,
   onMarqueeMove,
   onMarqueeMoveEnd,
+  onScopePoint,
+  onSelectParcel,
+  onHoverParcel,
+  hoveredParcelScope,
+  onScopeRect,
+  onScopeExit,
+  onParcelSplit,
+  onParcelSplitCancel,
   selectedStreet,
   onSelectStreet,
   selectedIntersection,
@@ -1421,12 +1777,17 @@ function PlanPane({
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
-  onSelectLot: (blockId: string, lot: number) => void;
+  onSelectLot?: (blockId: string, lot: number) => void;
   view: ViewSettings;
   display: BuildingDisplay;
+  lotOutlineGeometry: THREE.BufferGeometry | null;
+  interventionScope: InterventionScope | null;
   size: { w: number; h: number };
   drawMode: boolean;
   selectMode: boolean;
+  scopeMode: boolean;
+  parcelSplitActive: boolean;
+  parcelSplitOutline: Vec2[] | null;
   streetDrawMode: boolean;
   /** Walk-start picker armed — plan pane projects clicks onto streets. */
   walkArming: boolean;
@@ -1459,6 +1820,15 @@ function PlanPane({
   onMarqueeMoveStart: () => void;
   onMarqueeMove: (dx: number, dz: number) => void;
   onMarqueeMoveEnd: (dx: number, dz: number) => void;
+  onScopePoint: (point: Vec2) => void;
+  /** Empty-terrain parcel pick while the Parcels select filter is enabled. */
+  onSelectParcel?: (point: Vec2) => void;
+  onHoverParcel?: (point: Vec2 | null) => void;
+  hoveredParcelScope: InterventionScope | null;
+  onScopeRect: (a: Vec2, b: Vec2) => void;
+  onScopeExit: () => void;
+  onParcelSplit: (a: Vec2, b: Vec2) => void;
+  onParcelSplitCancel: () => void;
   selectedStreet: string | null;
   /** Undefined outside select mode → ribbons render but don't hover/select. */
   onSelectStreet?: (id: string) => void;
@@ -1492,7 +1862,7 @@ function PlanPane({
   const guardedSelectLot = useCallback(
     (blockId: string, lot: number) => {
       if (performance.now() - dragEndAt.current < 300) return;
-      onSelectLot(blockId, lot);
+      onSelectLot?.(blockId, lot);
     },
     [onSelectLot],
   );
@@ -1543,7 +1913,13 @@ function PlanPane({
   // can never drift apart — a one-finger touch drag dispatches through
   // OrbitControls' `touches.ONE`, entirely separate from `mouseButtons`, and
   // is NOT gated by `enablePan` on its own (see the MapControls comment).
-  const planToolActive = drawMode || nodeDrag || selectMode || streetDrawMode;
+  const planToolActive =
+    drawMode ||
+    nodeDrag ||
+    selectMode ||
+    scopeMode ||
+    parcelSplitActive ||
+    streetDrawMode;
   /** LEFT pans only when no left-drag tool owns the gesture; MIDDLE always
    * pans. RIGHT stays unmapped (rotation is off in the top-down plan). */
   const planMouseButtons = useMemo(
@@ -1578,9 +1954,12 @@ function PlanPane({
       <SceneContents
         blocks={blocks}
         selected={selected}
-        onSelectLot={guardedSelectLot}
+        onSelectLot={onSelectLot ? guardedSelectLot : undefined}
         view={view}
         display={display}
+        lotOutlineGeometry={lotOutlineGeometry}
+        interventionScope={interventionScope}
+        hoveredParcelScope={hoveredParcelScope}
         sceneShadows={false}
         maxCornerAngle={maxCornerAngle}
         cornerChoices={cornerChoices}
@@ -1600,6 +1979,12 @@ function PlanPane({
         onSelectContextBuilding={
           onSelectContextBuilding ? guardedSelectContextBuilding : undefined
         }
+        onSelectGround={onSelectParcel}
+      />
+      <ParcelHoverSurface
+        ground={ground}
+        geometry={groundGeometry}
+        onHover={onHoverParcel}
       />
       <StreetGuides streetRef={streetRef} streetWidth={streetWidth} />
       <PenSurface
@@ -1615,7 +2000,7 @@ function PlanPane({
       />
       <MarqueeSurface
         blocks={blocks}
-        active={selectMode}
+        active={selectMode && !!onSelectLot}
         marquee={marquee}
         onMarquee={onMarquee}
         onMarqueeClear={onMarqueeClear}
@@ -1623,6 +2008,18 @@ function PlanPane({
         onMove={onMarqueeMove}
         onMoveEnd={onMarqueeMoveEnd}
         onInteractionEnd={suppressNextSelect}
+      />
+      <ScopeSurface
+        active={scopeMode}
+        onPoint={onScopePoint}
+        onRect={onScopeRect}
+        onExit={onScopeExit}
+      />
+      <ParcelSplitSurface
+        active={parcelSplitActive}
+        outline={parcelSplitOutline}
+        onCommit={onParcelSplit}
+        onCancel={onParcelSplitCancel}
       />
       <StreetDrawSurface
         active={streetDrawMode}
@@ -1639,7 +2036,14 @@ function PlanPane({
       />
       <NodeHandles
         blocks={blocks}
-        interactive={!drawMode && !selectMode && !streetDrawMode && !walkArming}
+        interactive={
+          !drawMode &&
+          !selectMode &&
+          !scopeMode &&
+          !parcelSplitActive &&
+          !streetDrawMode &&
+          !walkArming
+        }
         onMoveNode={onMoveNode}
         onDraggingChange={handleDraggingChange}
         corners={corners}
@@ -1648,7 +2052,14 @@ function PlanPane({
       <StreetNodeHandles
         network={streetNetwork}
         selectedStreet={selectedStreet}
-        interactive={!drawMode && !selectMode && !streetDrawMode && !walkArming}
+        interactive={
+          !drawMode &&
+          !selectMode &&
+          !scopeMode &&
+          !parcelSplitActive &&
+          !streetDrawMode &&
+          !walkArming
+        }
         onMoveStreetNode={onMoveStreetNode}
         onDraggingChange={handleDraggingChange}
       />
@@ -2010,6 +2421,8 @@ function PerspectivePane({
   onSelectLot,
   view,
   display,
+  lotOutlineGeometry,
+  interventionScope,
   maxCornerAngle,
   cornerChoices,
   ground,
@@ -2026,6 +2439,9 @@ function PerspectivePane({
   sceneBounds,
   selectedContextBuilding,
   onSelectContextBuilding,
+  onSelectParcel,
+  onHoverParcel,
+  hoveredParcelScope,
   walk,
   walkStart,
   lookElement,
@@ -2033,9 +2449,11 @@ function PerspectivePane({
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
-  onSelectLot: (blockId: string, lot: number) => void;
+  onSelectLot?: (blockId: string, lot: number) => void;
   view: ViewSettings;
   display: BuildingDisplay;
+  lotOutlineGeometry: THREE.BufferGeometry | null;
+  interventionScope: InterventionScope | null;
   maxCornerAngle: number;
   cornerChoices?: ReadonlyMap<string, CornerChoice>;
   ground: Ground;
@@ -2055,6 +2473,10 @@ function PerspectivePane({
   selectedContextBuilding: string | null;
   /** Undefined outside select mode → backdrop renders but doesn't hover/click. */
   onSelectContextBuilding?: (id: string) => void;
+  /** Empty-terrain parcel pick while the Parcels filter is enabled. */
+  onSelectParcel?: (point: Vec2) => void;
+  onHoverParcel?: (point: Vec2 | null) => void;
+  hoveredParcelScope: InterventionScope | null;
   walk: boolean;
   /** The picked start pose (street point + facing); null → drop in place. */
   walkStart: StreetProjection | null;
@@ -2087,6 +2509,9 @@ function PerspectivePane({
         onSelectLot={onSelectLot}
         view={view}
         display={display}
+        lotOutlineGeometry={lotOutlineGeometry}
+        interventionScope={interventionScope}
+        hoveredParcelScope={hoveredParcelScope}
         sceneShadows
         maxCornerAngle={maxCornerAngle}
         cornerChoices={cornerChoices}
@@ -2103,6 +2528,12 @@ function PerspectivePane({
         contextGeometry={contextGeometry}
         selectedContextBuilding={selectedContextBuilding}
         onSelectContextBuilding={onSelectContextBuilding}
+        onSelectGround={onSelectParcel}
+      />
+      <ParcelHoverSurface
+        ground={ground}
+        geometry={groundGeometry}
+        onHover={onHoverParcel}
       />
       {/* far is DERIVED (clip.ts) to always contain the ground out to its far
         * corner at full dolly-out; a hardcoded 2000 was smaller than that, so
@@ -2162,6 +2593,8 @@ function ElevationPane({
   onSelectLot,
   view,
   display,
+  lotOutlineGeometry,
+  interventionScope,
   size,
   mode,
   maxCornerAngle,
@@ -2183,9 +2616,11 @@ function ElevationPane({
 }: {
   blocks: FacadeBlock[];
   selected: Selection | null;
-  onSelectLot: (blockId: string, lot: number) => void;
+  onSelectLot?: (blockId: string, lot: number) => void;
   view: ViewSettings;
   display: BuildingDisplay;
+  lotOutlineGeometry: THREE.BufferGeometry | null;
+  interventionScope: InterventionScope | null;
   size: { w: number; h: number };
   mode: "overview" | "detail";
   maxCornerAngle: number;
@@ -2307,6 +2742,8 @@ function ElevationPane({
         onSelectLot={onSelectLot}
         view={view}
         display={display}
+        lotOutlineGeometry={lotOutlineGeometry}
+        interventionScope={interventionScope}
         sceneShadows={false}
         maxCornerAngle={maxCornerAngle}
         cornerChoices={cornerChoices}
@@ -2369,6 +2806,15 @@ export default function FacadeViewer({
   onMoveStreetNode,
   onClearAll,
   display,
+  showLotOutlines,
+  interventionScope,
+  onScopePoint,
+  onScopeRect,
+  onScopeClear,
+  parcelSplitActive,
+  parcelSplitOutline,
+  onParcelSplit,
+  onParcelSplitCancel,
   view = FACADE_DEFAULT_VIEW,
   onDrawModeChange,
   corners,
@@ -2394,6 +2840,7 @@ export default function FacadeViewer({
   onSelectSquare: rawSelectSquare,
   onClearSelection,
   contextBuildings,
+  cadastralParcels,
   hiddenIds,
   contextVisible,
   selectedContextBuilding,
@@ -2413,10 +2860,13 @@ export default function FacadeViewer({
   // Imported context used to rebuild the same multi-thousand-building
   // BufferGeometry independently in every pane. Build it once at the viewer
   // boundary and let each visible pane reference the shared immutable model.
+  const activeContextBuildings = useMemo(
+    () => visibleBuildings(contextBuildings, hiddenIds),
+    [contextBuildings, hiddenIds],
+  );
   const shownContextBuildings = useMemo(
-    () =>
-      contextVisible ? visibleBuildings(contextBuildings, hiddenIds) : [],
-    [contextBuildings, hiddenIds, contextVisible],
+    () => (contextVisible ? activeContextBuildings : []),
+    [activeContextBuildings, contextVisible],
   );
   const contextGeometry = useMemo(
     () =>
@@ -2426,6 +2876,17 @@ export default function FacadeViewer({
     [shownContextBuildings, ground],
   );
   useEffect(() => () => contextGeometry?.geo.dispose(), [contextGeometry]);
+  const lotOutlineGeometry = useMemo(
+    () =>
+      showLotOutlines
+        ? buildLotOutlineGeometry(blocks, cadastralParcels, ground)
+        : null,
+    [showLotOutlines, blocks, cadastralParcels, ground],
+  );
+  useEffect(
+    () => () => lotOutlineGeometry?.dispose(),
+    [lotOutlineGeometry],
+  );
   const groundGeometry = useMemo(
     () => buildGroundGeometry(streetNetwork, ground.hf),
     [streetNetwork, ground.hf],
@@ -2436,10 +2897,18 @@ export default function FacadeViewer({
       deriveSceneBounds({
         blocks,
         streetNetwork,
-        contextBuildings: shownContextBuildings,
+        contextBuildings:
+          showLotOutlines ? activeContextBuildings : shownContextBuildings,
         ground,
       }),
-    [blocks, streetNetwork, shownContextBuildings, ground],
+    [
+      blocks,
+      streetNetwork,
+      activeContextBuildings,
+      shownContextBuildings,
+      showLotOutlines,
+      ground,
+    ],
   );
 
   const [maximized, setMaximized] = useState<PaneId | null>(null);
@@ -2460,6 +2929,45 @@ export default function FacadeViewer({
   // The Select tool (marquee). Mutually exclusive with draw mode; off by
   // default so every existing path is byte-identical.
   const [selectMode, setSelectMode] = useState(false);
+  const [selectFilters, setSelectFilters] = useState<
+    Record<SelectFilterKey, boolean>
+  >({
+    buildings: true,
+    roads: true,
+    parcels: true,
+  });
+  const [hoveredParcelScope, setHoveredParcelScope] =
+    useState<InterventionScope | null>(null);
+  const hoveredParcelPoint = useRef<Vec2 | null>(null);
+  const clearParcelHover = useCallback(() => {
+    hoveredParcelPoint.current = null;
+    setHoveredParcelScope(null);
+  }, []);
+  const onHoverParcel = useCallback(
+    (point: Vec2 | null) => {
+      if (!point) {
+        clearParcelHover();
+        return;
+      }
+      const previous = hoveredParcelPoint.current;
+      // Avoid an O(parcels) point-in-polygon sweep for every sub-pixel move.
+      if (
+        previous &&
+        Math.hypot(point[0] - previous[0], point[1] - previous[1]) < 0.2
+      ) {
+        return;
+      }
+      hoveredParcelPoint.current = point;
+      const next = scopeFromPoint(point, blocks, cadastralParcels);
+      setHoveredParcelScope((current) =>
+        sameScope(current, next) ? current : next,
+      );
+    },
+    [blocks, cadastralParcels, clearParcelHover],
+  );
+  // Scope is a separate, persistent analysis selection: click one parcel or
+  // drag a rectangular intervention area. It never mutates object selection.
+  const [scopeMode, setScopeMode] = useState(false);
   // Selecting is a Select-tool action. With the tool off, a click in ANY pane
   // selects nothing, and — just as important — nothing HIGHLIGHTS to advertise
   // that it could be selected.
@@ -2471,29 +2979,86 @@ export default function FacadeViewer({
   // stop hovering, and the invisible-until-hover markers stop rendering
   // entirely. Passing a truthy no-op (the old approach) left them hoverable.
   //
-  // Lots have no hover state — they highlight only from the persistent
-  // `selected` marker, which onClearSelection wipes on tool-off — and a corner
-  // node's disc hover is its DRAG affordance (node moves live outside select
-  // mode), not a selection cue. Both still call their handler unconditionally
-  // downstream, so those two stay defined and gate the ACTION on selectMode.
-  const onSelectLot = useCallback(
-    (blockId: string, lot: number) => {
-      if (selectMode) rawSelectLot(blockId, lot);
-    },
-    [selectMode, rawSelectLot],
-  );
+  // Editable lots use the same callback-presence convention: BlockGroup gives
+  // them a transient outline only while this callback is defined. Undefined
+  // also lets a click pass through an unfiltered building to the terrain's
+  // parcel picker.
+  const buildingsSelectable = selectMode && selectFilters.buildings;
+  const roadsSelectable = selectMode && selectFilters.roads;
+  const parcelsSelectable = selectMode && selectFilters.parcels;
+  useEffect(() => {
+    if (!parcelsSelectable) return;
+    const clearOutsideParcelPanes = (event: PointerEvent) => {
+      if (!hoveredParcelPoint.current) return;
+      const inside = [planRef.current, perspectiveRef.current].some((pane) => {
+        if (!pane) return false;
+        const rect = pane.getBoundingClientRect();
+        return (
+          rect.width > 0 &&
+          rect.height > 0 &&
+          event.clientX >= rect.left &&
+          event.clientX <= rect.right &&
+          event.clientY >= rect.top &&
+          event.clientY <= rect.bottom
+        );
+      });
+      if (!inside) clearParcelHover();
+    };
+    window.addEventListener("pointermove", clearOutsideParcelPanes, true);
+    return () =>
+      window.removeEventListener("pointermove", clearOutsideParcelPanes, true);
+  }, [parcelsSelectable, clearParcelHover]);
+  const visibleHoveredParcelScope =
+    parcelsSelectable &&
+    !sameScope(hoveredParcelScope, interventionScope)
+      ? hoveredParcelScope
+      : null;
+  const onSelectLot = buildingsSelectable ? rawSelectLot : undefined;
   const onSelectCorner = useCallback(
     (key: string) => {
-      if (selectMode) rawSelectCorner(key);
+      if (buildingsSelectable) rawSelectCorner(key);
     },
-    [selectMode, rawSelectCorner],
+    [buildingsSelectable, rawSelectCorner],
   );
-  const onSelectStreet = selectMode ? rawSelectStreet : undefined;
-  const onSelectIntersection = selectMode ? rawSelectIntersection : undefined;
-  const onSelectSquare = selectMode ? rawSelectSquare : undefined;
+  const onSelectStreet = roadsSelectable ? rawSelectStreet : undefined;
+  const onSelectIntersection = roadsSelectable
+    ? rawSelectIntersection
+    : undefined;
+  const onSelectSquare = roadsSelectable ? rawSelectSquare : undefined;
   // Same convention: undefined off, so the backdrop's hover highlight (which
   // only shows when onSelect is defined) disables along with the click.
-  const onSelectContextBuilding = selectMode ? rawSelectContextBuilding : undefined;
+  const onSelectContextBuilding = buildingsSelectable
+    ? rawSelectContextBuilding
+    : undefined;
+  const onSelectParcel = useCallback(
+    (point: Vec2) => {
+      clearParcelHover();
+      onClearSelection();
+      onScopePoint(point);
+    },
+    [clearParcelHover, onClearSelection, onScopePoint],
+  );
+  const toggleSelectFilter = useCallback(
+    (key: SelectFilterKey) => {
+      setSelectFilters((current) => ({
+        ...current,
+        [key]: !current[key],
+      }));
+      // A hidden category must not leave a stale highlighted object or
+      // inspector that now appears impossible to select.
+      onClearSelection();
+      if (key === "parcels") {
+        clearParcelHover();
+        if (selectFilters.parcels) onScopeClear();
+      }
+    },
+    [
+      clearParcelHover,
+      onClearSelection,
+      onScopeClear,
+      selectFilters.parcels,
+    ],
+  );
   // Two-step confirm for the select-mode Clear-all button.
   const [confirmClear, setConfirmClear] = useState(false);
   // The street tool (draws the standalone road network). Mutually exclusive
@@ -2506,45 +3071,83 @@ export default function FacadeViewer({
   const [gridSnap, setGridSnap] = useState(false);
   const [gridAngle, setGridAngle] = useState(0);
   useEffect(() => {
-    // "Sketching" for the page means ANY path tool is mid-flight — the pen
-    // or the road tool — so the page's global Delete/⌘A shortcuts stay out
-    // of the way of Backspace-undo while drawing.
-    onDrawModeChange?.(drawMode || streetDrawMode);
-  }, [drawMode, streetDrawMode, onDrawModeChange]);
+    // "Sketching" for the page means any plan click-catcher is active — the
+    // two path tools or Scope — so global Delete/⌘A stays out of
+    // the way of their own gestures.
+    onDrawModeChange?.(
+      drawMode || streetDrawMode || scopeMode || parcelSplitActive,
+    );
+  }, [
+    drawMode,
+    streetDrawMode,
+    scopeMode,
+    parcelSplitActive,
+    onDrawModeChange,
+  ]);
   // Arm the pen only when the world is TRULY empty — no blocks AND no streets
   // (e.g. a fresh session, or the last block deleted with no roads drawn). A
   // streets-only scene is a valid, common state (streets are the primary
   // interface), so it must NOT force the pen: the armed pen's click-catcher
   // would block selecting/deleting streets.
   useEffect(() => {
+    if (parcelSplitActive) return;
     if (blocks.length === 0 && streetNetwork.streets.length === 0) {
       setDrawMode(true);
       setSelectMode(false);
+      setScopeMode(false);
       setStreetDrawMode(false);
     }
-  }, [blocks.length, streetNetwork.streets.length]);
+  }, [blocks.length, streetNetwork.streets.length, parcelSplitActive]);
+  useEffect(() => {
+    if (!parcelSplitActive) return;
+    setDrawMode(false);
+    setSelectMode(false);
+    setScopeMode(false);
+    setStreetDrawMode(false);
+    setWalkArming(false);
+  }, [parcelSplitActive]);
   const toggleDraw = useCallback(() => {
+    onParcelSplitCancel();
+    clearParcelHover();
     setDrawMode((d) => !d);
     setSelectMode(false);
+    setScopeMode(false);
     setStreetDrawMode(false);
     setWalkArming(false);
-  }, []);
+  }, [clearParcelHover, onParcelSplitCancel]);
   const toggleSelect = useCallback(() => {
+    onParcelSplitCancel();
+    clearParcelHover();
     setDrawMode(false);
     setSelectMode((s) => !s);
+    setScopeMode(false);
     setStreetDrawMode(false);
     setWalkArming(false);
-  }, []);
-  const toggleStreetDraw = useCallback(() => {
+  }, [clearParcelHover, onParcelSplitCancel]);
+  const toggleScope = useCallback(() => {
+    onParcelSplitCancel();
+    clearParcelHover();
     setDrawMode(false);
     setSelectMode(false);
+    setScopeMode((active) => !active);
+    setStreetDrawMode(false);
+    setWalkArming(false);
+  }, [clearParcelHover, onParcelSplitCancel]);
+  const toggleStreetDraw = useCallback(() => {
+    onParcelSplitCancel();
+    clearParcelHover();
+    setDrawMode(false);
+    setSelectMode(false);
+    setScopeMode(false);
     setStreetDrawMode((s) => !s);
     setWalkArming(false);
-  }, []);
+  }, [clearParcelHover, onParcelSplitCancel]);
   // The Walk button is a small state machine: walking → exit; arming → cancel;
   // idle → arm the picker (and stand down the other plan tools so their
   // full-screen click-catchers don't intercept the pick).
   const onWalkButton = useCallback(() => {
+    onParcelSplitCancel();
+    clearParcelHover();
     if (walkMode) {
       setWalkMode(false);
       return;
@@ -2555,13 +3158,14 @@ export default function FacadeViewer({
     }
     setDrawMode(false);
     setSelectMode(false);
+    setScopeMode(false);
     setStreetDrawMode(false);
     setWalkArming(true);
     // The picker lives in the plan pane; if the perspective pane is maximized
     // (the only state where its Walk button is both visible and covers the
     // plan), drop back to quad so the street is pickable.
     setMaximized((m) => (m === "perspective" ? null : m));
-  }, [walkMode, walkArming]);
+  }, [clearParcelHover, walkMode, walkArming, onParcelSplitCancel]);
   // A pick on a street centreline commits the start pose and begins the walk.
   // It is also the trusted gesture needed for native game-style pointer lock,
   // so the user never has to click the 3D pane after choosing where to stand.
@@ -2687,9 +3291,14 @@ export default function FacadeViewer({
             onSelectLot={onSelectLot}
             view={view}
             display={display}
+            lotOutlineGeometry={lotOutlineGeometry}
+            interventionScope={interventionScope}
             size={planSize}
             drawMode={drawMode}
             selectMode={selectMode}
+            scopeMode={scopeMode}
+            parcelSplitActive={parcelSplitActive}
+            parcelSplitOutline={parcelSplitOutline}
             streetDrawMode={streetDrawMode}
             walkArming={walkArming}
             onPickWalkStart={onPickWalkStart}
@@ -2717,6 +3326,14 @@ export default function FacadeViewer({
             onMarqueeMoveStart={onMarqueeMoveStart}
             onMarqueeMove={onMarqueeMove}
             onMarqueeMoveEnd={onMarqueeMoveEnd}
+            onScopePoint={onScopePoint}
+            onSelectParcel={parcelsSelectable ? onSelectParcel : undefined}
+            onHoverParcel={parcelsSelectable ? onHoverParcel : undefined}
+            hoveredParcelScope={visibleHoveredParcelScope}
+            onScopeRect={onScopeRect}
+            onScopeExit={() => setScopeMode(false)}
+            onParcelSplit={onParcelSplit}
+            onParcelSplitCancel={onParcelSplitCancel}
             selectedStreet={selectedStreet}
             onSelectStreet={onSelectStreet}
             selectedIntersection={selectedIntersection}
@@ -2737,6 +3354,8 @@ export default function FacadeViewer({
             onSelectLot={onSelectLot}
             view={view}
             display={display}
+            lotOutlineGeometry={lotOutlineGeometry}
+            interventionScope={interventionScope}
             maxCornerAngle={maxCornerAngle}
             cornerChoices={cornerChoices}
             ground={ground}
@@ -2753,6 +3372,9 @@ export default function FacadeViewer({
             sceneBounds={sceneBounds}
             selectedContextBuilding={selectedContextBuilding}
             onSelectContextBuilding={onSelectContextBuilding}
+            onSelectParcel={parcelsSelectable ? onSelectParcel : undefined}
+            onHoverParcel={parcelsSelectable ? onHoverParcel : undefined}
+            hoveredParcelScope={visibleHoveredParcelScope}
             walk={walkMode}
             walkStart={walkStart}
             lookElement={perspectiveRef.current}
@@ -2770,6 +3392,8 @@ export default function FacadeViewer({
             onSelectLot={onSelectLot}
             view={view}
             display={display}
+            lotOutlineGeometry={lotOutlineGeometry}
+            interventionScope={interventionScope}
             size={overviewSize}
             mode="overview"
             maxCornerAngle={maxCornerAngle}
@@ -2798,6 +3422,8 @@ export default function FacadeViewer({
             onSelectLot={onSelectLot}
             view={view}
             display={display}
+            lotOutlineGeometry={lotOutlineGeometry}
+            interventionScope={interventionScope}
             size={detailSize}
             mode="detail"
             maxCornerAngle={maxCornerAngle}
@@ -3012,6 +3638,11 @@ export default function FacadeViewer({
             ref={cellRefs[p.id]}
             className={`relative ${paneVisible(p.id) ? "h-full" : "hidden"}`}
             onDoubleClick={() => isDesktop && toggleMaximize(p.id)}
+            onPointerLeave={
+              p.id === "plan" || p.id === "perspective"
+                ? clearParcelHover
+                : undefined
+            }
           >
             {paneVisible(p.id) && (
               <View className="absolute inset-0" index={p.index}>
@@ -3062,12 +3693,18 @@ export default function FacadeViewer({
               </>
             )}
             {p.id === "plan" &&
-              (drawMode || selectMode || streetDrawMode || walkArming) && (
+              (drawMode ||
+                selectMode ||
+                scopeMode ||
+                parcelSplitActive ||
+                streetDrawMode ||
+                walkArming) && (
                 /* Uniform mode frame: the plan pane is the live drawing surface
                  * while the pen is armed, the marquee surface while the Select
-                 * tool is active (gold), the road-network surface while the
-                 * street tool is active (green), or the walk-start picker while
-                 * arming a walk (bright green) — one colour per tool. */
+                 * tool is active (gold), the intervention-scope surface while
+                 * Scope is active (teal), the road-network surface while the
+                 * street tool is active (green), or the walk-start picker
+                 * while arming a walk (bright green) — one colour per tool. */
                 <div
                   aria-hidden
                   className={`absolute inset-0 pointer-events-none border-[3px] z-10 ${
@@ -3075,14 +3712,33 @@ export default function FacadeViewer({
                       ? "border-[var(--accent)]"
                       : selectMode
                         ? "border-[#d4a017]"
-                        : walkArming
-                          ? "border-[#7ee2a8]"
-                          : "border-[#2f855a]"
+                        : parcelSplitActive
+                          ? "border-[#f59e0b]"
+                          : scopeMode
+                          ? "border-[#0f9f9a]"
+                          : walkArming
+                            ? "border-[#7ee2a8]"
+                            : "border-[#2f855a]"
                   }`}
                 />
               )}
             {p.id === "plan" && (
               <div className="absolute top-1.5 left-16 z-20 flex flex-wrap gap-1.5">
+                {parcelSplitActive && (
+                  <div
+                    role="status"
+                    className="flex h-7 items-center gap-2 rounded-full bg-[#f59e0b] px-3 text-[11px] font-medium text-zinc-950 shadow-lg"
+                  >
+                    <span>✂ Click two parcel edges</span>
+                    <button
+                      type="button"
+                      onClick={onParcelSplitCancel}
+                      className="rounded border border-black/20 px-1.5 transition-colors hover:bg-black/10"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={toggleDraw}
@@ -3099,7 +3755,10 @@ export default function FacadeViewer({
                   * offered whenever ANYTHING is selectable — a streets-only
                   * scene would otherwise have no way to reach the Street /
                   * Intersection / Square inspectors. */}
-                {(blocks.length > 0 || hasStreets) && (
+                {(blocks.length > 0 ||
+                  hasStreets ||
+                  activeContextBuildings.length > 0 ||
+                  cadastralParcels.length > 0) && (
                   <button
                     type="button"
                     onClick={toggleSelect}
@@ -3111,6 +3770,55 @@ export default function FacadeViewer({
                     }`}
                   >
                     {selectMode ? "⬚ Selecting — Esc" : "⬚ Select"}
+                  </button>
+                )}
+                {selectMode && (
+                  <div
+                    role="group"
+                    aria-label="Selection filters"
+                    className="flex h-7 items-center gap-2 rounded-full border border-white/15 bg-black/75 px-2.5 text-[10px] font-medium text-white/90 shadow-lg backdrop-blur-sm"
+                  >
+                    <span className="text-white/55">Select</span>
+                    {SELECT_FILTER_OPTIONS.map((option) => (
+                      <label
+                        key={option.key}
+                        title={option.title}
+                        className="flex cursor-pointer items-center gap-1 whitespace-nowrap"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectFilters[option.key]}
+                          onChange={() => toggleSelectFilter(option.key)}
+                          className="size-3 cursor-pointer accent-[#d4a017]"
+                        />
+                        <span>{option.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={toggleScope}
+                  aria-pressed={scopeMode}
+                  aria-label={
+                    scopeMode ? "Exit scope mode" : "Define intervention scope"
+                  }
+                  title="Click a parcel, or drag a rectangular intervention area"
+                  className={`flex h-7 items-center gap-1.5 rounded-full px-3 text-[11px] font-medium shadow-lg transition-colors ${
+                    scopeMode
+                      ? "bg-[#0f9f9a] text-white hover:brightness-110"
+                      : "bg-white/90 text-zinc-900 hover:bg-white"
+                  }`}
+                >
+                  {scopeMode ? "▧ Scoping — Esc" : "▧ Scope"}
+                </button>
+                {scopeMode && interventionScope && (
+                  <button
+                    type="button"
+                    onClick={onScopeClear}
+                    className="flex h-7 items-center gap-1.5 rounded-full bg-white/90 px-3 text-[11px] font-medium text-zinc-900 shadow-lg transition-colors hover:bg-white"
+                  >
+                    Clear scope
                   </button>
                 )}
                 {selectMode && (

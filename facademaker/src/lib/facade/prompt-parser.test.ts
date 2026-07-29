@@ -10,9 +10,9 @@ describe("parseFacadePromptLocal", () => {
   });
 
   it("clamps storeys and bays to limits", () => {
-    const u = parseFacadePromptLocal("12 storeys, 15 bays");
+    const u = parseFacadePromptLocal("12 storeys, 100 bays");
     expect(u.storeys).toBe(6);
-    expect(u.bays).toBe(9);
+    expect(u.bays).toBe(64);
   });
 
   it("parses width", () => {
@@ -66,6 +66,8 @@ describe("parseFacadePromptLocal", () => {
     expect(parseFacadePromptLocal("small panes").windowStyle).toBe("georgian");
     expect(parseFacadePromptLocal("sash windows").windowStyle).toBe("sash");
     expect(parseFacadePromptLocal("plain glass").windowStyle).toBe("none");
+    expect(parseFacadePromptLocal("round windows").windowStyle).toBe("circle");
+    expect(parseFacadePromptLocal("oval windows").windowStyle).toBe("ellipse");
   });
 
   it("explicit glazing overrides the preset's default", () => {

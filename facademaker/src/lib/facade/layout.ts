@@ -103,6 +103,9 @@ export interface OpeningRect {
   /** Round-headed hole (passage kind): a semicircular head of radius w/2 at
    * springline `y + h − w/2` (crown at `y + h`). Absent = rectangular. */
   arched?: boolean;
+  /** Curved window opening. Circle windows are resolved to equal w/h before
+   * this marker is assigned; ellipse windows retain the configured ratios. */
+  elliptical?: boolean;
 }
 
 /** The pass-through tunnel void that pierces one section strip's massing box.
@@ -319,6 +322,13 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
         h = clamp(params.windowHeightRatio * sh, MIN_WINDOW_HEIGHT, maxH);
         x = bayCenter - w / 2;
         y = floorY + SILL_HEIGHT;
+        if (params.windowStyle === "circle") {
+          const diameter = Math.min(w, h);
+          x += (w - diameter) / 2;
+          y += (h - diameter) / 2;
+          w = diameter;
+          h = diameter;
+        }
       } else if (kind === "door") {
         const raised = s === 0 && params.groundFloor.stoop &&
           params.groundFloor.treatment === "residential";
@@ -390,6 +400,12 @@ export function computeLayout(params: FacadeParams): FacadeLayout {
         y = floorY;
       }
       const rect: OpeningRect = { kind, storey: s, bay: b, x, y, w, h };
+      if (
+        kind === "window" &&
+        (params.windowStyle === "circle" || params.windowStyle === "ellipse")
+      ) {
+        rect.elliptical = true;
+      }
       if (transomH !== undefined) rect.transomH = transomH;
       openings.push(rect);
     }

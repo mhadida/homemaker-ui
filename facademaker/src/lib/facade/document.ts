@@ -9,6 +9,7 @@ import { DEFAULT_FACADE } from "./types";
 import type { Monument, Street, StreetNetwork } from "@/lib/street/types";
 import { EMPTY_NETWORK, STREET_SPECS } from "@/lib/street/types";
 import type { GeoAnchor, LngLatBBox } from "@/lib/geo/project";
+import type { ParcelSubdivisionEdit } from "@/lib/geo/parcelSubdivision";
 
 /** Bump when the on-disk shape changes incompatibly. Loaders reject unknown
  * versions rather than silently mis-reading (beta data-preservation rule). */
@@ -29,6 +30,8 @@ export interface SceneState {
   bbox: LngLatBBox | null;
   /** Context buildings the user demolished, by OSM id. Sparse. */
   hiddenIds: Set<string>;
+  /** Sparse local replacements for official cadastral parcels. */
+  parcelEdits?: ParcelSubdivisionEdit[];
 }
 
 /** JSON-native form. `cornerChoices` is a Map in memory → entries on disk
@@ -44,6 +47,7 @@ export interface FacadeDocument {
   anchor?: GeoAnchor;
   bbox?: LngLatBBox;
   hiddenIds?: string[];
+  parcelEdits?: ParcelSubdivisionEdit[];
 }
 
 export type LoadResult =
@@ -83,6 +87,7 @@ export function serializeScene(s: SceneState): FacadeDocument {
     anchor: s.anchor ?? undefined,
     bbox: s.bbox ?? undefined,
     hiddenIds: s.hiddenIds.size ? Array.from(s.hiddenIds) : undefined,
+    parcelEdits: s.parcelEdits?.length ? s.parcelEdits : undefined,
   };
 }
 
@@ -127,6 +132,11 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
 function validParcel(v: unknown): v is NonNullable<FacadeBlock["parcel"]> {
   if (!isObject(v)) return false;
   if (typeof v.source !== "string") return false;
+  if (
+    v.contextBuildingId !== undefined &&
+    typeof v.contextBuildingId !== "string"
+  )
+    return false;
   if (!isFiniteNumber(v.depth)) return false;
   const o = v.outline;
   return (
@@ -139,6 +149,42 @@ function validParcel(v: unknown): v is NonNullable<FacadeBlock["parcel"]> {
         isFiniteNumber(p[0]) &&
         isFiniteNumber(p[1]),
     )
+  );
+}
+
+function validCadastralParcel(v: unknown): boolean {
+  if (!isObject(v) || typeof v.id !== "string") return false;
+  if (v.sourceId !== undefined && typeof v.sourceId !== "string") return false;
+  return (
+    Array.isArray(v.polygons) &&
+    v.polygons.length > 0 &&
+    v.polygons.every(
+      (polygon) =>
+        Array.isArray(polygon) &&
+        polygon.length > 0 &&
+        polygon.every(
+          (ring) =>
+            Array.isArray(ring) &&
+            ring.length >= 3 &&
+            ring.every(
+              (point) =>
+                Array.isArray(point) &&
+                point.length === 2 &&
+                isFiniteNumber(point[0]) &&
+                isFiniteNumber(point[1]),
+            ),
+        ),
+    )
+  );
+}
+
+function validParcelSubdivisionEdit(v: unknown): v is ParcelSubdivisionEdit {
+  return (
+    isObject(v) &&
+    typeof v.sourceId === "string" &&
+    Array.isArray(v.replacements) &&
+    v.replacements.length >= 2 &&
+    v.replacements.every(validCadastralParcel)
   );
 }
 
@@ -200,12 +246,19 @@ function validStreet(s: unknown): s is Street {
 
 /** A roundabout entry: [derived intersection key, {kind}]. */
 function validRoundabout(r: unknown): r is [string, Monument] {
+  const kinds: ReadonlySet<string> = new Set([
+    "obelisk",
+    "fountain",
+    "statue",
+    "triumphal-arch",
+  ]);
   return (
     Array.isArray(r) &&
     r.length === 2 &&
     typeof r[0] === "string" &&
     isObject(r[1]) &&
-    typeof (r[1] as { kind?: unknown }).kind === "string"
+    typeof (r[1] as { kind?: unknown }).kind === "string" &&
+    kinds.has((r[1] as { kind: string }).kind)
   );
 }
 
@@ -252,10 +305,14 @@ function normalizeBlocks(blocks: Record<string, unknown>[]): FacadeBlock[] {
     return {
       ...(rest as unknown as FacadeBlock),
       ...(validParcel(rawParcel) ? { parcel: rawParcel } : {}),
-      lots: (b.lots as Record<string, unknown>[]).map((l) => ({
-        ...(l as { customized?: boolean; depthOffset?: number }),
-        params: normalizeParams(l.params as Record<string, unknown>),
-      })),
+      lots: (b.lots as Record<string, unknown>[]).map((l) => {
+        const normalized: Record<string, unknown> = {
+          ...l,
+          params: normalizeParams(l.params as Record<string, unknown>),
+        };
+        if (normalized.kind !== "arch-gate") delete normalized.kind;
+        return normalized as unknown as FacadeBlock["lots"][number];
+      }),
     };
   }) as FacadeBlock[];
 }
@@ -344,6 +401,9 @@ export function deserializeScene(raw: unknown): LoadResult {
       ? (doc.hiddenIds as unknown[]).filter((s): s is string => typeof s === "string")
       : [],
   );
+  const parcelEdits = Array.isArray(doc.parcelEdits)
+    ? doc.parcelEdits.filter(validParcelSubdivisionEdit)
+    : [];
 
   return {
     ok: true,
@@ -361,6 +421,7 @@ export function deserializeScene(raw: unknown): LoadResult {
       anchor,
       bbox,
       hiddenIds,
+      parcelEdits,
     },
   };
 }

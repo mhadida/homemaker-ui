@@ -138,6 +138,42 @@ describe("round-trip", () => {
         side: "left",
       });
   });
+  it("round-trips an arch gate as a sparse lot use", () => {
+    const s = scene();
+    s.blocks[0].lots[1].kind = "arch-gate";
+    const res = deserializeScene(serializeScene(s));
+    expect(res.ok).toBe(true);
+    if (res.ok)
+      expect(res.scene.blocks[0].lots.map((lot) => lot.kind)).toEqual([
+        undefined,
+        "arch-gate",
+      ]);
+  });
+  it("round-trips sparse local parcel subdivisions", () => {
+    const s = scene();
+    s.parcelEdits = [
+      {
+        sourceId: "BRK.1",
+        replacements: [
+          {
+            id: "BRK.1~1",
+            sourceId: "BRK.1",
+            polygons: [[[[0, 0], [5, 0], [5, 10], [0, 10]]]],
+            area: 50,
+          },
+          {
+            id: "BRK.1~2",
+            sourceId: "BRK.1",
+            polygons: [[[[5, 0], [10, 0], [10, 10], [5, 10]]]],
+            area: 50,
+          },
+        ],
+      },
+    ];
+    const res = fromJSON(toJSON(s));
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.scene.parcelEdits).toEqual(s.parcelEdits);
+  });
 });
 
 describe("deserialize validation", () => {
@@ -352,6 +388,8 @@ describe("streetNetwork", () => {
         streets: [{ id: "street-1", type: "street", points: [[0, 0], [10, 0]] }],
         roundabouts: [
           ["node-a|node-b", { kind: "obelisk" }],
+          ["node-c|node-d", { kind: "triumphal-arch" }],
+          ["node-e|node-f", { kind: "unknown" }],
           ["bad-entry"], // wrong shape
           "not-a-pair",
         ],
@@ -362,6 +400,7 @@ describe("streetNetwork", () => {
     if (!res.ok) return;
     expect(res.scene.streetNetwork.roundabouts).toEqual([
       ["node-a|node-b", { kind: "obelisk" }],
+      ["node-c|node-d", { kind: "triumphal-arch" }],
     ]);
   });
 });

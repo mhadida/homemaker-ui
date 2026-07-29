@@ -50,6 +50,41 @@ describe("subdivide", () => {
 });
 
 describe("generateLot", () => {
+  it("gives long single-lot buildings more than the old six-bay ceiling", () => {
+    const lot = generateLot(60, DEFAULT_GEN, mulberry32(12));
+    expect(lot.bays).toBeGreaterThan(9);
+    expect(60 / lot.bays).toBeGreaterThanOrEqual(2);
+    expect(60 / lot.bays).toBeLessThanOrEqual(3.2);
+  });
+
+  it("keeps generated window openings inside the configured min/max ratios", () => {
+    const gen = {
+      ...DEFAULT_GEN,
+      windowWidthRatio: { min: 0.4, max: 0.5 },
+      windowHeightRatio: { min: 0.6, max: 0.7 },
+    };
+    for (let seed = 0; seed < 100; seed++) {
+      const lot = generateLot(7, gen, mulberry32(seed));
+      expect(lot.windowWidthRatio).toBeGreaterThanOrEqual(0.4);
+      expect(lot.windowWidthRatio).toBeLessThanOrEqual(0.5);
+      expect(lot.windowHeightRatio).toBeGreaterThanOrEqual(0.6);
+      expect(lot.windowHeightRatio).toBeLessThanOrEqual(0.7);
+    }
+  });
+
+  it("supports a fixed opening ratio when min equals max", () => {
+    const lot = generateLot(
+      7,
+      {
+        ...DEFAULT_GEN,
+        windowWidthRatio: { min: 0.55, max: 0.55 },
+        windowHeightRatio: { min: 0.65, max: 0.65 },
+      },
+      mulberry32(7),
+    );
+    expect(lot.windowWidthRatio).toBe(0.55);
+    expect(lot.windowHeightRatio).toBe(0.65);
+  });
   it("produces valid params across many seeds (layout invariants hold)", () => {
     for (let seed = 1; seed <= 50; seed++) {
       const p = generateLot(6.5, DEFAULT_GEN, mulberry32(seed));
